@@ -33,7 +33,7 @@ Codec拒绝未知true位、非法范围、未声明却非零的字段、动作ma
 CombatPacket.Decode(byte[])->CombatPacket，属性：Sequence,Capabilities,Flags,RangeSlot,KnownActionsMask,ReadyActionsMask,UsableActionsMask,ExtraKnownFlags(int)；TargetToken,TargetNameHash,CastEndMilliseconds,LootOpened,LootClosed,CastSuccess,CastFailed,SkinSuccess(uint)；TargetX/TargetY(double NaN未知)；Portrait(Rectangle)。
 
 FarmObservation public字段：Sequence,ReadFailures,Health,Power,PowerType,TargetHealth,MapMode,RangeSlot,KnownActionsMask,ReadyActionsMask,UsableActionsMask(int)；MapId,TargetToken,TargetNameHash,LootOpened,LootClosed,CastSuccess,CastFailed,SkinSuccess(uint)；Zone,TargetName(string)；X,Y,Facing,TargetX,TargetY(double)；Portrait(Rectangle)；Fresh,KnownCore,PlayerDead,PlayerGhost,InCombat,BagFull,TargetExists,TargetDeadKnown,TargetDead,TargetIdentityKnown,NameHashKnown,AttackabilityKnown,TargetCanAttack,TargetIsPlayer,RangeKnown,TargetInRange,TargetPositionKnown,LootKnown,Lootable,SkinKnown,Skinnable,CastingKnown,Casting,Channeling,ActionsKnown,LootEventsKnown,CastEventsKnown,SkinSuccessKnown,PortraitKnown(bool)。
-FarmObservation.FromPackets(ProbePacket core,CombatPacket extra,bool fresh)->FarmObservation：fresh还要求两包非空且序号相等，位置/朝向/地图能力可读；不把未知能力当正常。TargetExists依据core known位8；KnownCore要求core known7及target-exists known8。
+FarmObservation.FromPackets(ProbePacket core,CombatPacket extra,bool fresh)->FarmObservation：fresh还要求两包非空且序号相等，位置/朝向/地图/背包能力可读（core capabilities含83），背包满提示状态已知（core known位128），坐标和朝向为有限值；不把未知能力当正常。BagFull在已知背包空位为0或已知背包满提示为true时为true。TargetExists依据core known位8；KnownCore仍仅要求core known7及target-exists known8。
 
 ## 目标与配置 BattleProfiles.cs
 

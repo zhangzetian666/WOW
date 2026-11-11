@@ -26,6 +26,7 @@ local function object()
     function o:IsShown() return self.shown end
     function o:SetText(s) self.text = s end
     function o:SetTexture(...) self.color = {...} end
+    function o:GetTexture() return self.color and self.color[1] end
     function o:SetColorTexture(...) self.color = {...} end
     function o:CreateTexture() local t = object(); self.textures[#self.textures+1] = t; return t end
     function o:CreateFontString() local t = object(); self.labels[#self.labels+1] = t; return t end
@@ -366,6 +367,168 @@ test("missing or invalid dimensions hide the panel until valid physical geometry
     wp.Command("show"); eq(wp.rendererReady,true); eq(wp.panel.shown,true)
     env.GetPhysicalScreenSize=nil; env.GetCVar=nil
     wp.ScalePanel(); eq(wp.rendererReady,false); eq(wp.panel.shown,false)
+end)
+
+-- WC3 fixtures exercise the passive APIs independently of the WP1 compatibility fixture.
+local function combatEnvironment()
+    local env=environment()
+    env.UnitGUID=function() return "Creature-0-1-2-3-456-000001" end
+    env.UnitCanAttack=function() return true end
+    env.UnitIsPlayer=function() return false end
+    env.ActionButton1={action=13}; env.ActionButton2={action=14}
+    env.ActionButton3={action=15}; env.ActionButton4={action=16}
+    env.HasAction=function() return true end
+    env.GetActionCooldown=function(slot) return slot==14 and 12 or 0,slot==14 and 2 or 0,1 end
+    env.IsUsableAction=function(slot) return slot~=15,false end
+    env.IsActionInRange=function(slot,unit) eq(unit,"target"); return slot==14 and 0 or 1 end
+    env.UnitCastingInfo=function() return nil end; env.UnitChannelInfo=function() return nil end
+    env.CanLootUnit=function(guid) eq(guid,env.UnitGUID()); return false,false end
+    return env
+end
+test("WC3 keeps unknown APIs unknown and never requests legacy target coordinates",function()
+    local env=environment(); env.GetPlayerMapPosition=function(unit) eq(unit,"player"); return 0.2,0.4 end
+    local wp=load(env); assert(type(wp.BuildCombatPacket)=="function","WC3 builder missing")
+    local p=wp.BuildCombatPacket(wp.BuildPacket())
+    eq(#p,128); eq(p[1],87);eq(p[2],67);eq(p[3],51);eq(p[4],1)
+    eq(p[7],0);eq(p[8],0);eq(word(p,12),65535);eq(word(p,14),65535)
+    eq(p[18],0);eq(p[19],0);eq(p[20],0)
+end)
+test("WC3 binds selected range and action masks to actual current page slots",function()
+    local env=combatEnvironment(); local wp=load(env);wp.Command("range 2")
+    local p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[17],2)
+    eq(has(p[7],4),true);eq(has(p[8],4),false,"known out of range")
+    eq(p[18],15);eq(p[19],13);eq(p[20],11)
+    env.GetActionCooldown=nil;p=wp.BuildCombatPacket(wp.BuildPacket())
+    eq(has(p[7],128),false);eq(p[18],0);eq(p[19],0)
+    env.IsActionInRange=function() return nil end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],4),false);eq(has(p[8],4),false)
+end)
+test("WC3 distinguishes known false attackability from missing and throwing APIs",function()
+    local env=combatEnvironment();env.UnitCanAttack=function() return false end
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket())
+    eq(has(p[7],2),true);eq(has(p[8],1),false)
+    env.UnitIsPlayer=function() error("restricted") end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],2),false);eq(has(p[8],1),false)
+    env.UnitCanAttack=function() return "invalid boolean" end;env.UnitIsPlayer=function() return false end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],2),false)
+end)
+test("WC3 target coordinates require matching modern map identity and actual target API result",function()
+    local env=combatEnvironment();local same=true;local supported=true
+    env.C_Map={GetBestMapForUnit=function(unit) return unit=="target" and (same and 42 or 43) or 42 end,
+        GetPlayerMapPosition=function(id,unit) if unit=="target" and not supported then return nil end;return {x=0.25,y=0.75} end}
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket())
+    eq(has(p[7],8),true);eq(word(p,12),16384);eq(word(p,14),49151)
+    same=false;p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],8),false)
+    same=true;supported=false;p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],8),false)
+end)
+test("WC3 hashes complete UTF8 names and GUID bytes without display truncation",function()
+    local env=combatEnvironment();env.UnitName=function() return string.rep("兽",20).."甲" end
+    local wp=load(env);local core=wp.BuildPacket();local p=wp.BuildCombatPacket(core)
+    local function hash(s) local n=5381;for i=1,#s do n=(n*33+string.byte(s,i))%4294967296 end;return n==0 and 1 or n end
+    eq(dword(p,8),hash(env.UnitGUID()));eq(dword(p,44),hash(env.UnitName()))
+    eq(has(p[57],4),true);assert(core[41]<#env.UnitName())
+    env.UnitName=function() return "bad"..string.char(255) end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[57],4),false);eq(dword(p,44),0)
+end)
+test("WC3 event counters capture instant loot and only identified skinning success",function()
+    local env=combatEnvironment();env.GetSpellInfo=function(id) if id==8613 then return "剥皮" end end
+    local wp=load(env)
+    wp.OnEvent(nil,"LOOT_OPENED");wp.OnEvent(nil,"LOOT_CLOSED")
+    wp.OnEvent(nil,"UNIT_SPELLCAST_SUCCEEDED","target","Cast-1",8613)
+    wp.OnEvent(nil,"UNIT_SPELLCAST_SUCCEEDED","player","Cast-2",133)
+    wp.OnEvent(nil,"UNIT_SPELLCAST_SUCCEEDED","player","Cast-3",8613)
+    wp.OnEvent(nil,"UNIT_SPELLCAST_SUCCEEDED","player","剥皮","",123)
+    wp.OnEvent(nil,"UNIT_SPELLCAST_FAILED","player","Cast-4",133)
+    local p=wp.BuildCombatPacket(wp.BuildPacket())
+    eq(dword(p,24),1);eq(dword(p,28),1);eq(dword(p,32),3);eq(dword(p,36),1);eq(dword(p,40),2)
+    eq(has(p[57],2),true);eq(has(p[57],8),true);eq(has(p[57],16),true)
+    wp.eventRegistration.UNIT_SPELLCAST_FAILED=false
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[57],16),false);eq(dword(p,32),0);eq(dword(p,36),0)
+end)
+test("WC3 casting supports legacy and modern signatures without inferring completion",function()
+    local env=combatEnvironment();env.UnitCastingInfo=function() return "Fire","Fire","icon",12000,14000,false,"id" end
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket())
+    eq(has(p[7],64),true);eq(has(p[8],32),true);eq(dword(p,20),14000)
+    env.UnitCastingInfo=function() return "Fire","Rank 1","Fire","icon",12000,15000,false end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(dword(p,20),15000)
+    env.UnitCastingInfo=function() return nil end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(dword(p,20),0);eq(has(p[8],32),false)
+    env.UnitChannelInfo=nil;p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],64),false)
+end)
+test("WC3 tooltip skin signal uses localized marker and exposes unknown when unavailable",function()
+    local env=combatEnvironment();env.UNIT_SKINNABLE="可剥皮";env.UnitIsDead=function(unit) return unit=="target" end
+    local original=env.CreateFrame;local marker="可剥皮"
+    env.CreateFrame=function(kind,name,parent,template)
+        local o=original();if kind=="GameTooltip" then
+            function o:SetOwner() end;function o:ClearLines() end;function o:SetUnit(unit) eq(unit,"target");return true end
+            function o:NumLines() return 1 end;function o:GetName() return name end
+            env[name.."TextLeft1"]={GetText=function() return marker end}
+        end;return o
+    end
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket())
+    eq(has(p[7],32),true);eq(has(p[8],16),true)
+    marker="普通尸体";p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],32),true);eq(has(p[8],16),false)
+    env.UNIT_SKINNABLE=nil;p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],32),false)
+end)
+test("WC3 second physical grid shares heartbeat sequence and safe portrait geometry",function()
+    local env=combatEnvironment()
+    env.SetPortraitTexture=function(texture,unit) eq(unit,"target");texture:SetTexture("portrait-target") end
+    env.GetSpellInfo=function(id) if id==8613 then return "Skinning" end end
+    local wp=load(env);wp.Tick(nil,0.2)
+    wp.OnEvent(nil,"LOOT_OPENED");wp.OnEvent(nil,"LOOT_CLOSED")
+    wp.OnEvent(nil,"UNIT_SPELLCAST_SUCCEEDED","player","Cast-1",8613)
+    wp.OnEvent(nil,"UNIT_SPELLCAST_FAILED","player","Cast-2",133)
+    local a,b=wp.BuildPackets();eq(word(a,4),word(b,4));eq(word(a,4),1)
+    eq(wp.combatPanel.width,256);eq(wp.combatPanel.height,96);eq(#wp.combatCells,384)
+    eq(wp.combatPanel.point[4],280);eq(wp.panel.point[4],8)
+    eq(wp.combatPanel.scale,wp.panel.scale)
+    eq(has(b[57],1),true);eq(word(b,48),560);eq(word(b,50),8);eq(word(b,52),64);eq(word(b,54),64)
+    assert(word(b,48)>=8+272+256,"portrait reference must not intersect either data grid")
+    eq(dword(b,24),1);eq(dword(b,28),1);eq(dword(b,32),1);eq(dword(b,36),1);eq(dword(b,40),1)
+    WoWProbeCombatCoreFixture=a;WoWProbeCombatTestFixture=b
+end)
+test("WC3 never exposes original target portrait beneath the grids or stale reference texture",function()
+    local env=combatEnvironment()
+    env.TargetFramePortrait={GetRect=function() return 280,720,64,64 end,GetEffectiveScale=function() return 1 end,IsShown=function() return true end}
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[57],1),false)
+    env.SetPortraitTexture=function(texture) texture:SetTexture("portrait-target") end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[57],1),true)
+    env.SetPortraitTexture=function() end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[57],1),false,"missing texture must not reuse old target")
+end)
+test("WC3 missing loot results remain unknown and do not imply an empty corpse",function()
+    local env=combatEnvironment();env.CanLootUnit=function() return nil,nil end
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket())
+    eq(has(p[7],16),false);eq(has(p[8],8),false)
+    env.CanLootUnit=function() return true,true end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],16),true);eq(has(p[8],8),true)
+    env.CanLootUnit=function() return true,false end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],16),true);eq(has(p[8],8),false)
+end)
+test("WC3 optional rendering failure preserves live WP1 and hides the extension",function()
+    local env=combatEnvironment();local wp=load(env)
+    wp.combatCells[1].SetColorTexture=function() error("WC3 draw failed") end
+    wp.Tick(nil,0.2);eq(wp.panel.shown,true);eq(wp.combatPanel.shown,false)
+    wp.combatPanel:Show()
+    wp.cells[1].SetColorTexture=function() error("WP1 draw failed") end
+    wp.Command("show");eq(wp.panel.shown,false);eq(wp.combatPanel.shown,false)
+end)
+test("WC3 physical displacement stays 272 pixels across UI scales and resolutions",function()
+    for _,height in ipairs({1080,1440}) do
+        for _,scale in ipairs({1,0.75}) do
+            local env=combatEnvironment();env.GetPhysicalScreenSize=function() return 2560,height end
+            env.UIParent.GetEffectiveScale=function() return scale end
+            local wp=load(env)
+            eq((wp.combatPanel.point[4]-wp.panel.point[4])*wp.panel.scale*scale/(768/height),272)
+            wp.Command("hide");eq(wp.combatPanel.shown,false)
+        end
+    end
+end)
+test("WC3 retains range configuration after diagnostic reset and inventories passive APIs",function()
+    local env=combatEnvironment();local wp=load(env);wp.Command("range 3");wp.Command("reset")
+    eq(env.WoWProbeDB.rangeSlot,3)
+    eq(env.WoWProbeDB.apiAvailability.UnitGUID,true);eq(env.WoWProbeDB.apiAvailability.UnitCanAttack,true)
+    eq(env.WoWProbeDB.apiAvailability.UnitChannelInfo,true);eq(env.WoWProbeDB.apiAvailability.IsActionInRange,true)
 end)
 
 for _, t in ipairs(tests) do

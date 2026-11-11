@@ -6,6 +6,8 @@ local U16, U32 = 65535, 4294967296
 P.sequence, P.elapsed = 0, 0
 P.merchantOpen, P.lootOpen = false, false
 P.merchantKnown, P.lootKnown = false, false
+P.rangeSlot = 1
+P.counters = { lootOpened=0, lootClosed=0, castSuccess=0, castFailed=0, skinSuccess=0 }
 
 local function finite(n)
     return type(n) == "number" and n == n and n > -math.huge and n < math.huge
@@ -220,6 +222,13 @@ local function captureAPIs()
         for part in string.gmatch(path, "[^.]+") do value = type(value) == "table" and value[part] or nil end
         inventory[path] = type(value) == "function"
     end
+    for _,path in ipairs({"UnitGUID","UnitCanAttack","UnitIsPlayer","IsActionInRange","HasAction","GetActionCooldown",
+        "IsUsableAction","UnitCastingInfo","UnitChannelInfo","CanLootUnit","GetSpellInfo","C_Spell.GetSpellName",
+        "GetActionButtonForID","ActionButton_CalculateAction","ActionButton_GetPagedID","SetPortraitTexture"}) do
+        local value=_G
+        for part in string.gmatch(path,"[^.]+") do value=type(value)=="table" and value[part] or nil end
+        inventory[path]=type(value)=="function"
+    end
     WoWProbeDB.apiAvailability = inventory
     WoWProbeDB.eventRegistration = P.eventRegistration or {}
     for event, reason in pairs(P.registrationErrors or {}) do errorRecord("event." .. event, reason) end
@@ -350,6 +359,218 @@ function P.BuildPacket()
     return p
 end
 
+-- WC3 uses only public, passive APIs. In particular legacy GetPlayerMapPosition
+-- is a PLAYER API and must never be used to invent enemy coordinates.
+local function strictBool(value, nilFalse)
+    if value == true or value == 1 then return true, true end
+    if value == false or value == 0 or (value == nil and nilFalse) then return false, true end
+    return false, false
+end
+local function combatBool(name, fn, ...)
+    local ok,value=call(name,fn,...)
+    if not ok then return nil end
+    local result,known=strictBool(value,true)
+    if known then return result end
+    invalid(name,"Invalid boolean result");return nil
+end
+local function completeString(value)
+    return type(value)=="string" and #value>0 and P.UTF8Truncate(value,#value)==value
+end
+function P.HashUTF8(value)
+    if not completeString(value) then return nil end
+    local h=5381
+    for i=1,#value do h=(h*33+string.byte(value,i))%U32 end
+    return h==0 and 1 or h
+end
+local function actionSlot(index)
+    -- .action is the effective slot maintained by Blizzard's ActionButton code,
+    -- including page/bonus bars. Do not assume physical key n means slot n.
+    local button
+    if type(GetActionButtonForID)=="function" then
+        local ok,b=call("GetActionButtonForID",GetActionButtonForID,index)
+        if not ok then return nil end
+        button=b
+    else button=_G["ActionButton"..index] end
+    if not button then return nil end
+    if integer(button.action,65534) and button.action>0 then return button.action end
+    local fn=ActionButton_CalculateAction or ActionButton_GetPagedID
+    if type(fn)=="function" then
+        local ok,slot=call("ActionButton effective slot",fn,button)
+        if ok and integer(slot,65534) and slot>0 then return slot end
+    end
+    return nil
+end
+local function actionState(slot)
+    if not slot then return nil end
+    local present=combatBool("HasAction",HasAction,slot)
+    if present==nil then return nil end
+    if not present then return false,false end
+    local ok,start,duration,enabled=call("GetActionCooldown",GetActionCooldown,slot)
+    if not ok or not finite(start) or start<0 or not finite(duration) or duration<0 then return nil end
+    local enabledValue,enabledKnown=strictBool(enabled,false)
+    local usableOK,usable=call("IsUsableAction",IsUsableAction,slot)
+    local usableValue,usableKnown=strictBool(usable,true)
+    local now,clockKnown=rawTime()
+    if not enabledKnown or not usableOK or not usableKnown or not clockKnown then return nil end
+    return enabledValue and (duration==0 or start+duration<=now),usableValue
+end
+local function castState(name,fn)
+    if type(fn)~="function" then invalid(name,"API unavailable");return nil end
+    local values={pcall(fn,"player")}
+    if not values[1] then invalid(name,values[2]);return nil end
+    if values[2]==nil then return false,0 end
+    if not completeString(values[2]) then return nil end
+    -- Modern: name,text,texture,startMS,endMS. Legacy adds rank before displayName.
+    local start,finish
+    if finite(values[5]) and finite(values[6]) then start,finish=values[5],values[6]
+    elseif finite(values[6]) and finite(values[7]) then start,finish=values[6],values[7] end
+    if not start or start<0 or not finish or finish<start or finish<=0 then return nil end
+    return true,floor(finish)%U32
+end
+local function skinName()
+    local fn=type(C_Spell)=="table" and C_Spell.GetSpellName or GetSpellInfo
+    local ok,name=call("Skinning localized spell name",fn,8613)
+    if ok and completeString(name) then return name end
+end
+local function skinState()
+    if not completeString(UNIT_SKINNABLE) then return nil end
+    local tip=P.skinTooltip
+    if not tip then
+        local ok,frame=call("Create skin tooltip",CreateFrame,"GameTooltip","WoWProbeSkinTooltip",UIParent,"GameTooltipTemplate")
+        if not ok then return nil end
+        tip=frame;P.skinTooltip=frame
+    end
+    for _,name in ipairs({"SetOwner","ClearLines","SetUnit","NumLines","GetName","Hide"}) do
+        if type(tip[name])~="function" then return nil end
+    end
+    tip:SetOwner(UIParent,"ANCHOR_NONE");tip:ClearLines()
+    local set=tip:SetUnit("target")
+    if set==false then tip:Hide();return nil end
+    local count,name=tip:NumLines(),tip:GetName()
+    if not integer(count,100) or count==0 or type(name)~="string" then tip:Hide();return nil end
+    local found=false
+    for i=1,count do
+        local line=_G[name.."TextLeft"..i]
+        if not line or type(line.GetText)~="function" then tip:Hide();return nil end
+        local text=line:GetText()
+        if text~=nil and type(text)~="string" then tip:Hide();return nil end
+        if text==UNIT_SKINNABLE then found=true end
+    end
+    tip:Hide();return found
+end
+local function portraitState()
+    local frame,texture=P.portraitPanel,P.portraitTexture
+    if frame then frame:Hide() end
+    if not frame or not texture or type(SetPortraitTexture)~="function" or type(texture.GetTexture)~="function" then return nil end
+    local r=WoWProbeDB.renderer
+    if not r or not r.valid or WoWProbeDB.visible==false or r.physicalWidth<624 or r.physicalHeight<72 then return nil end
+    -- A dedicated passive reference avoids the default TargetFrame portrait,
+    -- which can be covered by the WC3 grid. Clear first so a failed/no-op API
+    -- never leaves the previous target's image marked as a current portrait.
+    texture:SetTexture(nil)
+    SetPortraitTexture(texture,"target")
+    local source=texture:GetTexture()
+    if not ((type(source)=="string" and #source>0) or (finite(source) and source>0)) then return nil end
+    frame:Show()
+    -- ScalePanel anchors these UI units to exact physical client pixels.
+    return {560,8,64,64}
+end
+function P.BuildCombatPacket(core)
+    local p={};for i=1,128 do p[i]=0 end
+    local function put(offset,value) p[offset+1]=value end
+    local function u16(offset,value) value=value or U16;put(offset,value%256);put(offset+1,floor(value/256)%256) end
+    local function u32(offset,value) value=value or 0;u16(offset,value%65536);u16(offset+2,floor(value/65536)) end
+    local function norm(offset,value) u16(offset,value and floor(value*65534+0.5)) end
+    local function section(name,fn)
+        local ok,a,b,c=pcall(fn)
+        if ok then return a,b,c end
+        invalid("combat."..name,a);return nil
+    end
+    core=core or P.BuildPacket()
+    local function has(n,mask) return floor(n/mask)%2==1 end
+    local caps,flags,extra=0,0,0
+    local exists=has(core[126],8) and has(core[7],8)
+    if not exists and P.portraitPanel then P.portraitPanel:Hide() end
+    put(0,87);put(1,67);put(2,51);put(3,1);u16(4,core[5]+core[6]*256)
+    put(16,P.rangeSlot);norm(12,nil);norm(14,nil)
+    if exists then
+        local guid,token=section("identity",function()
+            local ok,value=call("UnitGUID",UnitGUID,"target")
+            if ok then return value,P.HashUTF8(value) end
+        end)
+        if token then caps=caps+1;u32(8,token) end
+        local nameHash=section("fullName",function()
+            local ok,name=call("UnitName (full)",UnitName,"target")
+            if ok then return P.HashUTF8(name) end
+        end)
+        if nameHash then extra=extra+4;u32(44,nameHash) end
+        local attack,player=section("attack",function()
+            local a=combatBool("UnitCanAttack",UnitCanAttack,"player","target")
+            local b=combatBool("UnitIsPlayer",UnitIsPlayer,"target")
+            if a~=nil and b~=nil then return a,b end
+        end)
+        if attack~=nil then caps=caps+2;if attack then flags=flags+1 end;if player then flags=flags+2 end end
+        local range=section("range",function()
+            local slot=actionSlot(P.rangeSlot)
+            if not slot then return nil end
+            local ok,value=call("IsActionInRange",IsActionInRange,slot,"target")
+            if ok then local result,known=strictBool(value,false);if known then return result end end
+        end)
+        if range~=nil then caps=caps+4;if range then flags=flags+4 end end
+        local x,y=section("targetPosition",function()
+            if core[123]~=1 or not has(core[8],64) or not has(core[8],1) or type(C_Map)~="table" then return nil end
+            local ok,id=call("C_Map.GetBestMapForUnit(target)",C_Map.GetBestMapForUnit,"target")
+            local playerMap=core[21]+core[22]*256+core[23]*65536+core[24]*16777216
+            if not ok or not integer(id,U32-1) or id==0 or id~=playerMap then return nil end
+            local success,v=call("C_Map.GetPlayerMapPosition(target)",C_Map.GetPlayerMapPosition,id,"target")
+            if success then local a,b=vectorXY("targetPosition",v);if coordinates(a,b) then return a,b end end
+        end)
+        if x~=nil then caps=caps+8;norm(12,x);norm(14,y) end
+        local loot=section("loot",function()
+            if not token then return nil end
+            local ok,hasLoot,canLoot=call("CanLootUnit",CanLootUnit,guid)
+            if not ok then return nil end
+            -- MayReturnNothing means unavailable, unlike legacy nil-false predicates.
+            local a,ak=strictBool(hasLoot,false);local b,bk=strictBool(canLoot,false)
+            if ak and bk then return a and b end
+        end)
+        if loot~=nil then caps=caps+16;if loot then flags=flags+8 end end
+        local skin=section("skinTooltip",skinState)
+        if skin~=nil then caps=caps+32;if skin then flags=flags+16 end end
+        local rect=section("portrait",portraitState)
+        if rect then extra=extra+1;for i=1,4 do u16(46+i*2,rect[i]) end end
+    end
+    local cast,channel,finish=section("cast",function()
+        local a,ae=castState("UnitCastingInfo",UnitCastingInfo)
+        local b,be=castState("UnitChannelInfo",UnitChannelInfo)
+        if a~=nil and b~=nil and not (a and b) then return a,b,a and ae or (b and be or 0) end
+    end)
+    if cast~=nil then caps=caps+64;if cast then flags=flags+32 end;if channel then flags=flags+64 end;u32(20,finish) end
+    local known,ready,usable=0,0,0
+    for i=1,4 do
+        local r,u=section("action"..i,function() return actionState(actionSlot(i)) end)
+        if r~=nil then local mask=2^(i-1);known=known+mask;if r then ready=ready+mask end;if u then usable=usable+mask end end
+    end
+    if known~=0 then caps=caps+128 end
+    put(17,known);put(18,ready);put(19,usable)
+    local events=P.eventRegistration or {};local counters=P.counters
+    if events.LOOT_OPENED and events.LOOT_CLOSED then extra=extra+8;u32(24,counters.lootOpened);u32(28,counters.lootClosed) end
+    if events.UNIT_SPELLCAST_SUCCEEDED and events.UNIT_SPELLCAST_FAILED and events.UNIT_SPELLCAST_INTERRUPTED then
+        extra=extra+16;u32(32,counters.castSuccess);u32(36,counters.castFailed)
+    end
+    local localized=section("skinName",skinName)
+    if events.UNIT_SPELLCAST_SUCCEEDED and localized then extra=extra+2;u32(40,counters.skinSuccess) end
+    put(6,caps);put(7,flags);put(56,extra)
+    local a,b=0,0;for i=1,126 do a=(a+p[i])%255;b=(b+a)%255 end;put(126,a);put(127,b)
+    WoWProbeDB.lastCombatPacket={sequence=p[5]+p[6]*256,capabilities=caps,flags=flags,extraKnown=extra,
+        rangeSlot=P.rangeSlot,targetToken=p[9]+p[10]*256+p[11]*65536+p[12]*16777216,
+        knownActions=known,readyActions=ready,usableActions=usable}
+    return p
+end
+function P.BuildPackets()
+    local core=P.BuildPacket();return core,P.BuildCombatPacket(core)
+end
+
 function P.ScalePanel()
     P.rendererReady = false
     if not P.panel then return false end
@@ -371,6 +592,14 @@ function P.ScalePanel()
         local pixelScale = 768 / height
         P.panel:SetScale(pixelScale / parentScale)
         P.panel:ClearAllPoints(); P.panel:SetPoint("TOPLEFT", UIParent, "TOPLEFT", 8, -8)
+        if P.combatPanel then
+            P.combatPanel:SetScale(pixelScale / parentScale)
+            P.combatPanel:ClearAllPoints();P.combatPanel:SetPoint("TOPLEFT",UIParent,"TOPLEFT",280,-8)
+        end
+        if P.portraitPanel then
+            P.portraitPanel:SetScale(pixelScale/parentScale)
+            P.portraitPanel:ClearAllPoints();P.portraitPanel:SetPoint("TOPLEFT",UIParent,"TOPLEFT",560,-8)
+        end
         WoWProbeDB.renderer = {valid = true, effectiveScale = pixelScale, parentScale = parentScale,
             physicalWidth = width, physicalHeight = height, resolutionSource = source,
             cellPixels = 8, widthPixels = 256, heightPixels = 96}
@@ -379,6 +608,8 @@ function P.ScalePanel()
     end
     invalid("renderer", "Cannot establish physical screen dimensions and pixel scale")
     P.panel:Hide()
+    if P.combatPanel then P.combatPanel:Hide() end
+    if P.portraitPanel then P.portraitPanel:Hide() end
     return false
 end
 local function createPanel()
@@ -395,17 +626,33 @@ local function createPanel()
     P.label = panel:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
     P.label:SetPoint("TOPLEFT", panel, "TOPLEFT", 0, -100)
     P.label:SetText("WoWProbe WP1 | read-only | /wowprobe info")
+    local combat=CreateFrame("Frame","WoWProbeCombatPanel",UIParent)
+    P.combatPanel=combat
+    combat:SetWidth(256);combat:SetHeight(96);combat:SetFrameStrata("TOOLTIP");combat:EnableMouse(false)
+    P.combatCells={}
+    for i=0,383 do
+        local t=combat:CreateTexture(nil,"OVERLAY");t:SetWidth(8);t:SetHeight(8)
+        t:SetPoint("TOPLEFT",combat,"TOPLEFT",(i%32)*8,-floor(i/32)*8);P.combatCells[i+1]=t
+    end
+    local label=combat:CreateFontString(nil,"OVERLAY","GameFontNormalSmall")
+    label:SetPoint("TOPLEFT",combat,"TOPLEFT",0,-100);label:SetText("WoWProbe WC3 | read-only | /wowprobe range 1..4")
+    local reference=CreateFrame("Frame","WoWProbePortraitReference",UIParent)
+    P.portraitPanel=reference;reference:SetWidth(64);reference:SetHeight(64);reference:SetFrameStrata("TOOLTIP");reference:EnableMouse(false)
+    local texture=reference:CreateTexture(nil,"ARTWORK");texture:SetWidth(64);texture:SetHeight(64)
+    texture:SetPoint("TOPLEFT",reference,"TOPLEFT",0,0);P.portraitTexture=texture;reference:Hide()
     local ready = P.ScalePanel()
     if WoWProbeDB.visible == false or not ready then panel:Hide() else panel:Show() end
+    if WoWProbeDB.visible == false or not ready then combat:Hide() else combat:Show() end
 end
-function P.RenderPacket(packet)
+function P.RenderPacket(packet, cells)
+    cells=cells or P.cells
     for i = 1, 128 do
         local byte = packet[i]
         for n = 0, 2 do
             local r = floor(byte / (2 ^ (n * 3))) % 2
             local g = floor(byte / (2 ^ (n * 3 + 1))) % 2
             local b = n == 2 and 0 or floor(byte / (2 ^ (n * 3 + 2))) % 2
-            local cell = P.cells[(i - 1) * 3 + n + 1]
+            local cell = cells[(i - 1) * 3 + n + 1]
             if type(cell.SetColorTexture) == "function" then cell:SetColorTexture(r, g, b, 1)
             else cell:SetTexture(r, g, b, 1) end
         end
@@ -416,11 +663,24 @@ local function update()
     local ok, packet = pcall(P.BuildPacket)
     if ok then
         local rendered, reason = pcall(P.RenderPacket, packet)
-        if not rendered then errorRecord("renderer", reason); if P.panel then P.panel:Hide() end; return false end
+        if not rendered then
+            errorRecord("renderer",reason);if P.panel then P.panel:Hide() end;if P.combatPanel then P.combatPanel:Hide() end
+            if P.portraitPanel then P.portraitPanel:Hide() end
+            return false
+        end
+        -- Failure of the optional extension must not break old WP1 readers.
+        local built,combat=pcall(P.BuildCombatPacket,packet)
+        if built then
+            local good,why=pcall(P.RenderPacket,combat,P.combatCells)
+            if not good then errorRecord("combat.renderer",why);if P.combatPanel then P.combatPanel:Hide() end
+            elseif P.combatPanel and WoWProbeDB.visible~=false then P.combatPanel:Show() end
+        else errorRecord("combat.packet",combat);if P.combatPanel then P.combatPanel:Hide() end end
         return true
     else
         -- A partially updated grid must never remain a seemingly live packet.
         errorRecord("packet", packet); if P.panel then P.panel:Hide() end
+        if P.combatPanel then P.combatPanel:Hide() end
+        if P.portraitPanel then P.portraitPanel:Hide() end
         return false
     end
 end
@@ -441,23 +701,30 @@ local function printLine(text)
 end
 function P.ResetDiagnostics()
     local visible = type(WoWProbeDB) == "table" and WoWProbeDB.visible ~= false
-    WoWProbeDB = { schema = 1, addonVersion = "0.1.0", visible = visible, errors = {}, bindings = {}, capabilities = {} }
+    WoWProbeDB = { schema = 1, addonVersion = "0.3.0", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
     readClient(); captureBindings(); captureAPIs(); if P.panel then P.ScalePanel() end
 end
 function P.Command(command)
+    local argument=string.match(command or "","^%s*%S+%s+(%S+)%s*$")
     command = string.lower(string.match(command or "", "^%s*(%S*)") or "")
-    if command == "hide" then WoWProbeDB.visible = false; if P.panel then P.panel:Hide() end
+    if command == "hide" then
+        WoWProbeDB.visible = false;if P.panel then P.panel:Hide() end;if P.combatPanel then P.combatPanel:Hide() end
+        if P.portraitPanel then P.portraitPanel:Hide() end
     elseif command == "show" then
         WoWProbeDB.visible = true; P.ScalePanel(); if update() and P.panel then P.panel:Show() end
     elseif command == "reset" then
         P.ResetDiagnostics(); update(); printLine("Diagnostic report reset; saved on logout or /reload.")
+    elseif command == "range" then
+        local slot=tonumber(argument)
+        if integer(slot,4) and slot>=1 then P.rangeSlot=slot;WoWProbeDB.rangeSlot=slot;update()
+        else printLine("Range slot must be 1..4: /wowprobe range 2") end
     elseif command == "info" then
         captureBindings(); update()
         local c, last = WoWProbeDB.client, WoWProbeDB.lastPacket or {}
         printLine(string.format("client %s build %d interface %d; packet WP1 seq %d; capabilities %d; known flags %d; failures %d; map mode %d.",
             c.version, c.build, c.interface, P.sequence, last.capabilities or 0, last.knownFlags or 0, last.readFailures or 0, last.mapMode or 0))
         printLine("SavedVariables: WoWProbeDB (build, detected APIs, key bindings, errors). Real game verification is still required.")
-    else printLine("Commands: /wowprobe show | hide | info | reset. Read-only status; no actions or key bindings are changed.") end
+    else printLine("Commands: /wowprobe show | hide | info | reset | range 1..4. Read-only status; no actions or key bindings are changed.") end
 end
 function P.Initialize()
     if P.initialized then return end
@@ -466,8 +733,9 @@ function P.Initialize()
     local previous = { client = old.client, errors = old.errors, lastPacket = old.lastPacket,
         bindings = old.bindings, keyBindings = old.keyBindings, apiAvailability = old.apiAvailability }
     WoWProbeDB = old; WoWProbeDB.visible = visible
+    if integer(old.rangeSlot,4) and old.rangeSlot>=1 then P.rangeSlot=old.rangeSlot end
     WoWProbeDB.previousSession = previous
-    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.1.0"
+    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.3.0"
     WoWProbeDB.errors, WoWProbeDB.bindings, WoWProbeDB.capabilities = {}, {}, {}
     readClient(); captureBindings(); captureAPIs()
     local ok, reason = pcall(createPanel)
@@ -483,8 +751,24 @@ function P.OnEvent(_, event, ...)
     if not P.initialized then return end
     if event == "MERCHANT_SHOW" then P.merchantOpen, P.merchantKnown = true, true
     elseif event == "MERCHANT_CLOSED" then P.merchantOpen, P.merchantKnown = false, true
-    elseif event == "LOOT_OPENED" then P.lootOpen, P.lootKnown = true, true
-    elseif event == "LOOT_CLOSED" then P.lootOpen, P.lootKnown = false, true
+    elseif event == "LOOT_OPENED" then P.lootOpen, P.lootKnown = true, true;P.counters.lootOpened=(P.counters.lootOpened+1)%U32
+    elseif event == "LOOT_CLOSED" then P.lootOpen, P.lootKnown = false, true;P.counters.lootClosed=(P.counters.lootClosed+1)%U32
+    elseif event == "UNIT_SPELLCAST_SUCCEEDED" then
+        local unit,second,third,fourth,fifth=...
+        if unit=="player" then
+            P.counters.castSuccess=(P.counters.castSuccess+1)%U32
+            local localized=skinName()
+            local id=type(third)=="number" and third or fifth
+            local name=type(third)=="string" and second or nil
+            if integer(id,U32-1) then
+                local fn=type(C_Spell)=="table" and C_Spell.GetSpellName or GetSpellInfo
+                local ok,value=call("Succeeded spell name",fn,id)
+                if ok then name=value end
+            end
+            if localized and name==localized then P.counters.skinSuccess=(P.counters.skinSuccess+1)%U32 end
+        end
+    elseif event == "UNIT_SPELLCAST_FAILED" or event=="UNIT_SPELLCAST_INTERRUPTED" then
+        if (...)=="player" then P.counters.castFailed=(P.counters.castFailed+1)%U32 end
     elseif event == "UI_ERROR_MESSAGE" then
         local first, second = ...
         local message = type(second) == "string" and second or first
@@ -505,7 +789,7 @@ local driver = CreateFrame("Frame")
 P.driver = driver
 driver:SetScript("OnEvent", function(...) local ok, reason = pcall(P.OnEvent, ...); if not ok then errorRecord("event", reason) end end)
 driver:SetScript("OnUpdate", P.Tick)
-for _, event in ipairs({"ADDON_LOADED", "PLAYER_ENTERING_WORLD", "PLAYER_LOGOUT", "UPDATE_BINDINGS", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "MERCHANT_SHOW", "MERCHANT_CLOSED", "LOOT_OPENED", "LOOT_CLOSED", "UI_ERROR_MESSAGE"}) do
+for _, event in ipairs({"ADDON_LOADED", "PLAYER_ENTERING_WORLD", "PLAYER_LOGOUT", "UPDATE_BINDINGS", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "MERCHANT_SHOW", "MERCHANT_CLOSED", "LOOT_OPENED", "LOOT_CLOSED", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED"}) do
     local ok, reason = pcall(driver.RegisterEvent, driver, event)
     P.eventRegistration = P.eventRegistration or {}; P.eventRegistration[event] = ok
     if not ok then P.registrationErrors = P.registrationErrors or {}; P.registrationErrors[event] = tostring(reason) end

@@ -1,7 +1,7 @@
 ## Interface: 30300
 ## Title: WoWProbe
-## Notes: Read-only phase 1 diagnostic RGB state panel. No protected actions.
+## Notes: Read-only WP1 diagnostics and matching WC3 combat observation panels. No protected actions.
 ## Author: WoWProbe
-## Version: 0.1.0
+## Version: 0.3.0
 ## SavedVariables: WoWProbeDB
 WoWProbe.lua
