@@ -34,6 +34,8 @@ Step只在新数据帧规划动作。重复Sequence返回None，不推进到点�
 
 支持反向（调用original.Reversed）与loop；不允许反向路线时构造拒绝。死亡/灵魂/战斗/包满、unknown核心状态、ReadFailures非0、fresh=false、地图模式/区域不匹配、无效坐标/朝向、单节点超过120秒或时钟倒退均返回Stop并锁定直到新建Navigator。已完成返回Completed，不能自动重启。
 
+Loop额外约束：Navigator及Simulator构造时，当loop=true，标定后的首尾点距离必须<=max(首点Tolerance,尾点Tolerance)。否则拒绝，要求先录入回到起点的关闭路段；不生成从终点到起点的未录制直线。
+
 脱困：连续前进而累计2秒位移<0.0001时，按次序给Jump120、StrafeLeft或Right200、退回上一已到过路点（没有上一点则停止），继续尝试当前目标；最多3次恢复后停止。不得因为转向、等待或重复帧误判卡住。具体恢复阶段可以合并为有界命令，但不得跳过堵塞节点直接继续。
 
 NavigationSimulator(RouteDocument route,NavigationCalibration calibration,bool reverse,bool loop,int startIndex). Sample()->NavigationSample; Apply(NavigationCommand command); Advance(int ms); X,Y,Facing(double),ElapsedMilliseconds(long),InputEvents(int恒为0)。使用同一坐标/方位换算，作用于虚拟坐标，不包含Native/IInputBackend。Apply可使时钟推进HoldMilliseconds；None由调用方Advance(200)。Sample每次产生递增Sequence，时钟与所有状态独立于真实游戏；MapId/MapMode/Zone取路线绑定。
@@ -41,3 +43,5 @@ NavigationSimulator(RouteDocument route,NavigationCalibration calibration,bool r
 ## 会话 RouteSession.cs
 
 由root实现；消费Navigator输出并控制一个IInputBackend。Begin显式倒计时5000ms；实际脉冲60..250ms，由独立25ms Tick释放；发下一命令前等待新的有效Sequence；每个Tick持续检查状态与前台。与第一阶段单次输入互斥，停止/异常只释放本会话拥有的键。
+
+所有输入模式共享InputFailureLatch，发送或释放异常会跨会话、窗口重建保留锁定。进入模拟或录制前取消第一阶段脉冲；模拟/录制/真实巡航过程中不再接受新的单次测试。回调重入Stop后必须重新检查状态，禁止在已取消状态继续KeyDown。

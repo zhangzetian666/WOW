@@ -9,3 +9,4 @@ __pycache__/
 **/SavedVariables/
 *.docx
 *.pdf
+routes/user/

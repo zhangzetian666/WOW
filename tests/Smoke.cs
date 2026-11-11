@@ -14,7 +14,19 @@ namespace WoWProbe
         public static int Main(string[] args)
         {
             Native.SetProcessDPIAware();Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
+            if(args.Length>0&&args[0]=="--route-ui-preview")return RoutePreview();
             return args.Length>0 && args[0]=="--ui-preview"?Preview():Run();
+        }
+        public static int RoutePreview()
+        {
+            string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output");Directory.CreateDirectory(directory);
+            using(var form=new RouteForm(delegate{return new RouteTelemetry();},delegate{return null;},null,null))
+            using(var timer=new System.Windows.Forms.Timer{Interval=500})
+            {
+                timer.Tick+=delegate{timer.Stop();using(var image=Native.Capture(form.Bounds))image.Save(Path.Combine(directory,"route-ui.png"),System.Drawing.Imaging.ImageFormat.Png);form.Close();};
+                form.Shown+=delegate{form.Hide();form.Show();form.Activate();form.Refresh();timer.Start();};Application.Run(form);
+            }
+            return 0;
         }
         public static int Preview()
         {

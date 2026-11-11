@@ -1,6 +1,6 @@
 # WOW 脚本开发
 
-本仓库保存脚本源代码、辅助插件及项目 Markdown 文档。当前进度为第一阶段测试包已完成开发侧验证，等待另一台 Windows 11 游戏电脑确认客户端版本并进行实测。
+本仓库保存脚本源代码、辅助插件及项目 Markdown 文档。当前版本为 0.2.0，已增加路线录制、离线模拟、受控真实巡航与断点文件。用户授权在暂时假设第一阶段接口可用时继续开发；两个阶段都保留游戏电脑待实测的状态。
 
 ## 项目文档
 
@@ -8,6 +8,8 @@
 - [产品设计](docs/requirements/product-design.md)
 - [开发流程与周期](docs/development-workflow.md)
 - [第一阶段实施计划](docs/phase1-plan.md)
+- [第二阶段实施计划](docs/phase2-plan.md)
+- [路线录制与巡航使用说明](docs/phase2-testing.md)
 - [实际进度](docs/progress.md)
 - [开发侧验证记录](docs/verification.md)
 - [屏幕数据协议](docs/protocol.md)
@@ -17,23 +19,32 @@
 
 ## 代码与构建
 
-- `src/`：Windows 检测界面、状态解析及单次按键保护。
+- `src/`：Windows 界面、状态解析、路线管理、导航与输入保护。
 - `addon/WoWProbe/`：游戏内只读辅助插件。
 - `tests/`：核心逻辑、Lua、跨语言协议及界面验证。
+- `routes/examples/`：仅用于离线验证的示例路线。
 - `build.ps1`：编译并运行 C# 检查；添加 `-Package` 生成测试包。
 - `verify.ps1 -PythonPath <python.exe>`：运行完整开发侧验证，需要 Python 3.12 及本地 `lupa.lua51` 测试依赖。
 
 构建依赖 Windows 自带 .NET Framework 编译器。开发侧完整检查中的 Python 与 Lua 依赖不需要安装到游戏电脑。`bin/`、`dist/`、测试输出及本地依赖均不提交到源代码仓库。
 
+开发者可用 Python 3.12 执行 `python -m pip install --target .tools lupa==2.8` 准备 Lua 5.1 测试依赖，再把该 Python 的完整路径传给 verify.ps1。
+
+## 第二阶段快速开始
+
+运行测试包里的 WoWProbe.exe，点击“路线录制与巡航”，直接使用“离线方形演示”开始模拟。模拟不会发送系统按键；正反向、闭合循环、受阻恢复和报告导出都可在没有游戏的电脑上验证。
+
+真实游戏路线需从主窗口有效状态流录制，并核对地图和标定后才能启用。完整步骤见 [第二阶段使用说明](docs/phase2-testing.md)。新测试包由 `build.ps1 -Package` 生成在 `dist/WoWProbe-Phase2.zip`；已有第一阶段测试包不被覆盖。
+
 ## 第一阶段测试包使用说明
 
-本包用于确认游戏客户端能够提供哪些状态，以及屏幕读取、按键控制和急停是否有效。它提供状态检测和单次按键测试。当前阶段还没有路线巡航或自动打怪功能。
+主窗口用于确认游戏客户端状态、屏幕读取、单次按键和急停是否有效。路线功能请使用第二阶段入口；本版本尚未实现自动打怪。
 
 适用环境：游戏电脑为 Windows 11。插件以文档中的 3.3.5 为候选基线，会检测实际版本与接口；是否兼容你的客户端须以这次测试为准。检测工具使用 Windows 自带的 .NET Framework，不需要安装 Python、Node.js 或编程工具。
 
 ## 1 把测试包放到游戏电脑
 
-1. 将 WoWProbe-Phase1.zip 复制到游戏电脑并解压到普通可写文件夹，例如桌面的 WoWProbe-Phase1。请不要直接在压缩包里启动程序。
+1. 将对应阶段测试包复制到游戏电脑并解压到普通可写文件夹。请不要直接在压缩包里启动程序。
 2. 退出游戏，将解压后整个 WoWProbe 文件夹复制到游戏目录的 Interface\AddOns 中。
 3. 确认目录是 Interface\AddOns\WoWProbe\WoWProbe.toc，避免多套一层文件夹。插件同目录的 Lua 文件都须一起复制。
 4. 启动游戏，在角色选择界面的插件列表启用 WoWProbe。若提示过期，先确认客户端版本；3.3.5 对应接口号 30300。只有确认是本测试包时才选择加载过期插件，其他版本的兼容性仍待检测。

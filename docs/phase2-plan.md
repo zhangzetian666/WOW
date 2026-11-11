@@ -33,32 +33,32 @@
 ### 1 路线数据与录制
 
 Files: src/Routes.cs; tests/RoutesTests.cs; routes/examples/*.json.
-- [ ] Write failing tests for JSON roundtrip, malformed input, finite coordinates, count bounds, map/zone consistency, recording, reverse filtering and checkpoint identity.
-- [ ] Implement versioned JSON route store, recorder and atomic checkpoint persistence per phase2-interfaces.md.
-- [ ] Run pure console tests, including non-English paths and culture-independent numbers.
+- [x] Write failing tests for JSON roundtrip, malformed input, finite coordinates, count bounds, map/zone consistency, recording, reverse filtering and checkpoint identity.
+- [x] Implement versioned JSON route store, recorder and atomic checkpoint persistence per phase2-interfaces.md.
+- [x] Run pure console tests, including non-English paths and culture-independent numbers.
 
 ### 2 纯导航与模拟
 
 Files: src/Navigation.cs; tests/NavigationTests.cs.
-- [ ] Write failing tests for bearings at cardinal directions, aspect ratio, angle wrapping, arrival over distinct packets, waiting, reverse/loop and recovery exhaustion.
-- [ ] Implement bounded-pulse navigator, sample validation and virtual movement simulator.
-- [ ] Simulate straight, corner and reverse runs; prove stops on invalid states and never calls Windows input.
+- [x] Write failing tests for bearings at cardinal directions, aspect ratio, angle wrapping, arrival over distinct packets, waiting, reverse/loop and recovery exhaustion.
+- [x] Implement bounded-pulse navigator, sample validation and virtual movement simulator.
+- [x] Simulate straight, corner and reverse runs; prove stops on invalid states and never calls Windows input.
 
 ### 3 输入会话与界面
 
 Files: src/RouteSession.cs; src/RouteForm.cs; src/Program.cs; tests/RouteSessionTests.cs; tests/Smoke.cs.
-- [ ] Write failing session tests using fake backend: five-second arming, pulse deadline, stale/dead/combat/focus stop, exceptions and key ownership.
-- [ ] Integrate session with first-phase read-only state snapshots and an independent watchdog.
-- [ ] Add route recording/import/export, plotted preview, navigation controls, calibration settings, simulation, checkpoints and report export.
-- [ ] Keep simulator independent of game capture and native input; inspect application layouts.
+- [x] Write failing session tests using fake backend: five-second arming, pulse deadline, stale/dead/combat/focus stop, exceptions and key ownership.
+- [x] Integrate session with first-phase read-only state snapshots and an independent watchdog.
+- [x] Add route recording/import/export, plotted preview, navigation controls, calibration settings, simulation, checkpoints and report export.
+- [x] Keep simulator independent of game capture and native input; inspect application layouts.
 
 ### 4 验证与交付
 
 Files: build.ps1; verify.ps1; README.md; docs/progress.md; docs/phase2-testing.md; docs/verification.md.
-- [ ] Run existing and new suites, cross-language check, desktop capture smoke and route UI preview.
-- [ ] Run independent review; reproduce and fix important findings with tests.
-- [ ] Package v0.2.0 with example route and guides, preserve v0.1.0 package.
-- [ ] Commit logical changes, merge into main and synchronize the authorized GitHub repository without force pushing.
+- [x] Run existing and new suites, cross-language check, desktop capture smoke and route UI preview.
+- [x] Run independent review; reproduce and fix important findings with tests.
+- [x] Package v0.2.0 with example route and guides, preserve v0.1.0 package.
+- [x] Commit logical changes, merge into main and synchronize the authorized GitHub repository without force pushing.
 
 ## 完成口径
 

@@ -17,6 +17,10 @@ try {
         if ($probe.ExitCode -ne 0) { throw 'Actual screen capture smoke test failed. Inspect bin/test-output/smoke-error.txt.' }
         $preview = Start-Process -FilePath "$projectRoot\bin\IntegrationTests.exe" -ArgumentList '--ui-preview' -WindowStyle Hidden -Wait -PassThru
         if ($preview.ExitCode -ne 0) { throw 'UI preview failed.' }
+        $routePreview = Start-Process -FilePath "$projectRoot\bin\IntegrationTests.exe" -ArgumentList '--route-ui-preview' -WindowStyle Hidden -Wait -PassThru
+        if ($routePreview.ExitCode -ne 0) { throw 'Route UI preview failed.' }
+        $routeFlow = Start-Process -FilePath "$projectRoot\bin\RouteUiTests.exe" -WindowStyle Hidden -Wait -PassThru
+        if ($routeFlow.ExitCode -ne 0) { throw 'Offline route UI integration failed. Inspect bin/test-output/route-ui-tests.json.' }
     }
     Write-Output 'VERIFICATION_OK: Core, native boundaries, Lua51 and cross-language protocol passed. No real game was tested.'
 } finally { Pop-Location }

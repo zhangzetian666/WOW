@@ -20,19 +20,32 @@ if ($LASTEXITCODE -ne 0) { throw 'Native test compilation failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Core tests failed.' }
 & "$bin\NativeTests.exe"
 if ($LASTEXITCODE -ne 0) { throw 'Native tests failed.' }
+$routeSources = @("$projectRoot\src\Core.cs","$projectRoot\src\Routes.cs","$projectRoot\src\Navigation.cs","$projectRoot\src\RouteSession.cs")
+foreach ($testName in @('RoutesTests','NavigationTests','RouteSessionTests')) {
+    & $compiler @common /target:exe "/out:$bin\$testName.exe" @routeSources "$projectRoot\tests\$testName.cs"
+    if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
+    & "$bin\$testName.exe"
+    if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
+}
 & $compiler @common /target:winexe /main:WoWProbe.Smoke "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\IntegrationTests.exe" @sources "$projectRoot\tests\Smoke.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Integration test compilation failed.' }
+& $compiler @common /target:winexe /main:RouteUiTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\RouteUiTests.exe" @sources "$projectRoot\tests\RouteUiTests.cs"
+if ($LASTEXITCODE -ne 0) { throw 'Route UI test compilation failed.' }
 Write-Output "BUILD_OK $bin\WoWProbe.exe"
 if ($Package) {
     $dist = Join-Path $projectRoot 'dist'
-    $release = Join-Path $dist 'WoWProbe-Phase1'
+    $release = Join-Path $dist 'WoWProbe-Phase2'
     New-Item -ItemType Directory -Path $release -Force | Out-Null
     Copy-Item -LiteralPath "$bin\WoWProbe.exe" -Destination $release -Force
     Copy-Item -LiteralPath "$projectRoot\README.md" -Destination "$release\使用说明.txt" -Force
     Copy-Item -LiteralPath "$projectRoot\docs\实机测试记录.csv" -Destination $release -Force
     Copy-Item -LiteralPath "$projectRoot\docs\verification.md" -Destination "$release\开发侧验证记录.md" -Force
+    Copy-Item -LiteralPath "$projectRoot\docs\phase2-testing.md" -Destination "$release\路线录制与巡航说明.txt" -Force
     Copy-Item -LiteralPath "$projectRoot\addon\WoWProbe" -Destination $release -Recurse -Force
-    $zip = Join-Path $dist 'WoWProbe-Phase1.zip'
+    $routeExamples = Join-Path $release 'routes\examples'
+    New-Item -ItemType Directory -Path $routeExamples -Force | Out-Null
+    Copy-Item -Path "$projectRoot\routes\examples\*.json" -Destination $routeExamples -Force
+    $zip = Join-Path $dist 'WoWProbe-Phase2.zip'
     Compress-Archive -LiteralPath $release -DestinationPath $zip -Force
     (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash | Set-Content -LiteralPath "$zip.sha256" -Encoding ASCII
     Write-Output "PACKAGE_OK $zip"
