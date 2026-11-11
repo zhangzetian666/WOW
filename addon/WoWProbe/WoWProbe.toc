@@ -1,0 +1,7 @@
+## Interface: 30300
+## Title: WoWProbe
+## Notes: Read-only phase 1 diagnostic RGB state panel. No protected actions.
+## Author: WoWProbe
+## Version: 0.1.0
+## SavedVariables: WoWProbeDB
+WoWProbe.lua
