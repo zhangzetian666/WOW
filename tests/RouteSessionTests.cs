@@ -82,6 +82,40 @@ class RouteSessionTests
             s.Start(Route(),Calibration(),new RouteKeyBindings(),false,false,0);
             for(int i=0;i<12&&s.IsActive;i++){now=5000+i*200;sample.Sequence++;s.Tick();}Check(!s.IsActive&&f.Events.Count==0);
         });
+        Run("deadline overflow cannot release a key that was never pressed",delegate{
+            var f=new Fake();New(f);var latch=new InputFailureLatch();bool planned=false;
+            var s=new RouteSession(f,delegate{return now;},delegate{return sample;},delegate(string text){if(text.StartsWith("Pulse ")){planned=true;now=Int64.MaxValue-50;}},latch);
+            s.Start(Route(),Calibration(),new RouteKeyBindings(),false,false,0);
+            for(int i=0;i<12&&s.IsActive;i++){now=5000+i*200;sample.Sequence++;s.Tick();}
+            Check(planned&&!s.IsActive&&latch.Faulted&&f.Events.Count==0);
+        });
+        Run("callback restart cannot send a stale pulse through its replacement countdown",delegate{
+            var f=new Fake();New(f);RouteSession s=null;bool replaced=false;
+            s=new RouteSession(f,delegate{return now;},delegate{return sample;},delegate(string text){if(!replaced&&text.StartsWith("Pulse ")){replaced=true;s.Stop("replace");s.Start(Route(),Calibration(),new RouteKeyBindings(),false,false,0);}});
+            s.Start(Route(),Calibration(),new RouteKeyBindings(),false,false,0);
+            for(int i=0;i<12&&!replaced;i++){now=5000+i*200;sample.Sequence++;s.Tick();}
+            Check(replaced&&s.IsActive&&!s.IsHolding&&s.Status=="Countdown"&&f.Events.Count==0);s.Stop("done");
+        });
+        Run("reentrant Tick cannot produce duplicate unpaired route pulses",delegate{
+            var f=new Fake();New(f);RouteSession s=null;bool nested=false;
+            s=new RouteSession(f,delegate{return now;},delegate{return sample;},delegate(string text){if(!nested&&text.StartsWith("Pulse ")){nested=true;sample.Sequence++;s.Tick();}});
+            s.Start(Route(),Calibration(),new RouteKeyBindings(),false,false,0);Pump(s);
+            Check(nested&&f.Events.Count==1);s.Stop("done");Check(f.Events.Count==2);
+        });
+        Run("final clock callback cannot turn a safe route pulse into combat input",delegate{
+            var f=new Fake();New(f);bool finalClock=false,changed=false;
+            var s=new RouteSession(f,delegate{if(finalClock){finalClock=false;changed=true;sample.Combat=true;}return now;},delegate{return sample;},delegate(string text){if(text.StartsWith("Pulse "))finalClock=true;});
+            s.Start(Route(),Calibration(),new RouteKeyBindings(),false,false,0);
+            for(int i=0;i<12&&s.IsActive;i++){now=5000+i*200;sample.Sequence++;s.Tick();}
+            Check(changed&&!s.IsActive&&f.Events.Count==0);
+        });
+        Run("shared latch tripped from route logging stops in that same Tick",delegate{
+            var f=new Fake();New(f);var latch=new InputFailureLatch();bool tripped=false;
+            var s=new RouteSession(f,delegate{return now;},delegate{return sample;},delegate(string text){if(text.StartsWith("Pulse ")){tripped=true;latch.Fail("other mode fault");}},latch);
+            s.Start(Route(),Calibration(),new RouteKeyBindings(),false,false,0);
+            for(int i=0;i<12&&!tripped;i++){now=5000+i*200;sample.Sequence++;s.Tick();}
+            Check(tripped&&!s.IsActive&&f.Events.Count==0);
+        });
         Console.WriteLine("Route session tests: "+passed+" passed, "+failed+" failed. No native input.");return failed==0?0:1;
     }
 }

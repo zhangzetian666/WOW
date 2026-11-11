@@ -42,9 +42,9 @@ namespace WoWProbe
         RouteDocument original;
         RouteKeyBindings bindings;
         string fingerprint,status="Idle",reason="";
-        bool running,holding,ownsKey,faulted,armed,awaitObservation,reverse,loop;
+        bool running,holding,ownsKey,faulted,armed,awaitObservation,reverse,loop,ticking,starting;
         ushort ownedKey;
-        long due,releaseAt,lastTime;
+        long due,releaseAt,lastTime,generation;
         int releaseSequence;
         NavigationCommand lastCommand;
         public RouteSession(IInputBackend backend,Func<long> clock,Func<NavigationSample> reader,Action<string> log,InputFailureLatch inputSafety=null)
@@ -64,6 +64,10 @@ namespace WoWProbe
         {
             lock(gate)
             {
+                if(starting)throw new InvalidOperationException("A route session is already being armed.");
+                starting=true;long startTicket=generation;
+                try
+                {
                 if(faulted||inputSafety.Faulted)throw new InvalidOperationException("输入发送或释放曾失败。请手动松开按键，检查游戏状态并重启工具后再试。");
                 if(running||ownsKey)throw new InvalidOperationException("A route session is already active.");
                 if(route==null||calibration==null||keys==null)throw new ArgumentNullException("route settings");
@@ -74,9 +78,13 @@ namespace WoWProbe
                 if(rejected!=null)throw new InvalidOperationException(rejected);
                 var engine=new Navigator(source,calibration.Clone(),reverse,loop,startIndex);
                 long time=clock();if(time<0)throw new InvalidOperationException("Invalid monotonic clock.");
+                if(startTicket!=generation||faulted||inputSafety.Faulted)throw new InvalidOperationException("Route arming was cancelled or input safety failed.");
                 due=checked(time+5000);lastTime=time;original=source;navigator=engine;fingerprint=route.Fingerprint();bindings=keys.Clone();
+                generation++;
                 this.reverse=reverse;this.loop=loop;running=true;armed=false;holding=ownsKey=awaitObservation=false;lastCommand=null;status="Countdown";reason="Five-second countdown; focus the game window.";
                 WriteLog("Route armed: "+source.RouteId+" reverse="+reverse+" index="+startIndex);
+                }
+                finally{starting=false;}
             }
         }
 
@@ -84,22 +92,23 @@ namespace WoWProbe
         {
             lock(gate)
             {
-                if(!running||faulted)return;
+                if(!running||faulted||ticking)return;
+                ticking=true;long ticket=generation;
                 try
                 {
-                    if(inputSafety.Faulted){Fault(new InvalidOperationException(inputSafety.Reason));return;}
-                    long time=clock();if(time<lastTime){StopCore("Monotonic clock moved backwards.");return;}lastTime=time;
-                    if(backend.IsEmergencyPressed()){StopCore("Emergency stop.");return;}
-                    NavigationSample sample=reader();string problem=SampleProblem(sample,original);
+                    if(!Continue(ticket))return;
+                    long time=clock();if(!Continue(ticket))return;if(time<lastTime){StopCore("Monotonic clock moved backwards.");return;}lastTime=time;
+                    bool emergency=backend.IsEmergencyPressed();if(!Continue(ticket))return;if(emergency){StopCore("Emergency stop.");return;}
+                    NavigationSample sample=reader();if(!Continue(ticket))return;string problem=SampleProblem(sample,original);
                     if(problem!=null){StopCore(problem);return;}
                     if(!armed&&time<due)return;
-                    if(!backend.IsTargetForeground()){StopCore("Target window is not foreground.");return;}
+                    bool foreground=backend.IsTargetForeground();if(!Continue(ticket))return;if(!foreground){StopCore("Target window is not foreground.");return;}
                     armed=true;
                     if(holding)
                     {
                         if(time>=releaseAt)
                         {
-                            Release();if(faulted)return;
+                            Release();if(!Continue(ticket))return;
                             awaitObservation=true;releaseSequence=sample.Sequence;status="WaitingForFrame";
                         }
                         return;
@@ -112,20 +121,27 @@ namespace WoWProbe
                     if(command.Action==NavigationAction.None){status="WaitingForFrame";reason=command.Reason;return;}
                     if(command.HoldMilliseconds<60||command.HoldMilliseconds>250)throw new InvalidOperationException("Navigator requested an unbounded key pulse.");
                     ushort key=bindings.For(command.Action);
-                    if(backend.IsKeyAlreadyDown(key)){StopCore("Key is already held by the user.");return;}
+                    bool alreadyDown=backend.IsKeyAlreadyDown(key);if(!Continue(ticket))return;if(alreadyDown){StopCore("Key is already held by the user.");return;}
                     // Recheck the exact input destination immediately before the key-down call.
-                    if(!backend.IsTargetForeground()||backend.IsEmergencyPressed()){StopCore("Input destination changed before pulse.");return;}
+                    foreground=backend.IsTargetForeground();if(!Continue(ticket))return;
+                    emergency=backend.IsEmergencyPressed();if(!Continue(ticket))return;
+                    if(!foreground||emergency){StopCore("Input destination changed before pulse.");return;}
                     WriteLog("Pulse "+command.Action+" "+command.HoldMilliseconds+"ms at index "+command.TargetIndex);
-                    if(!running||faulted||inputSafety.Faulted)return;
-                    string latestProblem=SampleProblem(reader(),original);
+                    if(!Continue(ticket))return;
+                    NavigationSample latest=reader();if(!Continue(ticket))return;string latestProblem=SampleProblem(latest,original);
                     if(latestProblem!=null){StopCore(latestProblem);return;}
-                    if(!backend.IsTargetForeground()||backend.IsEmergencyPressed()){StopCore("Input destination changed before pulse.");return;}
-                    if(!running||faulted||inputSafety.Faulted)return;
-                    long pressTime=clock();if(!running||faulted||inputSafety.Faulted)return;if(pressTime<lastTime){StopCore("Monotonic clock moved backwards.");return;}lastTime=pressTime;
-                    ownedKey=key;ownsKey=holding=true;releaseAt=checked(pressTime+command.HoldMilliseconds);status="Holding";reason=command.Reason;
+                    foreground=backend.IsTargetForeground();if(!Continue(ticket))return;
+                    emergency=backend.IsEmergencyPressed();if(!Continue(ticket))return;
+                    if(!foreground||emergency){StopCore("Input destination changed before pulse.");return;}
+                    long pressTime=clock();if(!Continue(ticket))return;if(pressTime<lastTime){StopCore("Monotonic clock moved backwards.");return;}lastTime=pressTime;
+                    latest=reader();if(!Continue(ticket))return;latestProblem=SampleProblem(latest,original);
+                    if(latestProblem!=null){StopCore(latestProblem);return;}
+                    long deadline=checked(pressTime+command.HoldMilliseconds);
+                    ownedKey=key;ownsKey=holding=true;releaseAt=deadline;status="Holding";reason=command.Reason;
                     backend.KeyDown(key);
                 }
                 catch(Exception ex){Fault(ex);}
+                finally{ticking=false;}
             }
         }
 
@@ -133,7 +149,7 @@ namespace WoWProbe
         {lock(gate){if(faulted)return;StopCore(String.IsNullOrEmpty(why)?"Stopped by user.":why);}}
         void StopCore(string why)
         {
-            running=false;status="Stopped";reason=why;
+            generation++;running=false;status="Stopped";reason=why;
             if(navigator!=null&&!navigator.Completed)navigator.Stop(why);
             Release();WriteLog("Route stopped: "+why);
         }
@@ -146,7 +162,9 @@ namespace WoWProbe
             catch(Exception ex){faulted=true;running=false;status="Faulted";reason="Key release failed: "+ex.Message;inputSafety.Fail(reason);WriteLog(reason);}
         }
         void Fault(Exception ex)
-        {faulted=true;running=false;reason="Input stopped after exception: "+ex.Message;inputSafety.Fail(reason);Release();status="Faulted";WriteLog(reason);}
+        {generation++;faulted=true;running=false;reason="Input stopped after exception: "+ex.Message;inputSafety.Fail(reason);Release();status="Faulted";WriteLog(reason);}
+        bool Continue(long ticket)
+        {if(ticket!=generation||!running||faulted)return false;if(inputSafety.Faulted){Fault(new InvalidOperationException(inputSafety.Reason));return false;}return true;}
         void WriteLog(string text){if(log!=null)try{log(text);}catch{/* Logging must never delay or prevent a matching key release. */}}
         static string SampleProblem(NavigationSample s,RouteDocument route)
         {
