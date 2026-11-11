@@ -64,7 +64,8 @@ if ($Package) {
     Copy-Item -LiteralPath "$projectRoot\AGENTS.md" -Destination $release -Force
     Copy-Item -LiteralPath "$projectRoot\README.md" -Destination "$release\使用说明.txt" -Force
     Copy-Item -LiteralPath "$projectRoot\docs\实机测试记录.csv" -Destination $release -Force
-    Copy-Item -LiteralPath "$projectRoot\docs\verification.md" -Destination "$release\开发侧验证记录.md" -Force
+    $verificationIndex = "# 开发侧验证记录`r`n`r`n完整结果见 [验证记录](docs/verification.md)，操作步骤见 [方案交接与测试反馈指南](docs/readiness-testing.md)。`r`n`r`n自动检查与离线模拟属于开发侧验证，游戏电脑实测仍待完成。`r`n"
+    [System.IO.File]::WriteAllText((Join-Path $release '开发侧验证记录.md'),$verificationIndex,(New-Object System.Text.UTF8Encoding($true)))
     Copy-Item -LiteralPath "$projectRoot\docs\phase2-testing.md" -Destination "$release\路线录制与巡航说明.txt" -Force
     Copy-Item -LiteralPath "$projectRoot\docs\phase3-testing.md" -Destination "$release\战斗与恢复说明.txt" -Force
     Copy-Item -LiteralPath "$projectRoot\addon\WoWProbe" -Destination $release -Recurse -Force
