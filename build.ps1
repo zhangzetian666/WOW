@@ -8,7 +8,7 @@ if (-not (Test-Path -LiteralPath $compiler)) {
 if (-not (Test-Path -LiteralPath $compiler)) { throw '.NET Framework compiler not found.' }
 $bin = Join-Path $projectRoot 'bin'
 New-Item -ItemType Directory -Path $bin -Force | Out-Null
-$common = @('/nologo','/codepage:65001','/langversion:5','/optimize+','/r:System.Drawing.dll','/r:System.Windows.Forms.dll','/r:System.Web.Extensions.dll')
+$common = @('/nologo','/codepage:65001','/langversion:5','/optimize+','/r:System.Drawing.dll','/r:System.Windows.Forms.dll','/r:System.Web.Extensions.dll','/r:System.IO.Compression.dll','/r:System.IO.Compression.FileSystem.dll')
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -Filter '*.cs' | ForEach-Object { $_.FullName })
 & $compiler @common /target:winexe "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\WoWProbe.exe" @sources
 if ($LASTEXITCODE -ne 0) { throw 'Application compilation failed.' }
@@ -35,7 +35,7 @@ foreach ($testName in @('CombatTelemetryTests','BattleProfileTests','FarmingTest
     if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
 }
 $domainSources = @($sources | Where-Object { [System.IO.Path]::GetFileName($_) -notmatch '(^Program\.cs$|^Native\.cs$|^CampaignNative\.cs$|^AssemblyInfo\.cs$|Form\.cs$)' })
-foreach ($testName in @('CampaignSettingsTests','RecoveryWorkflowTests','VendorWorkflowTests','CampaignEngineTests','CampaignSessionTests','CampaignSimulatorTests','RuntimeEvidenceTests','OperationsTelemetryTests')) {
+foreach ($testName in @('CampaignSettingsTests','RecoveryWorkflowTests','VendorWorkflowTests','CampaignEngineTests','CampaignSessionTests','CampaignSimulatorTests','RuntimeEvidenceTests','OperationsTelemetryTests','CampaignBundleTests','CampaignCheckpointTests','FeedbackSummaryTests','CampaignPreflightTests')) {
     & $compiler @common /target:exe "/out:$bin\$testName.exe" @domainSources "$projectRoot\tests\CampaignFixtures.cs" "$projectRoot\tests\$testName.cs"
     if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
     & "$bin\$testName.exe"
@@ -51,10 +51,12 @@ if ($LASTEXITCODE -ne 0) { throw 'Farm UI test compilation failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Campaign UI test compilation failed.' }
 & $compiler @common /target:winexe /main:CampaignStartFailureTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\CampaignStartFailureTests.exe" @sources "$projectRoot\tests\CampaignFixtures.cs" "$projectRoot\tests\CampaignStartFailureTests.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Campaign startup failure test compilation failed.' }
+& $compiler @common /target:winexe /main:ReadinessUiTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\ReadinessUiTests.exe" @sources "$projectRoot\tests\CampaignFixtures.cs" "$projectRoot\tests\ReadinessUiTests.cs"
+if ($LASTEXITCODE -ne 0) { throw 'Readiness UI test compilation failed.' }
 Write-Output "BUILD_OK $bin\WoWProbe.exe"
 if ($Package) {
     $dist = Join-Path $projectRoot 'dist'
-    $releaseName = 'WoWProbe-Complete-0.5.0'
+    $releaseName = 'WoWProbe-Complete-0.6.0'
     $release = Join-Path $dist $releaseName
     New-Item -ItemType Directory -Path $release -Force | Out-Null
     Copy-Item -LiteralPath "$bin\WoWProbe.exe" -Destination $release -Force
