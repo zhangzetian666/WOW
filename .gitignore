@@ -4,3 +4,8 @@ dist/
 test-output/
 reports/
 *.user
+__pycache__/
+*.pyc
+**/SavedVariables/
+*.docx
+*.pdf

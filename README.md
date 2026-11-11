@@ -1,4 +1,31 @@
-# 第一阶段测试包使用说明
+# WOW 脚本开发
+
+本仓库保存脚本源代码、辅助插件及项目 Markdown 文档。当前进度为第一阶段测试包已完成开发侧验证，等待另一台 Windows 11 游戏电脑确认客户端版本并进行实测。
+
+## 项目文档
+
+- [功能需求](docs/requirements/functional-requirements.md)
+- [产品设计](docs/requirements/product-design.md)
+- [开发流程与周期](docs/development-workflow.md)
+- [第一阶段实施计划](docs/phase1-plan.md)
+- [实际进度](docs/progress.md)
+- [开发侧验证记录](docs/verification.md)
+- [屏幕数据协议](docs/protocol.md)
+- [后续协作与 Git 约定](AGENTS.md)
+
+日常文档以 Markdown 为准，需要汇报时再导出 Word。每次完成修改并通过相应检查后创建 Git 提交，保留可追踪记录。
+
+## 代码与构建
+
+- `src/`：Windows 检测界面、状态解析及单次按键保护。
+- `addon/WoWProbe/`：游戏内只读辅助插件。
+- `tests/`：核心逻辑、Lua、跨语言协议及界面验证。
+- `build.ps1`：编译并运行 C# 检查；添加 `-Package` 生成测试包。
+- `verify.ps1 -PythonPath <python.exe>`：运行完整开发侧验证，需要 Python 3.12 及本地 `lupa.lua51` 测试依赖。
+
+构建依赖 Windows 自带 .NET Framework 编译器。开发侧完整检查中的 Python 与 Lua 依赖不需要安装到游戏电脑。`bin/`、`dist/`、测试输出及本地依赖均不提交到源代码仓库。
+
+## 第一阶段测试包使用说明
 
 本包用于确认游戏客户端能够提供哪些状态，以及屏幕读取、按键控制和急停是否有效。它提供状态检测和单次按键测试。当前阶段还没有路线巡航或自动打怪功能。
 
@@ -66,6 +93,6 @@
 
 本包提供只读插件、Windows 检测工具、单次受控按键、测试记录与报告导出。开发侧验证范围见“开发侧验证记录.md”。请先确认客户端版本并完成最初一轮状态读取，将结果发回后继续适配。
 
-开发源代码在原电脑的 D:\software\WOW\phase1。需要重新编译时在该目录运行 build.ps1；打包使用 build.ps1 -Package。普通游戏电脑直接运行已打包的 WoWProbe.exe。
+开发源代码位于本仓库根目录。需要重新编译时在仓库目录运行 build.ps1；打包使用 build.ps1 -Package。普通游戏电脑直接运行已打包的 WoWProbe.exe。
 
 接口依据：Microsoft SendInput 文档 https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-sendinput 。输入受前台窗口和进程权限条件影响，工具会检查返回结果；最终效果仍须在实际客户端观察。
