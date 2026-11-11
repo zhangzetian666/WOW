@@ -8,7 +8,7 @@
 
 **Tech Stack:** .NET Framework 4.x C# 5 Windows Forms；游戏 Lua 5.1；Windows 原生截图与 SendInput。游戏电脑无需 Python 或开发工具。
 
-**Spec:** ../魔兽世界无限服脚本开发流程与周期计划.docx 第一阶段；../脚本功能需求.docx；../魔兽世界无限服脚本开发产品文档.docx。
+**Spec:** ../../魔兽世界无限服脚本开发流程与周期计划.docx 第一阶段；../../脚本功能需求.docx；../../魔兽世界无限服脚本开发产品文档.docx。
 
 ## Global Constraints
 
