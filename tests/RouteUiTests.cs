@@ -58,6 +58,7 @@ class RouteUiTests
                 }
                 catch(Exception ex){error=ex.ToString();timer.Stop();single.Stop("test cleanup");form.Close();}
             };
+            form.ShowInTaskbar=false;form.StartPosition=FormStartPosition.Manual;form.Location=new System.Drawing.Point(-16000,-16000);form.Opacity=0;
             form.Shown+=delegate{timer.Start();};Application.Run(form);
         }
         File.WriteAllText(Path.Combine(output,"route-ui-tests.json"),new JavaScriptSerializer().Serialize(new {passed=exit==0,input_events=fake.Events,native_backend_requests=nativeFactoryCalls,error=error}),new UTF8Encoding(true));

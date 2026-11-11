@@ -55,6 +55,7 @@ class FarmUiTests
                     if((DateTime.UtcNow-began).TotalSeconds>90)throw new Exception("Farm UI scenarios timed out at "+stage);
                 }catch(Exception ex){error=ex.ToString();f.Export();t.Stop();single.Stop("Cleanup");f.Close();}
             };
+            f.ShowInTaskbar=false;f.StartPosition=FormStartPosition.Manual;f.Location=new System.Drawing.Point(-16000,-16000);f.Opacity=0;
             f.Shown+=delegate{f.Hide();f.Show();t.Start();};Application.Run(f);
         }
         string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output");Directory.CreateDirectory(path);File.WriteAllText(Path.Combine(path,"farm-ui-tests.json"),new JavaScriptSerializer().Serialize(new{passed=exit==0,scenarios=scenarios,input_events=fake.Events,native_backend_requests=factory,error=error}),new UTF8Encoding(true));return exit;

@@ -16,6 +16,7 @@ namespace WoWProbe
             Native.SetProcessDPIAware();Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
             if(args.Length>0&&args[0]=="--route-ui-preview")return RoutePreview();
             if(args.Length>0&&args[0]=="--farm-ui-preview")return FarmPreview();
+            if(args.Length>0&&args[0]=="--campaign-ui-preview")return CampaignPreview();
             return args.Length>0 && args[0]=="--ui-preview"?Preview():Run();
         }
         public static int RoutePreview()
@@ -44,6 +45,13 @@ namespace WoWProbe
                 form.Shown+=delegate{form.Hide();form.Show();form.Activate();form.Refresh();timer.Start();};Application.Run(form);
             }
             return exit;
+        }
+        public static int CampaignPreview()
+        {
+            string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output");Directory.CreateDirectory(directory);int exit=1;
+            using(var form=new CampaignForm(delegate{return new OperationObservation();},delegate{return null;},null,null,null,null,new InputFailureLatch()))
+            using(var timer=new System.Windows.Forms.Timer{Interval=500})
+            {timer.Tick+=delegate{timer.Stop();try{exit=SaveUiPreview(form,directory,"campaign-ui");}finally{form.Close();}};form.Shown+=delegate{form.Hide();form.Show();form.Refresh();timer.Start();};Application.Run(form);}return exit;
         }
         public static int Preview()
         {

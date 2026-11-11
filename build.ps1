@@ -34,31 +34,53 @@ foreach ($testName in @('CombatTelemetryTests','BattleProfileTests','FarmingTest
     & "$bin\$testName.exe"
     if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
 }
+$domainSources = @($sources | Where-Object { [System.IO.Path]::GetFileName($_) -notmatch '(^Program\.cs$|^Native\.cs$|^CampaignNative\.cs$|^AssemblyInfo\.cs$|Form\.cs$)' })
+foreach ($testName in @('CampaignSettingsTests','RecoveryWorkflowTests','VendorWorkflowTests','CampaignEngineTests','CampaignSessionTests','CampaignSimulatorTests','RuntimeEvidenceTests','OperationsTelemetryTests')) {
+    & $compiler @common /target:exe "/out:$bin\$testName.exe" @domainSources "$projectRoot\tests\CampaignFixtures.cs" "$projectRoot\tests\$testName.cs"
+    if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
+    & "$bin\$testName.exe"
+    if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
+}
 & $compiler @common /target:winexe /main:WoWProbe.Smoke "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\IntegrationTests.exe" @sources "$projectRoot\tests\Smoke.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Integration test compilation failed.' }
 & $compiler @common /target:winexe /main:RouteUiTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\RouteUiTests.exe" @sources "$projectRoot\tests\RouteUiTests.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Route UI test compilation failed.' }
 & $compiler @common /target:winexe /main:FarmUiTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\FarmUiTests.exe" @sources "$projectRoot\tests\FarmUiTests.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Farm UI test compilation failed.' }
+& $compiler @common /target:winexe /main:CampaignUiTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\CampaignUiTests.exe" @sources "$projectRoot\tests\CampaignUiTests.cs"
+if ($LASTEXITCODE -ne 0) { throw 'Campaign UI test compilation failed.' }
+& $compiler @common /target:winexe /main:CampaignStartFailureTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\CampaignStartFailureTests.exe" @sources "$projectRoot\tests\CampaignFixtures.cs" "$projectRoot\tests\CampaignStartFailureTests.cs"
+if ($LASTEXITCODE -ne 0) { throw 'Campaign startup failure test compilation failed.' }
 Write-Output "BUILD_OK $bin\WoWProbe.exe"
 if ($Package) {
     $dist = Join-Path $projectRoot 'dist'
-    $release = Join-Path $dist 'WoWProbe-Phase3'
+    $releaseName = 'WoWProbe-Complete-0.5.0'
+    $release = Join-Path $dist $releaseName
     New-Item -ItemType Directory -Path $release -Force | Out-Null
     Copy-Item -LiteralPath "$bin\WoWProbe.exe" -Destination $release -Force
+    Copy-Item -LiteralPath "$projectRoot\README.md" -Destination $release -Force
+    Copy-Item -LiteralPath "$projectRoot\AGENTS.md" -Destination $release -Force
     Copy-Item -LiteralPath "$projectRoot\README.md" -Destination "$release\使用说明.txt" -Force
     Copy-Item -LiteralPath "$projectRoot\docs\实机测试记录.csv" -Destination $release -Force
     Copy-Item -LiteralPath "$projectRoot\docs\verification.md" -Destination "$release\开发侧验证记录.md" -Force
     Copy-Item -LiteralPath "$projectRoot\docs\phase2-testing.md" -Destination "$release\路线录制与巡航说明.txt" -Force
     Copy-Item -LiteralPath "$projectRoot\docs\phase3-testing.md" -Destination "$release\战斗与恢复说明.txt" -Force
     Copy-Item -LiteralPath "$projectRoot\addon\WoWProbe" -Destination $release -Recurse -Force
+    # Keep Markdown relative links usable, including the original requirements and earlier-stage guides.
+    $docRoot = Join-Path $projectRoot 'docs'
+    foreach ($document in @(Get-ChildItem -LiteralPath $docRoot -Recurse -File | Where-Object { $_.Extension -in @('.md','.csv') })) {
+        $relative = $document.FullName.Substring($docRoot.Length + 1)
+        $destination = Join-Path (Join-Path $release 'docs') $relative
+        New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
+        Copy-Item -LiteralPath $document.FullName -Destination $destination -Force
+    }
     $routeExamples = Join-Path $release 'routes\examples'
     New-Item -ItemType Directory -Path $routeExamples -Force | Out-Null
     Copy-Item -Path "$projectRoot\routes\examples\*.json" -Destination $routeExamples -Force
     $profileExamples = Join-Path $release 'profiles\examples'
     New-Item -ItemType Directory -Path $profileExamples -Force | Out-Null
     Copy-Item -Path "$projectRoot\profiles\examples\*.json" -Destination $profileExamples -Force
-    $zip = Join-Path $dist 'WoWProbe-Phase3.zip'
+    $zip = Join-Path $dist ($releaseName + '.zip')
     Compress-Archive -LiteralPath $release -DestinationPath $zip -Force
     (Get-FileHash -LiteralPath $zip -Algorithm SHA256).Hash | Set-Content -LiteralPath "$zip.sha256" -Encoding ASCII
     Write-Output "PACKAGE_OK $zip"
