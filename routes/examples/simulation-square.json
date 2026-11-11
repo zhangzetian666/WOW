@@ -1,0 +1,17 @@
+{
+  "schema_version": 1,
+  "route_id": "simulation-square-v1",
+  "name": "Simulation square (synthetic map)",
+  "route_type": "farm",
+  "map_id": 900001,
+  "map_mode": 1,
+  "zone": "Simulation only",
+  "reverse_policy": "allowed",
+  "loop": false,
+  "points": [
+    { "x": 0.40, "y": 0.40, "tol": 0.003, "wait_ms": 0, "action": "wait" },
+    { "x": 0.40, "y": 0.44, "tol": 0.003, "wait_ms": 250, "action": "scan" },
+    { "x": 0.44, "y": 0.44, "tol": 0.003, "wait_ms": 0, "action": "turn_point" },
+    { "x": 0.44, "y": 0.40, "tol": 0.003, "wait_ms": 500, "action": "interact" }
+  ]
+}
