@@ -84,7 +84,7 @@ class CombatTelemetryTests
         if(args.Length==2)Test("actual Lua WC3 and WP1 fixture cross decode",delegate {
             var core=ProbePacket.Decode(File.ReadAllBytes(args[0]));var extra=Decode(File.ReadAllBytes(args[1]));Equal(core.Sequence,Get(extra,"Sequence"),"same sequence");
             Equal(Get(extra,"TargetToken"),Hash("Creature-0-1-2-3-456-000001"),"GUID UTF8 hash");Equal(Get(extra,"TargetNameHash"),Hash("Target"),"complete name hash");
-            Equal(Get(extra,"Portrait"),new Rectangle(560,8,64,64),"portrait physical client ROI");Equal(Get(extra,"KnownActionsMask"),15,"action evidence");
+            Equal(Get(extra,"Portrait"),new Rectangle(832,8,64,64),"portrait physical client ROI");Equal(Get(extra,"KnownActionsMask"),15,"action evidence");
             foreach(string field in new[]{"LootOpened","LootClosed","CastSuccess","CastFailed","SkinSuccess"})Equal(Get(extra,field),1u,"counter evidence "+field);
         });
         if(args.Length==2)Test("paired pixel image uses exact live capture geometry",delegate {

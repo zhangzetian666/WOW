@@ -1,5 +1,7 @@
 # 第三阶段模块接口约定
 
+> v0.5.0兼容说明：新增WO4位于WP1右侧544px，头像参考区右移，默认客户区区域为(832,8,64,64)。WC3格式不变，以包内实时ROI为准。下文阶段三默认位置属于v0.3.0布局，完整版本接口见 [complete-interfaces.md](complete-interfaces.md)。
+
 C#5、命名空间WoWProbe。已有WP1保持不变。新代码只消费明确能力，未知不得当作false或0。
 
 ## WC3扩展 CombatTelemetry.cs 与插件

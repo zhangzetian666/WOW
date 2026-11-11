@@ -18,6 +18,8 @@ bool：Fresh,CorpseKnown,FreeSlotsKnown,GeometryKnown,ReleaseKnown,ReleaseVisibl
 
 提供 Clone() 深拷贝（FarmObservation可MemberwiseClone或手动复制），SlotOccupied(int bag,int slot)->bool（无效索引抛ArgumentOutOfRangeException；必须先检查InventoryKnown），FromPackets(ProbePacket,CombatPacket,OperationsPacket,bool fresh)->OperationObservation。FromPackets 要三包同序号、旧Farm.Fresh，并提取WP1 corpse cap128、空位cap16及merchant基本状态；任何包缺失Fresh=false。`OperationsPacket.Decode(byte[])->OperationsPacket` 后可提供 `ApplyTo(OperationObservation)` 进行字段填充。
 
+补充：BagEventsKnown明确对应WO4 bit256；InventoryEventsKnown由bit16导出，发布Inventory需要可靠注册背包变更事件。外部头像辅助结果使用PortraitCheckKnown/PortraitMatch(bool)、PortraitCheckSequence(int)、PortraitCheckTargetToken(uint)，不占用WO4字段；只允许同帧同目标结果。图片采集与文件读取在UI生产端完成，完整观察和结果一起发布；安全监控只读内存。捕获时间与处理完成时间分开，捕获超过900ms不能因为新处理而变为新鲜。
+
 ### WO4：128字节
 
 物理位置在WP1右侧544px（68个cell），WO4 32×12×8；整体采集宽度100cell。WC3头像右移至WP1+824px，默认client区域(832,8,64,64)，不重叠。WP1/WC3旧单独读取仍可用。
@@ -91,5 +93,7 @@ CampaignEngine(CampaignPlan)；Step(OperationObservation,long)->OperationCommand
 ICampaignInputBackend : IInputBackend，方法 ClientBounds()->Rectangle（屏幕坐标）, IsMouseAlreadyDown(bool right), MoveMouse(Point screen), MouseDown(bool right), MouseUp(bool right)。Windows实现仅外部SendInput/移动光标，无后台消息点击。
 
 CampaignSession使用一个backend/engine/25ms监控，5秒倒计时；最终KeyDown/MouseDown前重新读取同目的、同target/hash、同item/fingerprint/revision、同layout/region以及全部可用条件；按住期间检查危险变化，保证自有按键/按钮释放。鼠标仅允许已知按钮或物品中心点，client边界内，避开三个数据网格；未知/异常/重入取消共享InputFailureLatch并停止。
+
+恢复需要打怪路线允许反向，即使售卖未启用也不绕过reverse_policy。日志初始化必须在实机会话布防之前成功；任何启动异常都停止候选会话，不能残留倒计时。
 
 CampaignSimulator完全不持有Native/backend；驱动完整farm→death→recovery→farm→full→vendor→farm，支持多轮/2h虚拟运行及失败注入。报告统一game_validation="pending"，虚拟时间/墙钟时间分列，系统输入0，真会话不得标输入0。UI开始任一模式先停止其他模式，运行时不允许重绑计划，断点校验完整计划fingerprint。

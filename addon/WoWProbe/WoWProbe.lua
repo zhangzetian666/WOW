@@ -230,6 +230,7 @@ local function captureAPIs()
         inventory[path]=type(value)=="function"
     end
     WoWProbeDB.apiAvailability = inventory
+    if P.CaptureOperationsAPIs then P.CaptureOperationsAPIs() end
     WoWProbeDB.eventRegistration = P.eventRegistration or {}
     for event, reason in pairs(P.registrationErrors or {}) do errorRecord("event." .. event, reason) end
     binding("health", "UnitHealth/UnitHealthMax")
@@ -463,7 +464,7 @@ local function portraitState()
     if frame then frame:Hide() end
     if not frame or not texture or type(SetPortraitTexture)~="function" or type(texture.GetTexture)~="function" then return nil end
     local r=WoWProbeDB.renderer
-    if not r or not r.valid or WoWProbeDB.visible==false or r.physicalWidth<624 or r.physicalHeight<72 then return nil end
+    if not r or not r.valid or WoWProbeDB.visible==false or r.physicalWidth<896 or r.physicalHeight<72 then return nil end
     -- A dedicated passive reference avoids the default TargetFrame portrait,
     -- which can be covered by the WC3 grid. Clear first so a failed/no-op API
     -- never leaves the previous target's image marked as a current portrait.
@@ -473,7 +474,7 @@ local function portraitState()
     if not ((type(source)=="string" and #source>0) or (finite(source) and source>0)) then return nil end
     frame:Show()
     -- ScalePanel anchors these UI units to exact physical client pixels.
-    return {560,8,64,64}
+    return {832,8,64,64}
 end
 function P.BuildCombatPacket(core)
     local p={};for i=1,128 do p[i]=0 end
@@ -568,7 +569,7 @@ function P.BuildCombatPacket(core)
     return p
 end
 function P.BuildPackets()
-    local core=P.BuildPacket();return core,P.BuildCombatPacket(core)
+    local core=P.BuildPacket();return core,P.BuildCombatPacket(core),P.BuildOperationsPacket and P.BuildOperationsPacket(core) or nil
 end
 
 function P.ScalePanel()
@@ -598,7 +599,11 @@ function P.ScalePanel()
         end
         if P.portraitPanel then
             P.portraitPanel:SetScale(pixelScale/parentScale)
-            P.portraitPanel:ClearAllPoints();P.portraitPanel:SetPoint("TOPLEFT",UIParent,"TOPLEFT",560,-8)
+            P.portraitPanel:ClearAllPoints();P.portraitPanel:SetPoint("TOPLEFT",UIParent,"TOPLEFT",832,-8)
+        end
+        if P.operationsPanel then
+            P.operationsPanel:SetScale(pixelScale/parentScale);P.operationsPanel:ClearAllPoints();P.operationsPanel:SetPoint("TOPLEFT",UIParent,"TOPLEFT",552,-8)
+            if width<808 or WoWProbeDB.visible==false then P.operationsPanel:Hide() else P.operationsPanel:Show() end
         end
         WoWProbeDB.renderer = {valid = true, effectiveScale = pixelScale, parentScale = parentScale,
             physicalWidth = width, physicalHeight = height, resolutionSource = source,
@@ -610,6 +615,7 @@ function P.ScalePanel()
     P.panel:Hide()
     if P.combatPanel then P.combatPanel:Hide() end
     if P.portraitPanel then P.portraitPanel:Hide() end
+    if P.operationsPanel then P.operationsPanel:Hide() end
     return false
 end
 local function createPanel()
@@ -640,9 +646,11 @@ local function createPanel()
     P.portraitPanel=reference;reference:SetWidth(64);reference:SetHeight(64);reference:SetFrameStrata("TOOLTIP");reference:EnableMouse(false)
     local texture=reference:CreateTexture(nil,"ARTWORK");texture:SetWidth(64);texture:SetHeight(64)
     texture:SetPoint("TOPLEFT",reference,"TOPLEFT",0,0);P.portraitTexture=texture;reference:Hide()
+    if P.CreateOperationsPanel then P.CreateOperationsPanel() end
     local ready = P.ScalePanel()
     if WoWProbeDB.visible == false or not ready then panel:Hide() else panel:Show() end
     if WoWProbeDB.visible == false or not ready then combat:Hide() else combat:Show() end
+    if P.operationsPanel and (WoWProbeDB.visible==false or not ready) then P.operationsPanel:Hide() end
 end
 function P.RenderPacket(packet, cells)
     cells=cells or P.cells
@@ -666,6 +674,7 @@ local function update()
         if not rendered then
             errorRecord("renderer",reason);if P.panel then P.panel:Hide() end;if P.combatPanel then P.combatPanel:Hide() end
             if P.portraitPanel then P.portraitPanel:Hide() end
+            if P.operationsPanel then P.operationsPanel:Hide() end
             return false
         end
         -- Failure of the optional extension must not break old WP1 readers.
@@ -675,12 +684,21 @@ local function update()
             if not good then errorRecord("combat.renderer",why);if P.combatPanel then P.combatPanel:Hide() end
             elseif P.combatPanel and WoWProbeDB.visible~=false then P.combatPanel:Show() end
         else errorRecord("combat.packet",combat);if P.combatPanel then P.combatPanel:Hide() end end
+        if P.BuildOperationsPacket then
+            local built,operations=pcall(P.BuildOperationsPacket,packet)
+            if built then
+                local good,why=pcall(P.RenderPacket,operations,P.operationsCells)
+                if not good then errorRecord("operations.renderer",why);if P.operationsPanel then P.operationsPanel:Hide() end
+                elseif P.operationsPanel and WoWProbeDB.visible~=false and WoWProbeDB.renderer.physicalWidth>=808 then P.operationsPanel:Show() end
+            else errorRecord("operations.packet",operations);if P.operationsPanel then P.operationsPanel:Hide() end end
+        end
         return true
     else
         -- A partially updated grid must never remain a seemingly live packet.
         errorRecord("packet", packet); if P.panel then P.panel:Hide() end
         if P.combatPanel then P.combatPanel:Hide() end
         if P.portraitPanel then P.portraitPanel:Hide() end
+        if P.operationsPanel then P.operationsPanel:Hide() end
         return false
     end
 end
@@ -701,7 +719,7 @@ local function printLine(text)
 end
 function P.ResetDiagnostics()
     local visible = type(WoWProbeDB) == "table" and WoWProbeDB.visible ~= false
-    WoWProbeDB = { schema = 1, addonVersion = "0.3.0", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
+    WoWProbeDB = { schema = 1, addonVersion = "0.5.0", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
     readClient(); captureBindings(); captureAPIs(); if P.panel then P.ScalePanel() end
 end
 function P.Command(command)
@@ -710,6 +728,7 @@ function P.Command(command)
     if command == "hide" then
         WoWProbeDB.visible = false;if P.panel then P.panel:Hide() end;if P.combatPanel then P.combatPanel:Hide() end
         if P.portraitPanel then P.portraitPanel:Hide() end
+        if P.operationsPanel then P.operationsPanel:Hide() end
     elseif command == "show" then
         WoWProbeDB.visible = true; P.ScalePanel(); if update() and P.panel then P.panel:Show() end
     elseif command == "reset" then
@@ -735,7 +754,7 @@ function P.Initialize()
     WoWProbeDB = old; WoWProbeDB.visible = visible
     if integer(old.rangeSlot,4) and old.rangeSlot>=1 then P.rangeSlot=old.rangeSlot end
     WoWProbeDB.previousSession = previous
-    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.3.0"
+    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.0"
     WoWProbeDB.errors, WoWProbeDB.bindings, WoWProbeDB.capabilities = {}, {}, {}
     readClient(); captureBindings(); captureAPIs()
     local ok, reason = pcall(createPanel)
@@ -749,6 +768,7 @@ function P.OnEvent(_, event, ...)
         return
     end
     if not P.initialized then return end
+    if P.OperationsEvent then P.OperationsEvent(event,...) end
     if event == "MERCHANT_SHOW" then P.merchantOpen, P.merchantKnown = true, true
     elseif event == "MERCHANT_CLOSED" then P.merchantOpen, P.merchantKnown = false, true
     elseif event == "LOOT_OPENED" then P.lootOpen, P.lootKnown = true, true;P.counters.lootOpened=(P.counters.lootOpened+1)%U32
@@ -789,7 +809,7 @@ local driver = CreateFrame("Frame")
 P.driver = driver
 driver:SetScript("OnEvent", function(...) local ok, reason = pcall(P.OnEvent, ...); if not ok then errorRecord("event", reason) end end)
 driver:SetScript("OnUpdate", P.Tick)
-for _, event in ipairs({"ADDON_LOADED", "PLAYER_ENTERING_WORLD", "PLAYER_LOGOUT", "UPDATE_BINDINGS", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "MERCHANT_SHOW", "MERCHANT_CLOSED", "LOOT_OPENED", "LOOT_CLOSED", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED"}) do
+for _, event in ipairs({"ADDON_LOADED", "PLAYER_ENTERING_WORLD", "PLAYER_LOGOUT", "UPDATE_BINDINGS", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "MERCHANT_SHOW", "MERCHANT_CLOSED", "LOOT_OPENED", "LOOT_CLOSED", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED", "BAG_UPDATE", "ITEM_LOCK_CHANGED"}) do
     local ok, reason = pcall(driver.RegisterEvent, driver, event)
     P.eventRegistration = P.eventRegistration or {}; P.eventRegistration[event] = ok
     if not ok then P.registrationErrors = P.registrationErrors or {}; P.registrationErrors[event] = tostring(reason) end

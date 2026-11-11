@@ -1,7 +1,8 @@
 ## Interface: 30300
 ## Title: WoWProbe
-## Notes: Read-only WP1 diagnostics and matching WC3 combat observation panels. No protected actions.
+## Notes: Read-only WP1, WC3 combat and WO4 recovery/inventory panels. No protected actions.
 ## Author: WoWProbe
-## Version: 0.3.0
+## Version: 0.5.0
 ## SavedVariables: WoWProbeDB
 WoWProbe.lua
+Operations.lua

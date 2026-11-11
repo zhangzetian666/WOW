@@ -69,6 +69,8 @@ local function load(env)
     local chunk, reason = loadfile("addon/WoWProbe/WoWProbe.lua")
     assert(chunk, "WoWProbe implementation must exist: " .. tostring(reason))
     setfenv(chunk, env); chunk()
+    local operations=loadfile("addon/WoWProbe/Operations.lua")
+    if operations then setfenv(operations,env);operations() end
     assert(type(env.WoWProbe) == "table", "WoWProbe module missing")
     env.WoWProbe.Initialize()
     return env.WoWProbe
@@ -482,7 +484,7 @@ test("WC3 second physical grid shares heartbeat sequence and safe portrait geome
     eq(wp.combatPanel.width,256);eq(wp.combatPanel.height,96);eq(#wp.combatCells,384)
     eq(wp.combatPanel.point[4],280);eq(wp.panel.point[4],8)
     eq(wp.combatPanel.scale,wp.panel.scale)
-    eq(has(b[57],1),true);eq(word(b,48),560);eq(word(b,50),8);eq(word(b,52),64);eq(word(b,54),64)
+    eq(has(b[57],1),true);eq(word(b,48),832);eq(word(b,50),8);eq(word(b,52),64);eq(word(b,54),64)
     assert(word(b,48)>=8+272+256,"portrait reference must not intersect either data grid")
     eq(dword(b,24),1);eq(dword(b,28),1);eq(dword(b,32),1);eq(dword(b,36),1);eq(dword(b,40),1)
     WoWProbeCombatCoreFixture=a;WoWProbeCombatTestFixture=b
@@ -529,6 +531,132 @@ test("WC3 retains range configuration after diagnostic reset and inventories pas
     eq(env.WoWProbeDB.rangeSlot,3)
     eq(env.WoWProbeDB.apiAvailability.UnitGUID,true);eq(env.WoWProbeDB.apiAvailability.UnitCanAttack,true)
     eq(env.WoWProbeDB.apiAvailability.UnitChannelInfo,true);eq(env.WoWProbeDB.apiAvailability.IsActionInRange,true)
+end)
+
+local function operationsEnvironment()
+    local env=combatEnvironment();env.GetCorpseRecoveryDelay=function() return 0 end;env.GetCursorInfo=function() return nil end
+    env.UnitName=function(unit) return unit=="npc" and "Vendor" or "Target" end
+    env.UnitGUID=function(unit) return unit=="npc" and "Creature-NPC-999" or "Creature-0-1-2-3-456-000001" end
+    env.UnitHealth=function(unit) return unit=="player" and 50 or 25 end
+    env.StaticPopupDialogs={DEATH={},RECOVER_CORPSE={}};env.STATICPOPUP_NUMDIALOGS=4
+    local function physical(o,x,y,w,h)
+        function o:GetRect() local scale=.75/(768/1080);return x/scale,(1080-y-h)/scale,w/scale,h/scale end
+        function o:GetEffectiveScale() return .75 end
+        function o:IsVisible() return self.shown end
+        function o:IsEnabled() return self.enabled~=false end
+        return o
+    end
+    for i=1,4 do env["StaticPopup"..i]=object();env["StaticPopup"..i]:Hide();env["StaticPopup"..i.."Button1"]=physical(object(),200,300,150,40) end
+    env.MerchantFrame:Show();env.MerchantFrame.selectedTab=1
+    env.GetContainerNumSlots=function(bag) return bag==0 and 2 or bag==1 and 1 or 0 end
+    env.GetContainerItemInfo=function(bag,slot) if bag==0 and slot==2 then return nil end;return 100,2,false,0,false,false,"|Hitem:1001:0:0:0:0:0:0:0|h[Scrap]|h" end
+    env.GetContainerItemQuestInfo=function() return false,nil,false end
+    env.GetItemInfo=function() return "Scrap","|Hitem:1001:0:0:0:0:0:0:0|h[Scrap]|h",0,1,1,"Miscellaneous","Junk",20,"",100,7 end
+    env.GetItemClassInfo=function(id) eq(id,0);return "Consumable" end
+    local container=object();function container:GetID() return 0 end;function container:GetName() return "ContainerFrame1" end;env.ContainerFrame1=container
+    local b1=physical(object(),1600,800,35,35);function b1:GetID() return 2 end;env.ContainerFrame1Item1=b1
+    local b2=physical(object(),1700,800,35,35);function b2:GetID() return 1 end;env.ContainerFrame1Item2=b2
+    return env
+end
+test("WO4 unknown APIs remain unknown without breaking WP1 or WC3",function()
+    local env=combatEnvironment();local wp=load(env);local a,b,c=wp.BuildPackets();eq(#a,128);eq(#b,128);eq(#c,128);eq(c[1],87);eq(c[2],79);eq(c[3],52)
+    eq(has(word(c,6),16),false);eq(has(word(c,6),1),false);eq(dword(c,26),4294967295)
+end)
+test("WO4 uses actual merchant npc identity instead of selected target",function()
+    local env=operationsEnvironment();local wp=load(env);local p=wp.BuildOperationsPacket(wp.BuildPacket())
+    eq(has(word(p,6),8),true);eq(has(word(p,8),16),true);eq(dword(p,88),wp.HashUTF8("Creature-NPC-999"));eq(dword(p,92),wp.HashUTF8("Vendor"))
+    env.UnitGUID=function(unit) if unit=="target" then return "Selected-target" end end
+    p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,6),8),false);eq(dword(p,88),0)
+end)
+test("WO4 release resurrection cooldown and incoming resurrection never invoke actions",function()
+    local env=operationsEnvironment();local calls=0;env.RepopMe=function() calls=calls+1 end;env.RetrieveCorpse=function() calls=calls+1 end
+    env.StaticPopup1:Show();env.StaticPopup1.which="DEATH";local wp=load(env);local p=wp.BuildOperationsPacket(wp.BuildPacket())
+    eq(has(word(p,6),1),true);eq(has(word(p,8),1),true);eq(has(word(p,8),2),true);eq(word(p,10),200);eq(word(p,12),300)
+    env.StaticPopup1.which="RECOVER_CORPSE";env.GetCorpseRecoveryDelay=function() return 1.25 end
+    p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,8),4),true);eq(dword(p,26),1250)
+    env.StaticPopup1.which="RESURRECT_NO_SICKNESS";p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,8),128),true);eq(has(word(p,8),4),false);eq(calls,0)
+end)
+test("WO4 confirmation unknown frames and hidden buttons are conservative",function()
+    local env=operationsEnvironment();local wp=load(env);env.StaticPopup1:Show();env.StaticPopup1.which="CONFIRM_SELL_ITEM"
+    local p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,6),64),true);eq(has(word(p,8),64),true)
+    env.StaticPopup2=nil;p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,6),64),false);eq(has(word(p,6),1),false)
+end)
+test("WO4 inventories actual bag capacities and every occupied slot",function()
+    local env=operationsEnvironment();local wp=load(env);wp.operationsState.page=0
+    local p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,6),16),true);eq(p[97],2);eq(p[98],1);eq(p[102],1);eq(p[107],1);eq(word(p,60),3)
+    eq(p[63],0);eq(p[64],1);eq(dword(p,64),1001);eq(word(p,68),2);eq(p[71],0);eq(has(p[72],8),true);eq(has(p[72],32),true);eq(has(p[72],64),true);eq(dword(p,72),7)
+end)
+test("WO4 inventory pagination handles empty slots and cycle completion",function()
+    local env=operationsEnvironment();local wp=load(env);wp.operationsState.page=0;wp.operationsState.cycle=0
+    local a=wp.BuildOperationsPacket(wp.BuildPacket());local b=wp.BuildOperationsPacket(wp.BuildPacket());local c=wp.BuildOperationsPacket(wp.BuildPacket())
+    eq(word(a,58),0);eq(word(b,58),1);eq(has(b[72],16),true);eq(dword(b,64),0);eq(dword(b,72),0);eq(word(c,58),2);eq(dword(c,54),1)
+end)
+test("WO4 metadata quest and consumable knowledge cannot be inferred from missing APIs",function()
+    local env=operationsEnvironment();local wp=load(env);env.GetItemInfo=nil;wp.operationsState.page=0
+    local p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,6),16),true);eq(has(p[72],8),false);eq(p[71],255);eq(dword(p,72),4294967295)
+    env.GetContainerItemQuestInfo=nil;wp.operationsState.page=0;p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(p[72],32),false)
+end)
+test("WO4 item rectangle matches actual slot GetID not reversed button suffix",function()
+    local env=operationsEnvironment();local wp=load(env);wp.operationsState.page=0
+    local p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,6),1024),true);eq(word(p,80),1700);eq(word(p,82),800)
+    env.ContainerFrame1Item2:Hide();wp.operationsState.page=0;p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,6),1024),false)
+end)
+test("WO4 buyback tab is never advertised as the sell tab",function()
+    local env=operationsEnvironment();local wp=load(env);env.MerchantFrame.selectedTab=2
+    local p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,6),4096),true);eq(has(word(p,8),256),false)
+    env.MerchantFrame.selectedTab=nil;p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,6),4096),false)
+end)
+test("WO4 event registration failures withhold inventory and qualified error counters",function()
+    local env=operationsEnvironment();local wp=load(env);wp.OnEvent(nil,"BAG_UPDATE",0);wp.OnEvent(nil,"UI_ERROR_MESSAGE",1,env.ERR_INV_FULL)
+    wp.operationsState.page=0;local p=wp.BuildOperationsPacket(wp.BuildPacket());eq(dword(p,38),1);eq(dword(p,42),1)
+    wp.OnEvent(nil,"UI_ERROR_MESSAGE",1,"special bag full");p=wp.BuildOperationsPacket(wp.BuildPacket());eq(dword(p,42),1)
+    wp.eventRegistration.BAG_UPDATE=false;p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,6),16),false);eq(dword(p,38),0)
+    wp.eventRegistration.UI_ERROR_MESSAGE=false;p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,6),256),false);eq(dword(p,42),0)
+end)
+test("WO4 oversized bags unknown cursor and missing rectangle geometry remain unavailable",function()
+    local env=operationsEnvironment();env.GetContainerNumSlots=function() return 41 end;env.GetCursorInfo=nil;local wp=load(env)
+    local p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,6),16),false);eq(has(word(p,6),32),false)
+    env.StaticPopup1:Show();env.StaticPopup1.which="DEATH";env.StaticPopup1Button1.GetRect=nil
+    p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,6),1),false)
+end)
+test("WO4 modern quest nil or incomplete metadata cannot declare a safe nonquest item",function()
+    local env=operationsEnvironment();env.C_Container={GetContainerItemQuestInfo=function() return nil end};local wp=load(env);wp.operationsState.page=0
+    local p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(p[72],32),false)
+    env.C_Container.GetContainerItemQuestInfo=function() return {} end;wp.operationsState.page=0;p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(p[72],32),false)
+    env.C_Container.GetContainerItemQuestInfo=function() return {isQuestItem=true} end;wp.operationsState.page=0;p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(p[72],32),true);eq(has(p[72],2),true)
+end)
+test("WO4 conflicting item identity or quality never claims complete metadata",function()
+    local env=operationsEnvironment();env.C_Container={GetContainerItemInfo=function() return {iconFileID=100,stackCount=2,isLocked=false,quality=0,hyperlink="|Hitem:1001:0|hTest|h",itemID=2002} end};local wp=load(env);wp.operationsState.page=0
+    local p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(p[72],8),false);eq(dword(p,76),0)
+    env.C_Container.GetContainerItemInfo=function() return {iconFileID=100,stackCount=2,isLocked=false,quality=1,hyperlink="|Hitem:1001:0|hTest|h",itemID=1001} end;wp.operationsState.page=0
+    p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(p[72],8),false)
+end)
+test("WO4 inventory mutation during a metadata callback discards the mixed revision",function()
+    local env=operationsEnvironment();local wp=load(env);local original=env.GetItemInfo
+    env.GetItemInfo=function(...) wp.OnEvent(nil,"BAG_UPDATE",0);return original(...) end;wp.operationsState.page=0
+    local p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,6),16),false);eq(word(p,60),0);eq(dword(p,38),0);eq(dword(p,76),0)
+end)
+test("WO4 optional rendering failure never hides the original two grids",function()
+    local env=operationsEnvironment();local wp=load(env);wp.operationsCells[1].SetColorTexture=function() error("WO4 draw failure") end
+    wp.Tick(nil,.2);eq(wp.panel.shown,true);eq(wp.combatPanel.shown,true);eq(wp.operationsPanel.shown,false)
+    wp.Command("hide");eq(wp.operationsPanel.shown,false)
+end)
+test("WO4 layout token is stable across dialogs and changes with physical layout",function()
+    local env=operationsEnvironment();local wp=load(env);local initial=dword(wp.BuildOperationsPacket(wp.BuildPacket()),34)
+    env.StaticPopup1:Show();env.StaticPopup1.which="DEATH"
+    eq(dword(wp.BuildOperationsPacket(wp.BuildPacket()),34),initial,"death dialog must not invalidate the whole armed campaign")
+    env.StaticPopup1.which="RECOVER_CORPSE"
+    eq(dword(wp.BuildOperationsPacket(wp.BuildPacket()),34),initial,"resurrection dialog is normal state transition")
+    env.GetPhysicalScreenSize=function() return 2560,1440 end;wp.ScalePanel()
+    assert(dword(wp.BuildOperationsPacket(wp.BuildPacket()),34)~=initial,"resolution change must invalidate layout")
+    env.GetPhysicalScreenSize=function() return 1920,1080 end;env.UIParent.GetEffectiveScale=function() return .8 end;wp.ScalePanel()
+    assert(dword(wp.BuildOperationsPacket(wp.BuildPacket()),34)~=initial,"UI scale change must invalidate layout")
+end)
+test("WO4 physical rendering shares sequence and never overlaps portrait",function()
+    local env=operationsEnvironment();local wp=load(env);wp.Tick(nil,.2);wp.operationsState.page=0
+    local a,b,c=wp.BuildPackets();eq(word(a,4),word(b,4));eq(word(a,4),word(c,4));eq(wp.operationsPanel.point[4]-wp.panel.point[4],544);eq(#wp.operationsCells,384)
+    eq(wp.portraitPanel.point[4],832);assert(832>=8+544+256)
+    WoWProbeOperationsCoreFixture=a;WoWProbeOperationsCombatFixture=b;WoWProbeOperationsTestFixture=c
 end)
 
 for _, t in ipairs(tests) do

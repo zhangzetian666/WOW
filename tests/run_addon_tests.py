@@ -22,4 +22,7 @@ def export_packet(global_name, file_name):
 export_packet('WoWProbeTestFixture', 'lua-packet.bin')
 export_packet('WoWProbeCombatCoreFixture', 'lua-combat-core.bin')
 export_packet('WoWProbeCombatTestFixture', 'lua-combat-packet.bin')
-print('Exported real Lua 5.1 WP1 and sequence-matched WP1/WC3 packets for cross-language decoding.')
+export_packet('WoWProbeOperationsCoreFixture', 'lua-operations-core.bin')
+export_packet('WoWProbeOperationsCombatFixture', 'lua-operations-combat.bin')
+export_packet('WoWProbeOperationsTestFixture', 'lua-operations-packet.bin')
+print('Exported real Lua 5.1 WP1 and sequence-matched WP1/WC3/WO4 packets for cross-language decoding.')
