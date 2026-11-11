@@ -43,6 +43,7 @@ namespace WoWProbe
         }
     }
     public enum NavigationAction { None, Forward, TurnLeft, TurnRight, StrafeLeft, StrafeRight, Jump, Stop, Completed }
+    public enum NavigationPurpose { Patrol, CorpseRun, VendorReturn }
     public sealed class NavigationCommand
     {
         public NavigationAction Action;
@@ -54,16 +55,20 @@ namespace WoWProbe
         private readonly RouteDocument route;
         private readonly NavigationCalibration calibration;
         private readonly bool loop;
+        private readonly NavigationPurpose purpose;
         private bool stopped, hasTime, hasSequence, hasForwardAnchor, retreating;
         private int sequence, arrivalCount, lastReached = -1, pendingForwardMs;
         private long lastTime, targetStarted, arrivalTime, pendingIssued, forwardMs;
         private double anchorX, anchorY;
 
         public Navigator(RouteDocument original, NavigationCalibration calibration, bool reverse, bool loop, int startIndex)
+            :this(original,calibration,reverse,loop,startIndex,NavigationPurpose.Patrol) { }
+        public Navigator(RouteDocument original, NavigationCalibration calibration, bool reverse, bool loop, int startIndex,NavigationPurpose purpose)
         {
+            if(purpose!=NavigationPurpose.Patrol&&purpose!=NavigationPurpose.CorpseRun&&purpose!=NavigationPurpose.VendorReturn)throw new ArgumentOutOfRangeException("purpose");
             route = NavigationMath.Prepare(original, calibration, reverse, loop, startIndex);
             this.calibration = calibration.Clone();
-            this.loop = loop;
+            this.loop = loop;this.purpose=purpose;
             TargetIndex = startIndex;
             Completed = startIndex == route.Points.Count;
             Status = Completed ? "Completed" : "Ready";
@@ -171,7 +176,10 @@ namespace WoWProbe
         {
             if (sample == null || !sample.Fresh) return "Fresh position, facing and map data are required.";
             if (!sample.KnownCore || sample.ReadFailures != 0) return "Core state is unknown or a game API read failed.";
-            if (sample.Dead || sample.Ghost || sample.Combat || sample.BagFull) return "Dead, ghost, combat or full-bag state stopped navigation.";
+            if(sample.Combat)return "Combat stopped navigation.";
+            if(purpose==NavigationPurpose.CorpseRun)
+            {if(!sample.Ghost)return "Corpse navigation requires the player's actual known ghost state.";}
+            else if(sample.Dead||sample.Ghost||(purpose==NavigationPurpose.Patrol&&sample.BagFull))return "Dead, ghost or full-bag state stopped navigation.";
             if (sample.MapId != route.MapId || sample.MapMode != route.MapMode || !String.Equals(sample.Zone, route.Zone, StringComparison.Ordinal))
                 return "Map identity, map mode or zone changed.";
             if (!NavigationMath.InRange(sample.X, 0, 1) || !NavigationMath.InRange(sample.Y, 0, 1) || !NavigationMath.Finite(sample.Facing))

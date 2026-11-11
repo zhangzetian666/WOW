@@ -10,6 +10,9 @@ internal static class NavigationTests
     {
         Run("calibration rejects invalid numeric bounds and route identity", CalibrationValidation);
         Run("sample conversion retains unavailable and dangerous packet states", PacketConversion);
+        Run("explicit corpse travel preserves real ghost state and rejects living travel", CorpsePurpose);
+        Run("explicit vendor travel allows full bags but still rejects death and combat", VendorPurpose);
+        Run("navigation purpose values are validated without weakening default patrol", PurposeValidation);
         Run("cardinal bearings and shortest wrap choose the correct turn", CompassGeometry);
         Run("aspect ratio and facing sign and offset affect planning", CalibratedGeometry);
         Run("approach pulses shrink and remain within their bounds", PulseBounds);
@@ -65,6 +68,26 @@ internal static class NavigationTests
     { return new NavigationSample { X = x, Y = y, Facing = rawFacing, MapId = 12, MapMode = 1, Zone = "Test zone", Sequence = seq, Fresh = true, KnownCore = true }; }
     private static Navigator New(RouteDocument r, int start)
     { return new Navigator(r, Calibration(), false, false, start); }
+    private static void CorpsePurpose()
+    {
+        var route=Route(.5,.4,.5,.3);var ghost=Sample(1,.5,.5,0);ghost.Ghost=true;ghost.Dead=true;ghost.BagFull=true;
+        var nav=new Navigator(route,Calibration(),false,false,0,NavigationPurpose.CorpseRun);
+        Equal(NavigationAction.Forward,nav.Step(ghost,0).Action,"ghost movement allowed only by explicit purpose");Check(ghost.Ghost&&ghost.Dead&&ghost.BagFull,"actual observations not rewritten");
+        var alive=Sample(1,.5,.5,0);nav=new Navigator(route,Calibration(),false,false,0,NavigationPurpose.CorpseRun);Equal(NavigationAction.Stop,nav.Step(alive,0).Action,"living corpse route refused");
+        ghost.Combat=true;nav=new Navigator(route,Calibration(),false,false,0,NavigationPurpose.CorpseRun);Equal(NavigationAction.Stop,nav.Step(ghost,0).Action,"ghost combat refused");
+        ghost.Combat=false;ghost.Fresh=false;nav=new Navigator(route,Calibration(),false,false,0,NavigationPurpose.CorpseRun);Equal(NavigationAction.Stop,nav.Step(ghost,0).Action,"stale ghost refused");
+    }
+    private static void VendorPurpose()
+    {
+        var route=Route(.5,.4,.5,.3);var full=Sample(1,.5,.5,0);full.BagFull=true;
+        var nav=new Navigator(route,Calibration(),false,false,0,NavigationPurpose.VendorReturn);Equal(NavigationAction.Forward,nav.Step(full,0).Action,"full bags may return");Check(full.BagFull,"actual full bag state retained");
+        foreach(string danger in new[]{"dead","ghost","combat"}){full=Sample(1,.5,.5,0);full.BagFull=true;full.Dead=danger=="dead";full.Ghost=danger=="ghost";full.Combat=danger=="combat";nav=new Navigator(route,Calibration(),false,false,0,NavigationPurpose.VendorReturn);Equal(NavigationAction.Stop,nav.Step(full,0).Action,danger+" still stops vendor travel");}
+    }
+    private static void PurposeValidation()
+    {
+        var route=Route(.5,.4,.5,.3);Throws(delegate{new Navigator(route,Calibration(),false,false,0,(NavigationPurpose)99);});
+        var full=Sample(1,.5,.5,0);full.BagFull=true;Equal(NavigationAction.Stop,New(route,0).Step(full,0).Action,"default patrol unchanged");
+    }
     private static void CalibrationValidation()
     {
         Calibration().Validate();
