@@ -4,7 +4,7 @@
   "name": "Simulation square (synthetic map)",
   "route_type": "farm",
   "map_id": 900001,
-  "map_mode": 1,
+  "map_mode": 2,
   "zone": "Simulation only",
   "reverse_policy": "allowed",
   "loop": false,
