@@ -160,3 +160,21 @@ CombatTelemetryTests 带两份 Lua 文件参数时显示 12/12，其中包含已
 文件重解析点/符号链接的实际对象探针受限，未登记为专项运行通过，相关分支做了静态检查。该限制与本轮已通过的普通路径、PNG 边界、日志轮转和证据复制检查分开记录。
 
 使用与反馈见 [完整指南](complete-testing.md)；各客户端能力与所有待测项见 [能力矩阵](capability-matrix.md)。
+
+# v0.6 交接、自检与反馈验证记录
+
+Windows工具目标版本0.6.0，兼容插件保留0.5.0及既有三面板协议。新模块为完整方案保存/载入、严格断点一致性、启动前自检及只读反馈摘要；使用步骤见 [交接指南](readiness-testing.md)。
+
+构建脚本已接入CampaignBundleTests、CampaignCheckpointTests、FeedbackSummaryTests、CampaignPreflightTests与ReadinessUiTests，并保留原域测试、Lua/跨语言、启动失败、桌面与完整界面流程。压缩功能只使用系统Framework程序集，没有新增NuGet依赖。
+
+本轮完整 `verify.ps1` 已退出0，未使用 `-SkipDesktopSmoke`。C#域检查433项、Lua 5.1检查60项，合计493项通过、0失败；另通过5项跨语言/像素检查。四组新增专用检查为CampaignBundleTests 21项、CampaignCheckpointTests 6项、FeedbackSummaryTests 25项、CampaignPreflightTests 16项，合计68项；OperationsTelemetryTests另新增1项客户端元数据来源回归。互通时重复执行的基础项不再次计入493项。完整日志为 `test-output/verify-v060.log`；上文0.5.0的424项保留为历史记录。
+
+真实桌面模拟色块捕获通过，`screen_capture=true`、`packet_decoded=true`、`input_emitted=false`。主窗口、路线、战斗、完整工作区四个预览均为真实桌面捕获，已逐一查看，无裁切，完整工作区新增按钮可见。路线界面、战斗界面6场景、完整工作区6场景及2项既有前置回归均通过；新增ReadinessUiTests 7场景通过，覆盖路线/战斗/标定导入保留未保存设置、方案往返及方向/循环、清空实机确认、只读自检、损坏方案不替换当前计划、只读反馈和本轮事件隔离。头像文件往返及启动条件边界另由域检查覆盖。各界面测试报告记录 `native_backend_requests=0`、`input_events=0`。界面与启动失败检查单独登记，不混入493项域检查。
+
+隔离启动失败2项通过：日志准备失败不留下启动会话，模拟后端工厂抛错后关闭日志并清理会话。故意请求的假工厂没有构造真实Windows输入后端，输入事件为0。本轮两小时虚拟压力为 `virtual_elapsed_ms=7200136`、37,202步、88次恢复及88次商人循环，`wall_ms=36`、`input=0`；虚拟时长与实际耗时分开登记，不构成游戏连续运行验收。
+
+独立界面复核未发现问题；纯逻辑复核的两个P2均先增加失败复现，再修正并通过回归：当前已保存且可攻击目标的已配置技能槽，技能知识未知时必须阻断，技能冷却仍保留为运行时检查；simulation来源日志的头部/观察项 `native_input_events` 非0或格式非法必须拒绝，旧日志缺值只警告，不推断为0。当前无未关闭的P1/P2。脚本语法、UTF8 BOM、Framework压缩引用、Markdown本地链接与差异格式检查也已通过。
+
+已生成并核对 `dist/WoWProbe-Complete-0.6.0.zip`：42个归档项、40个文件，35个源文件逐字一致，71个包内Markdown相对链接均可解析。首轮核对发现根目录中文验证文档副本的相对链接失效；修正为根目录中文索引并链接正式 `docs/verification.md` 与 `docs/readiness-testing.md` 后，重新打包核对通过。包内执行文件为0.6.0.0、兼容插件为0.5.0，默认实机确认关闭且仅出售灰色物品，无用户数据或测试程序。旧0.5.0包SHA256未变，Phase1/2/3包保留。
+
+本轮文档纳入最终包后仍需重新生成旁置SHA256并完成文档提交、远程同步核对；中间包哈希不写入本记录，也不嵌入被校验包内。所有游戏接口、真实动作和至少两小时游戏运行仍待游戏电脑实测。
