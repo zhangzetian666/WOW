@@ -25,6 +25,7 @@ namespace WoWProbe
         sealed class OwnedOutput{public string Path;public DateTime Utc;public bool Snapshot;}
         sealed class SnapshotEvidence{public string file,utc,reason;}
         public RunJournal(string directory,bool simulation):this(directory,simulation,delegate{return DateTime.UtcNow;}){}
+        public string RunId{get{return runId;}}
         public RunJournal(string directory,bool simulation,Func<DateTime> utcNow)
         {
             if(String.IsNullOrWhiteSpace(directory))throw new ArgumentException("Journal directory is required.","directory");if(utcNow==null)throw new ArgumentNullException("utcNow");

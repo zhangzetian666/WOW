@@ -21,6 +21,7 @@ namespace WoWProbe
     public sealed class OperationObservation
     {
         public FarmObservation Farm=new FarmObservation();
+        public string ClientVersion="";public uint ClientBuild,ClientInterfaceVersion;
         public int Sequence,FreeSlots=-1,ClientWidth,ClientHeight,RecoveryDelayMs=-1,PageIndex,TotalSlots;
         public uint MapId,LayoutToken,InventoryRevision,BagFullEvents,MerchantOpened,MerchantClosed,InventoryCycle,MerchantTargetToken,MerchantNameHash;
         public double CorpseX=Double.NaN,CorpseY=Double.NaN;public InventoryItem Item=new InventoryItem();public byte[] BagSizes=new byte[5],Occupancy=new byte[25];
@@ -43,7 +44,7 @@ namespace WoWProbe
         public static OperationObservation FromPackets(ProbePacket core,CombatPacket combat,OperationsPacket operations,bool fresh)
         {
             var o=new OperationObservation{Farm=FarmObservation.FromPackets(core,combat,fresh)};if(core==null)return o;
-            o.Sequence=core.Sequence;o.MapId=core.MapId;o.FreeSlotsKnown=(core.Capabilities&16)!=0;o.FreeSlots=core.FreeSlots;
+            o.Sequence=core.Sequence;o.MapId=core.MapId;o.FreeSlotsKnown=(core.Capabilities&16)!=0;o.FreeSlots=core.FreeSlots;o.ClientVersion=core.ClientVersion;o.ClientBuild=core.Build;o.ClientInterfaceVersion=core.InterfaceVersion;
             o.CorpseKnown=(core.Capabilities&128)!=0;if(o.CorpseKnown){o.CorpseX=core.CorpseX;o.CorpseY=core.CorpseY;}
             if(operations==null||combat==null||core.Sequence!=operations.Sequence||core.Sequence!=combat.Sequence)return o;
             operations.ApplyTo(o);o.Fresh=o.Farm.Fresh;
@@ -63,7 +64,7 @@ namespace WoWProbe
         {
             if(o==null)throw new ArgumentNullException("observation");var c=value.Clone();
             foreach(FieldInfo f in typeof(OperationObservation).GetFields(BindingFlags.Public|BindingFlags.Instance))
-                if(f.Name!="Farm"&&f.Name!="Fresh"&&f.Name!="MapId"&&f.Name!="CorpseKnown"&&f.Name!="CorpseX"&&f.Name!="CorpseY"&&f.Name!="FreeSlotsKnown"&&f.Name!="FreeSlots")f.SetValue(o,f.GetValue(c));
+                if(f.Name!="Farm"&&f.Name!="Fresh"&&f.Name!="MapId"&&f.Name!="CorpseKnown"&&f.Name!="CorpseX"&&f.Name!="CorpseY"&&f.Name!="FreeSlotsKnown"&&f.Name!="FreeSlots"&&f.Name!="ClientVersion"&&f.Name!="ClientBuild"&&f.Name!="ClientInterfaceVersion")f.SetValue(o,f.GetValue(c));
         }
         public static OperationsPacket Decode(byte[] bytes)
         {
