@@ -44,6 +44,7 @@ namespace WoWProbe
         [DllImport("user32.dll")] public static extern bool SetProcessDPIAware();
         [DllImport("user32.dll")] static extern uint MapVirtualKey(uint code, uint mapType);
         [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, INPUT[] input, int size);
+        [DllImport("user32.dll", SetLastError=true)] static extern bool SetCursorPos(int x,int y);
         public static int InputStructureSize { get { return Marshal.SizeOf(typeof(INPUT)); } }
 
         public static List<WindowInfo> Windows()
@@ -112,6 +113,16 @@ namespace WoWProbe
                 Key=0, Scan=(ushort)scan, Flags=8u | (up ? 2u : 0u), Extra=UIntPtr.Zero } } };
             if (SendInput(1, new INPUT[] {input}, InputStructureSize) != 1)
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "按键未发送。请确认工具与游戏以相同权限运行。");
+        }
+        public static void MoveMouse(Point screen)
+        {
+            if(!SystemInformation.VirtualScreen.Contains(screen))throw new ArgumentException("鼠标位置超出有效屏幕。");
+            if(!SetCursorPos(screen.X,screen.Y))throw new Win32Exception(Marshal.GetLastWin32Error(),"鼠标移动失败。");
+        }
+        public static void SendMouseButton(bool right,bool up)
+        {
+            var input=new INPUT{Type=0,Data=new INPUTUNION{Mouse=new MOUSEINPUT{Flags=right?(up?16u:8u):(up?4u:2u),Extra=UIntPtr.Zero}}};
+            if(SendInput(1,new INPUT[]{input},InputStructureSize)!=1)throw new Win32Exception(Marshal.GetLastWin32Error(),"鼠标按钮未发送。");
         }
     }
 

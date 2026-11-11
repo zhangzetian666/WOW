@@ -160,7 +160,7 @@ namespace WoWProbe
         }
         bool CompletedInteraction(FarmObservation o)
         {return command!=null&&((command.Action==FarmAction.Interact&&o.LootEventsKnown&&o.LootOpened!=lootOpenAtSend&&o.LootClosed!=lootCloseAtSend)||(command.Action==FarmAction.Skin&&o.SkinSuccessKnown&&o.SkinSuccess!=skinAtSend));}
-        static string TargetProblem(FarmObservation o,FarmCommand c,bool before,uint expectedHash,BattleProfile p)
+        internal static string TargetProblem(FarmObservation o,FarmCommand c,bool before,uint expectedHash,BattleProfile p)
         {
             if(c==null)return null;
             if(before&&(o.Casting||o.Channeling))return "Casting or channeling changed before pending input.";
@@ -196,7 +196,7 @@ namespace WoWProbe
             }
             return null;
         }
-        static string GlobalProblem(FarmObservation o,RouteDocument route,BattleProfile p)
+        internal static string GlobalProblem(FarmObservation o,RouteDocument route,BattleProfile p)
         {
             if(o==null||!o.Fresh)return "Matching combat observations are unavailable or stale.";
             if(!o.KnownCore||o.ReadFailures!=0)return "Required core state is unknown or an API read failed.";
