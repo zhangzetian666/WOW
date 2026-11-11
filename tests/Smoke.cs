@@ -15,33 +15,59 @@ namespace WoWProbe
         {
             Native.SetProcessDPIAware();Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
             if(args.Length>0&&args[0]=="--route-ui-preview")return RoutePreview();
+            if(args.Length>0&&args[0]=="--farm-ui-preview")return FarmPreview();
             return args.Length>0 && args[0]=="--ui-preview"?Preview():Run();
         }
         public static int RoutePreview()
         {
-            string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output");Directory.CreateDirectory(directory);
+            string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output");Directory.CreateDirectory(directory);int exit=1;
             using(var form=new RouteForm(delegate{return new RouteTelemetry();},delegate{return null;},null,null))
             using(var timer=new System.Windows.Forms.Timer{Interval=500})
             {
-                timer.Tick+=delegate{timer.Stop();using(var image=Native.Capture(form.Bounds))image.Save(Path.Combine(directory,"route-ui.png"),System.Drawing.Imaging.ImageFormat.Png);form.Close();};
+                timer.Tick+=delegate{timer.Stop();try{exit=SaveUiPreview(form,directory,"route-ui");}finally{form.Close();}};
                 form.Shown+=delegate{form.Hide();form.Show();form.Activate();form.Refresh();timer.Start();};Application.Run(form);
             }
-            return 0;
+            return exit;
+        }
+        public static int FarmPreview()
+        {
+            string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output");Directory.CreateDirectory(directory);int exit=1;
+            // This preview never selects a game window or creates an input backend.
+            using(var form=new FarmForm(delegate{return new FarmObservation();},delegate{return null;},null,null,null,new InputFailureLatch()))
+            using(var timer=new System.Windows.Forms.Timer{Interval=500})
+            {
+                timer.Tick+=delegate{
+                    timer.Stop();
+                    try{exit=SaveUiPreview(form,directory,"farm-ui");}
+                    finally{form.Close();}
+                };
+                form.Shown+=delegate{form.Hide();form.Show();form.Activate();form.Refresh();timer.Start();};Application.Run(form);
+            }
+            return exit;
         }
         public static int Preview()
         {
-            string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output");Directory.CreateDirectory(directory);
+            string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output");Directory.CreateDirectory(directory);int exit=1;
             using(var form=new ProbeForm())
             using(var timer=new System.Windows.Forms.Timer {Interval=500})
             {
                 timer.Tick+=delegate {
                     timer.Stop();
-                    using(var image=Native.Capture(form.Bounds)) {image.Save(Path.Combine(directory,"tool-ui.png"),System.Drawing.Imaging.ImageFormat.Png);}
-                    form.Close();
+                    try{exit=SaveUiPreview(form,directory,"tool-ui");}finally{form.Close();}
                 };
                 form.Shown+=delegate{form.Hide();form.Show();form.Activate();form.Refresh();timer.Start();};Application.Run(form);
             }
-            return 0;
+            return exit;
+        }
+        // Only UI previews may fall back to rendering their owned form. Run() below
+        // continues to require a real desktop capture and packet roundtrip.
+        static int SaveUiPreview(Form form,string directory,string name)
+        {
+            try{
+                try{using(var image=Native.Capture(form.Bounds))image.Save(Path.Combine(directory,name+".png"),System.Drawing.Imaging.ImageFormat.Png);File.WriteAllText(Path.Combine(directory,name+"-preview.txt"),"desktop_capture");}
+                catch(Exception captureError){using(var image=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(image,new Rectangle(Point.Empty,form.Size));image.Save(Path.Combine(directory,name+".png"),System.Drawing.Imaging.ImageFormat.Png);}File.WriteAllText(Path.Combine(directory,name+"-preview.txt"),"owned_form_render; desktop capture unavailable: "+captureError.Message);}
+                return 0;
+            }catch(Exception ex){File.WriteAllText(Path.Combine(directory,name+"-error.txt"),ex.ToString());return 1;}
         }
         static void Put16(byte[] b,int i,int n){b[i]=(byte)n;b[i+1]=(byte)(n>>8);}
         static void Put32(byte[] b,int i,int n){for(int k=0;k<4;k++)b[i+k]=(byte)(n>>(8*k));}

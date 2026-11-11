@@ -51,6 +51,7 @@ namespace WoWProbe
         WindowInfo target;
         volatile InputGuard guard;
         ProbePacket packet;
+        CombatPacket combatPacket;
         Point clientCenter;
         Bitmap lastGrid;
         bool calibrated,reading,closing;
@@ -58,11 +59,12 @@ namespace WoWProbe
         string lastError="等待选择游戏窗口并定位色块。";
         string previousGuardStatus="";
         RouteForm routeWindow;
+        FarmForm farmWindow;
         readonly Dictionary<string, ushort> keyCodes=new Dictionary<string, ushort>();
 
         public ProbeForm()
         {
-            Text="环境与能力检测 · 路线工具  v0.2.0";
+            Text="状态检测 · 路线与基础打怪  v0.3.0";
             Font=new Font("Microsoft YaHei UI",9F);
             BackColor=Color.FromArgb(247,249,252);
             ForeColor=Color.FromArgb(24,35,52);
@@ -136,11 +138,12 @@ namespace WoWProbe
             var bottom=Row();bottom.Dock=DockStyle.Fill;main.Controls.Add(bottom,0,5);
             bottom.Controls.Add(Button("导出本轮测试报告",ExportReport));
             bottom.Controls.Add(Button("路线录制与巡航",OpenRoutes));
-            bottom.Controls.Add(new Label {AutoSize=true,Text="报告在 reports 中。路线工具可离线模拟。",Margin=new Padding(10,10,0,0)});
+            bottom.Controls.Add(Button("目标与基础打怪",OpenFarming));
+            bottom.Controls.Add(new Label {AutoSize=true,Text="支持无游戏离线模拟。",Margin=new Padding(10,10,0,0)});
             poll.Interval=200;poll.Tick+=delegate { ReadTick(); };poll.Start();
             picker.Interval=1000;picker.Tick+=delegate { PickTick(); };
             watchdog=new System.Threading.Timer(delegate { try { InputGuard g=guard;if(g!=null){g.Tick();if(g.Status=="Faulted")inputSafety.Fail(g.LastReason);} } catch { InputGuard g=guard;if(g!=null){g.Stop("输入监控异常");if(g.Status=="Faulted")inputSafety.Fail(g.LastReason);} } },null,25,25);
-            FormClosing+=delegate { closing=true;poll.Stop();picker.Stop();Stop("检测工具关闭");if(routeWindow!=null&&!routeWindow.IsDisposed)routeWindow.Close();watchdog.Dispose();if(lastGrid!=null)lastGrid.Dispose(); };
+            FormClosing+=delegate { closing=true;poll.Stop();picker.Stop();Stop("检测工具关闭");if(routeWindow!=null&&!routeWindow.IsDisposed)routeWindow.Close();if(farmWindow!=null&&!farmWindow.IsDisposed)farmWindow.Close();watchdog.Dispose();if(lastGrid!=null)lastGrid.Dispose(); };
             RefreshWindows();
         }
 
@@ -157,7 +160,7 @@ namespace WoWProbe
         { lock(stateLock) return !inputSafety.Faulted && reading && calibrated && InputEligibility.Allows(packet,heartbeat.IsFresh(clock.ElapsedMilliseconds)); }
 
         void Stop(string reason)
-        { Log(reason);InputGuard g=guard;if(g!=null){g.Stop(reason);if(g.Status=="Faulted")inputSafety.Fail(g.LastReason);}if(routeWindow!=null&&!routeWindow.IsDisposed)routeWindow.StopExternal(reason);if(!closing) {consent.Checked=false;actionStatus.Text=reason;} }
+        { Log(reason);InputGuard g=guard;if(g!=null){g.Stop(reason);if(g.Status=="Faulted")inputSafety.Fail(g.LastReason);}if(routeWindow!=null&&!routeWindow.IsDisposed)routeWindow.StopWorkspace(reason);if(farmWindow!=null&&!farmWindow.IsDisposed)farmWindow.StopWorkspace(reason);if(!closing) {consent.Checked=false;actionStatus.Text=reason;} }
         RouteTelemetry RouteSnapshot()
         {lock(stateLock)return new RouteTelemetry{Packet=packet,Fresh=reading&&calibrated&&heartbeat.IsFresh(clock.ElapsedMilliseconds)};}
         void OpenRoutes()
@@ -166,8 +169,29 @@ namespace WoWProbe
                 routeWindow=new RouteForm(RouteSnapshot,delegate{return target==null?null:new WindowsInputBackend(target,Log);},delegate{Stop("已停止单次按键，准备路线操作");},Log,inputSafety);
             routeWindow.Show(this);routeWindow.Activate();
         }
+        FarmObservation FarmSnapshot()
+        {lock(stateLock)return FarmObservation.FromPackets(packet,combatPacket,reading&&calibrated&&heartbeat.IsFresh(clock.ElapsedMilliseconds));}
+        void OpenFarming()
+        {
+            if(farmWindow==null||farmWindow.IsDisposed)
+                farmWindow=new FarmForm(FarmSnapshot,delegate{return target==null?null:new WindowsInputBackend(target,Log);},CaptureAvatar,delegate{
+                    if(routeWindow!=null&&!routeWindow.IsDisposed&&routeWindow.IsRecording)throw new InvalidOperationException("请先结束或取消路线录制。");
+                    Stop("切换到基础打怪工作区");
+                },Log,inputSafety);
+            farmWindow.Show(this);farmWindow.Activate();
+        }
+        Bitmap CaptureAvatar(Rectangle clientRectangle)
+        {
+            if(!calibrated||target==null)throw new InvalidOperationException("请先选择游戏窗口并定位状态面板。");
+            Rectangle bounds=Native.ClientBounds(target);var region=new Rectangle(bounds.X+clientRectangle.X,bounds.Y+clientRectangle.Y,clientRectangle.Width,clientRectangle.Height);
+            if(clientRectangle.Width<1||clientRectangle.Height<1||clientRectangle.Width>512||clientRectangle.Height>512||!bounds.Contains(region))throw new InvalidOperationException("头像参考区域无效。");
+            var first=Native.CaptureGeometry(new Point(bounds.X+clientCenter.X,bounds.Y+clientCenter.Y),(int)size.Value,bounds);
+            var second=new Rectangle(first.X+34*(int)size.Value,first.Y,first.Width,first.Height);
+            if(region.IntersectsWith(first)||region.IntersectsWith(second))throw new InvalidOperationException("头像区域被状态色块遮挡，本次只保存名称。");
+            return Native.Capture(region);
+        }
         void ResetData()
-        { lock(stateLock) {heartbeat.Reset();packet=null;} if(lastGrid!=null){lastGrid.Dispose();lastGrid=null;} }
+        { lock(stateLock) {heartbeat.Reset();packet=null;combatPacket=null;} if(lastGrid!=null){lastGrid.Dispose();lastGrid=null;} }
         void InvalidateCalibration(string message)
         { Stop(message);reading=false;calibrated=false;ResetData();calibration.Text="尚未定位";lastError=message; }
         void ChangeTarget()
@@ -215,20 +239,24 @@ namespace WoWProbe
                 var bounds=Native.ClientBounds(target);
                 var center=new Point(bounds.X+clientCenter.X,bounds.Y+clientCenter.Y);
                 var region=Native.CaptureGeometry(center,(int)size.Value,bounds);
+                var extended=new Rectangle(region.X,region.Y,66*(int)size.Value,region.Height);
+                if(bounds.Contains(extended)&&SystemInformation.VirtualScreen.Contains(extended))region=extended;
                 using(var image=Native.Capture(region))
                 {
                     var bytes=PixelCodec.Decode(image,(int)size.Value/2,(int)size.Value/2,(int)size.Value);
                     var parsed=ProbePacket.Decode(bytes);
-                    lock(stateLock){heartbeat.Observe(parsed,clock.ElapsedMilliseconds);packet=parsed;}
+                    CombatPacket extra=null;
+                    if(image.Width>=66*(int)size.Value)try{var raw=PixelCodec.Decode(image,34*(int)size.Value+(int)size.Value/2,(int)size.Value/2,(int)size.Value);var candidate=CombatPacket.Decode(raw);if(candidate.Sequence==parsed.Sequence)extra=candidate;}catch(FormatException){}catch(ArgumentException){}
+                    lock(stateLock){heartbeat.Observe(parsed,clock.ElapsedMilliseconds);packet=parsed;combatPacket=extra;}
                     if(lastGrid!=null)lastGrid.Dispose();lastGrid=(Bitmap)image.Clone();
                     lastError=Fresh()?"数据正在更新；这只说明状态通道可读，游戏内动作仍需实测。":"已读到数据，正在等待序号更新。";
                     connection.Text=lastError;connection.ForeColor=Fresh()?Color.DarkGreen:Color.DarkGoldenrod;
-                    stateText.Text=Describe(parsed,Fresh());
+                    stateText.Text=Describe(parsed,Fresh())+Environment.NewLine+"战斗扩展："+(extra==null?"不可用或序号不一致；基础读取仍可用，禁止实机打怪。":"已配对。身份/射程/坐标/拾取/剥皮/读条能力掩码 "+extra.Capabilities);
                 }
             }
             catch(Exception ex)
             {
-                lock(stateLock)heartbeat.Invalidate();
+                lock(stateLock){heartbeat.Invalidate();combatPacket=null;}
                 if(g!=null && (g.Active || g.Pending))Stop("读取失败，已取消按键："+ex.Message);
                 if(lastError!=ex.Message)Log("Read failure: "+ex.Message);
                 lastError=ex.Message;connection.ForeColor=Color.DarkRed;connection.Text="读取失败："+ex.Message;
@@ -272,6 +300,7 @@ namespace WoWProbe
             {
                 if(inputSafety.Faulted)throw new InvalidOperationException("输入发送或释放曾失败。请手动松开按键，检查游戏状态并重启工具后再试。");
                 if(routeWindow!=null&&!routeWindow.IsDisposed&&routeWindow.NavigationBusy)throw new InvalidOperationException("请先停止路线模拟、录制或真实巡航，再进行单次按键测试。");
+                if(farmWindow!=null&&!farmWindow.IsDisposed&&farmWindow.Busy)throw new InvalidOperationException("请先停止打怪模拟或实机会话，再进行单次按键测试。");
                 if(!consent.Checked)throw new InvalidOperationException("请先核对游戏内按键和聊天框状态，再勾选确认。");
                 if(!CanInput())throw new InvalidOperationException("状态必须持续更新、关键状态可读且无读取错误后才能测试按键。请先导出报告排查不可读字段。");
                 if(guard==null)throw new InvalidOperationException("请重新选择游戏窗口。");
@@ -292,7 +321,7 @@ namespace WoWProbe
                 var checks=new List<object>();
                 foreach(DataGridViewRow row in checklist.Rows)checks.Add(new {item=row.Cells[0].Value,result=row.Cells[1].Value});
                 var report=new Dictionary<string,object>();
-                report["tool_version"]="0.2.0";report["report_kind"]="game_observation_pending_manual_acceptance";
+                report["tool_version"]="0.3.0";report["report_kind"]="game_observation_pending_manual_acceptance";
                 report["created_local"]=DateTimeOffset.Now.ToString("o");report["windows"]=Environment.OSVersion.VersionString;
                 report["process_bitness"]=IntPtr.Size*8;report["virtual_screen"]=SystemInformation.VirtualScreen.ToString();
                 report["selected_window"]=target==null?null:target.ToString();report["fresh_at_export"]=Fresh();report["status"]=lastError;

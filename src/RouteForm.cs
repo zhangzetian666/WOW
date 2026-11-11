@@ -40,6 +40,7 @@ namespace WoWProbe
         public bool SimulationRunning {get{return simulationTimer.Enabled;}}
         public bool SimulationCompleted {get{return simulatorNavigator!=null&&simulatorNavigator.Completed;}}
         public bool NavigationBusy {get{return LiveActive||SimulationRunning||recorder.IsRecording;}}
+        public bool IsRecording {get{return recorder.IsRecording;}}
 
         public RouteForm(Func<RouteTelemetry> telemetry,Func<IInputBackend> backendFactory,Action stopSingleInput,Action<string> parentLog,InputFailureLatch inputSafety=null)
         {
@@ -185,6 +186,7 @@ namespace WoWProbe
             if(identity==lastCheckpoint)return;CheckpointStore.Save(Path.Combine(UserRouteDirectory(),"checkpoint-"+cp.RouteFingerprint.Substring(0,16)+".json"),cp);lastCheckpoint=identity;
         }
         public void StopExternal(string reason){var s=session;if(s!=null)s.Stop(reason);}
+        public void StopWorkspace(string reason){StopAll(reason);}
         void StopAll(string reason){simulationTimer.Stop();StopExternal(reason);if(!closing){status.Text=reason;UpdateLive();}}
         void UpdateLive()
         {

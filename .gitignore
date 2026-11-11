@@ -10,3 +10,5 @@ __pycache__/
 *.docx
 *.pdf
 routes/user/
+profiles/user/
+avatars/
