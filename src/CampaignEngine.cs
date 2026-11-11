@@ -26,6 +26,9 @@ namespace WoWProbe
             if(c==null||c.SchemaVersion!=1||c.FarmIndex<0||c.FarmIndex>5000||c.PlanFingerprint==null||c.PlanFingerprint.Length!=64)throw new FormatException("Invalid campaign checkpoint.");
             foreach(char x in c.PlanFingerprint)if(!(x>='0'&&x<='9')&&!(x>='a'&&x<='f'))throw new FormatException("Invalid campaign fingerprint.");
             if(c.Phase!="Farm"&&c.Phase!="Recovery"&&c.Phase!="Vendor"&&c.Phase!="Stopped"&&c.Phase!="Completed")throw new FormatException("Invalid campaign checkpoint phase.");
+            if(c.Completed!=(c.Phase=="Completed"))throw new FormatException("Checkpoint completed flag and phase must agree.");
+            if(c.Phase=="Farm"&&c.Interrupted)throw new FormatException("A farm checkpoint cannot retain a pending interruption.");
+            if((c.Phase=="Recovery"||c.Phase=="Vendor")&&!c.Interrupted)throw new FormatException("An interruption checkpoint must retain its pending interruption.");
             if(c.Completed&&c.Interrupted)throw new FormatException("A completed campaign cannot have a pending interruption.");
         }
     }
