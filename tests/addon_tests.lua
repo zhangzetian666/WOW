@@ -120,6 +120,42 @@ test("API exception invalidates its category while panel and other fields surviv
     assert(env.WoWProbeDB.errors.UnitHealth, "API error must be diagnostic")
 end)
 
+test("restricted numeric values remain unknown while a genuine API failure still marks its category", function()
+    local env = environment()
+    -- Lua 5.1 has no engine secret numbers. Model the external boundary with a
+    -- numeric-typed value whose comparisons fail, as reported by the live client.
+    local secret = newproxy(true)
+    local nativeType = type
+    env.type = function(value) if value == secret then return "number" end return nativeType(value) end
+    getmetatable(secret).__lt = function() error("restricted comparison") end
+    getmetatable(secret).__le = function() error("restricted comparison") end
+    env.UnitHealth = function() return secret end
+    env.UnitPower = function() return secret end
+    local wp = load(env); local p = wp.BuildPacket()
+    eq(p[9],255);eq(p[10],255);eq(p[11],255)
+    eq(has(p[8],4),false);eq(has(p[8],8),false);eq(p[125],0)
+    env.UnitPower = function() error("power API unavailable") end
+    p=wp.BuildPacket();eq(p[125],1,"actual player resource error must survive restricted health")
+    eq(has(p[8],32),true,"target identity remains independently readable")
+end)
+
+test("invalid ordinary numeric values retain read failure bits", function()
+    local env=environment();env.UnitHealth=function() return 0/0 end;env.UnitPower=function() return math.huge end
+    local wp=load(env);local p=wp.BuildPacket()
+    eq(p[9],255);eq(p[10],255);eq(p[11],255);eq(p[125],3)
+    assert(env.WoWProbeDB.errors.UnitHealth);assert(env.WoWProbeDB.errors.UnitPower)
+end)
+
+test("a restricted percentage operand cannot hide a readable invalid bound", function()
+    local env=environment();local secret=newproxy(true);local nativeType=type
+    env.type=function(value) if value==secret then return "number" end return nativeType(value) end
+    getmetatable(secret).__lt=function() error("restricted comparison") end
+    env.UnitHealth=function() return secret end;env.UnitHealthMax=function() return 0 end
+    env.UnitPower=function() return -1 end;env.UnitPowerMax=function() return secret end
+    local wp=load(env);local p=wp.BuildPacket()
+    eq(p[9],255);eq(p[10],255);eq(p[11],255);eq(p[125],3)
+end)
+
 test("unknown map never invents zero coordinate or a continent identity", function()
     local env = environment(); env.GetPlayerMapPosition = function() return 0, 0 end
     local wp = load(env); local p = wp.BuildPacket()
@@ -404,6 +440,29 @@ test("WC3 binds selected range and action masks to actual current page slots",fu
     eq(has(p[7],128),false);eq(p[18],0);eq(p[19],0)
     env.IsActionInRange=function() return nil end
     p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],4),false);eq(has(p[8],4),false)
+end)
+test("WC3 interaction proximity never substitutes for the selected action range",function()
+    local env=combatEnvironment();env.IsActionInRange=function() return nil end
+    env.CheckInteractDistance=function(unit,index) eq(unit,"target");eq(index,3);return true end
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket())
+    eq(has(p[7],4),false,"duel distance does not establish skill range");eq(has(p[8],4),false)
+    env.IsActionInRange=function() return false end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],4),true);eq(has(p[8],4),false)
+end)
+
+test("rez diagnostic never targets interacts or selects gossip",function()
+    local env=environment();local actions=0
+    env.TargetNearestFriend=function() actions=actions+1 end
+    env.InteractUnit=function() actions=actions+1 end
+    env.C_GossipInfo={GetOptions=function() return {{gossipOptionID=7,name="First option"}} end,SelectOption=function() actions=actions+1 end}
+    env.C_Timer={After=function(_,fn) fn() end}
+    local wp=load(env);wp.Command("rez");eq(actions,0,"read-only diagnostics must emit no game actions")
+end)
+
+test("rez diagnostic works without timer or revival action APIs",function()
+    local env=environment();env.C_Timer=nil
+    local wp=load(env);wp.Command("rez")
+    assert(type(env.WoWProbeDB.rezDiagnostics)=="table","diagnostics should retain passive evidence")
 end)
 test("WC3 distinguishes known false attackability from missing and throwing APIs",function()
     local env=combatEnvironment();env.UnitCanAttack=function() return false end

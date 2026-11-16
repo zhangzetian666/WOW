@@ -16,7 +16,7 @@ local function finite(n)
     local ok, result = pcall(function()
         return n == n and n > -math.huge and n < math.huge
     end)
-    return ok and result == true
+    return ok and result == true, not ok
 end
 local function integer(n, max)
     return finite(n) and n >= 0 and n <= max and floor(n) == n
@@ -55,16 +55,23 @@ local function readPercent(name, currentAPI, maxAPI, unit)
     local a, current = call(name, currentAPI, unit)
     local b, maximum = call(name .. "Max", maxAPI, unit)
     if a and b then
-        if finite(current) and finite(maximum) then
-            local result = percent(current, maximum)
-            if result ~= nil then return result end
-            invalid(name)
+        local currentOK, currentRestricted = finite(current)
+        local maximumOK, maximumRestricted = finite(maximum)
+        if (not currentOK and not currentRestricted) or (not maximumOK and not maximumRestricted) then
+            invalid(name); return nil, false
         end
-        -- Secret value: API exists and returns a value, but the value is not
-        -- readable by tainted code. Not a read failure -- just unavailable.
-        return nil
+        if (currentOK and current < 0) or (maximumOK and maximum <= 0) then
+            invalid(name); return nil, false
+        end
+        -- Only a trapped numeric comparison is classified as restricted.
+        -- Missing/throwing APIs and ordinary invalid numbers still fail their
+        -- category, even when another field happens to be restricted.
+        if currentRestricted or maximumRestricted then return nil, true end
+        local result = percent(current, maximum)
+        if result ~= nil then return result, false end
+        invalid(name)
     end
-    return nil
+    return nil, false
 end
 local function boolean(name, fn, ...)
     local ok, result = call(name, fn, ...)
@@ -284,11 +291,10 @@ function P.BuildPacket()
         if P.bagFullUntil and now < P.bagFullUntil then flags = flags + 128 end
     else invalid("bagFull", "UI_ERROR_MESSAGE observation, ERR_INV_FULL or plugin clock unavailable"); failed(4) end
 
-    local health = section("health", nil, function() return readPercent("UnitHealth", UnitHealth, UnitHealthMax, "player") end)
-    if health ~= nil then caps = caps + 4 end
-    -- Secret health is not a read failure; do not call failed(1).
+    local health, healthRestricted = section("health", 1, function() return readPercent("UnitHealth", UnitHealth, UnitHealthMax, "player") end)
+    if health ~= nil then caps = caps + 4 elseif not healthRestricted then failed(1) end
     put(8, health or 255)
-    local power, powerType = section("power", 1, function()
+    local power, powerType, powerRestricted = section("power", 1, function()
         local name, current, maximum
         if type(UnitPower) == "function" and type(UnitPowerMax) == "function" then
             name, current, maximum = "UnitPower", UnitPower, UnitPowerMax
@@ -299,10 +305,10 @@ function P.BuildPacket()
         end
         local ok, kind = call("UnitPowerType", UnitPowerType, "player")
         if not ok or not integer(kind, 254) then kind = 255 end
-        return readPercent(name, current, maximum, "player"), kind
+        local value, restricted = readPercent(name, current, maximum, "player")
+        return value, kind, restricted
     end)
-    if power ~= nil then caps = caps + 8 end
-    -- Secret power is not a read failure; do not call failed(1).
+    if power ~= nil then caps = caps + 8 elseif not powerRestricted then failed(1) end
     put(9, power or 255); put(11, powerType or 255)
 
     local target = section("target", 2, function()
@@ -315,9 +321,8 @@ function P.BuildPacket()
         local targetDead, knownDead = boolean("UnitIsDead", UnitIsDead, "target")
         if targetDead then flags = flags + 16 end
         if knownDead then knownFlags = knownFlags + 16 else failed(2) end
-        local h = readPercent("UnitHealth", UnitHealth, UnitHealthMax, "target")
-        if h ~= nil then result.health = h end
-        -- Secret target health is not a read failure; do not call failed(2).
+        local h, restricted = readPercent("UnitHealth", UnitHealth, UnitHealthMax, "target")
+        if h ~= nil then result.health = h elseif not restricted then failed(2) end
         local ok, name = call("UnitName", UnitName, "target")
         if ok and type(name) == "string" and #name > 0 then
             result.name = P.UTF8Truncate(name, 32)
@@ -531,16 +536,10 @@ function P.BuildCombatPacket(core)
                 local ok,value=call("IsActionInRange",IsActionInRange,slot,"target")
                 if ok then local result,known=strictBool(value,false);if known then return result end end
             end
-            -- Forever client taints IsActionInRange, so WC3 reported RangeKnown=False
-            -- and the grind engine had no way to tell "20 yards away" from "in melee".
-            -- CheckInteractDistance is a passive query that survives the taint on this
-            -- build: index 3 is the duel sphere (~10yd), index 2 the trade sphere (~11yd).
-            -- Feed the tightest readable distance back into the existing WC3 range bit
-            -- so the C# decoder needs no protocol change.
-            if type(CheckInteractDistance)=="function" then
-                local ok,near=call("CheckInteractDistance(3)",CheckInteractDistance,"target",3)
-                if ok then local r,k=strictBool(near,true);if k then return r end end
-            end
+            -- WC3 range belongs to the selected action. Interaction proximity
+            -- cannot prove that a melee or ranged skill can actually hit.
+            -- Restricted action range remains unknown; /dist and /rez expose
+            -- interaction proximity separately without changing that meaning.
             return nil
         end)
         if range~=nil then caps=caps+4;if range then flags=flags+4 end end
@@ -745,7 +744,7 @@ local function printLine(text)
 end
 function P.ResetDiagnostics()
     local visible = type(WoWProbeDB) == "table" and WoWProbeDB.visible ~= false
-    WoWProbeDB = { schema = 1, addonVersion = "0.5.0", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
+    WoWProbeDB = { schema = 1, addonVersion = "0.5.1", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
     readClient(); captureBindings(); captureAPIs(); if P.panel then P.ScalePanel() end
 end
 function P.Command(command)
@@ -824,30 +823,33 @@ function P.Command(command)
         if #lines == 0 then printLine("No actions found on bar 1 slots 1-12.") end
         for i=1,#lines do printLine(lines[i]) end
     elseif command == "rez" then
-        -- Hardware-event assisted revival: target nearest friendly NPC, interact, pick first gossip option.
-        local log = {}
-        local ok1 = pcall(function()
-            if C_Targeting and C_Targeting.TargetNearestFriend then C_Targeting.TargetNearestFriend()
-            elseif TargetNearestFriend then TargetNearestFriend() end
-        end)
-        log[#log+1] = "target: " .. tostring(ok1)
-        C_Timer.After(0.6, function()
-            local ok2 = pcall(function() InteractUnit("target") end)
-            log[#log+1] = "interact: " .. tostring(ok2)
-            C_Timer.After(1.4, function()
-                local ok3, chosen = pcall(function()
-                    local infos = C_GossipInfo and C_GossipInfo.GetOptions and C_GossipInfo.GetOptions()
-                    if infos and #infos > 0 then
-                        C_GossipInfo.SelectOption(infos[1].gossipOptionID)
-                        return infos[1].name
-                    end
-                    return nil
-                end)
-                log[#log+1] = "gossip: " .. tostring(ok3) .. " option=" .. tostring(chosen)
-                WoWProbeDB.rezLog = log
-                for i=1,#log do printLine(log[i]) end
-            end)
-        end)
+        -- A passive snapshot, including on legacy clients without C_Timer.
+        -- Targeting, interaction and gossip selection belong to the explicitly
+        -- armed external runner, never to this telemetry AddOn.
+        local core,combat,operations = P.BuildPackets()
+        local function has(n,mask) return floor(n/mask)%2==1 end
+        local function word(packet,offset) return packet[offset+1]+packet[offset+2]*256 end
+        local function state(value,known) if not known then return "unknown" end return value and "true" or "false" end
+        local knownFlags,flags=core[126],core[7]
+        local caps=operations and word(operations,6) or 0
+        local operationFlags=operations and word(operations,8) or 0
+        local near,nearKnown=false,false
+        local ok,value=call("CheckInteractDistance(3)",CheckInteractDistance,"target",3)
+        if ok then
+            local readable,result,known=pcall(strictBool,value,false)
+            if readable then near,nearKnown=result,known end
+        end
+        local report={dead_known=has(knownFlags,1),dead=has(flags,1),ghost_known=has(knownFlags,2),ghost=has(flags,2),
+            target_known=has(knownFlags,8),target_exists=has(flags,8),target_name=WoWProbeDB.lastPacket.targetName,
+            interaction_known=nearKnown,interaction_near=near,
+            release_known=has(caps,1),release_visible=has(operationFlags,1),release_enabled=has(operationFlags,2),
+            resurrect_known=has(caps,2),resurrect_visible=has(operationFlags,4),resurrect_enabled=has(operationFlags,8)}
+        WoWProbeDB.rezDiagnostics=report
+        printLine("rez (read-only): dead="..state(report.dead,report.dead_known).." ghost="..state(report.ghost,report.ghost_known)..
+            " target="..state(report.target_exists,report.target_known).." name="..tostring(report.target_name))
+        printLine("interaction proximity="..state(near,nearKnown).."; this is not the selected skill range.")
+        printLine("release visible="..state(report.release_visible,report.release_known).." enabled="..state(report.release_enabled,report.release_known)..
+            "; resurrect visible="..state(report.resurrect_visible,report.resurrect_known).." enabled="..state(report.resurrect_enabled,report.resurrect_known))
     elseif command == "dist" then
         -- One-shot read-only probe of every distance/identity API on the current target.
         -- Used to find a feedback channel the tainted client still exposes.
@@ -869,7 +871,7 @@ function P.Command(command)
         probe("UnitHealth", UnitHealth, "target")
         probe("UnitHealthMax", UnitHealthMax, "target")
         probe("GetActionInfo(1)", GetActionInfo, 1)
-    else printLine("Commands: /wowprobe show | hide | info | reset | range 1..4 | actions | dist. Read-only status; no actions or key bindings are changed.") end
+    else printLine("Commands: /wowprobe show | hide | info | reset | range 1..4 | errors | actions | dist | rez. Read-only status; no actions or key bindings are changed.") end
 end
 function P.Initialize()
     if P.initialized then return end
@@ -880,7 +882,7 @@ function P.Initialize()
     WoWProbeDB = old; WoWProbeDB.visible = visible
     if integer(old.rangeSlot,4) and old.rangeSlot>=1 then P.rangeSlot=old.rangeSlot end
     WoWProbeDB.previousSession = previous
-    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.0"
+    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.1"
     WoWProbeDB.errors, WoWProbeDB.bindings, WoWProbeDB.capabilities = {}, {}, {}
     readClient(); captureBindings(); captureAPIs()
     local ok, reason = pcall(createPanel)
