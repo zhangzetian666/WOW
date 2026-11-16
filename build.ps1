@@ -34,9 +34,9 @@ foreach ($testName in @('CombatTelemetryTests','BattleProfileTests','FarmingTest
     & "$bin\$testName.exe"
     if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
 }
-$domainSources = @($sources | Where-Object { [System.IO.Path]::GetFileName($_) -notmatch '(^Program\.cs$|^Native\.cs$|^CampaignNative\.cs$|^GrindCli\.cs$|^AssemblyInfo\.cs$|Form\.cs$)' })
-foreach ($testName in @('CampaignSettingsTests','RecoveryWorkflowTests','VendorWorkflowTests','CampaignEngineTests','CampaignSessionTests','CampaignSimulatorTests','RuntimeEvidenceTests','OperationsTelemetryTests','CampaignBundleTests','CampaignCheckpointTests','FeedbackSummaryTests','CampaignPreflightTests','GrindSafetyTests','GrindHealerApproachTests')) {
-    & $compiler @common /target:exe "/out:$bin\$testName.exe" @domainSources "$projectRoot\tests\CampaignFixtures.cs" "$projectRoot\tests\$testName.cs"
+$domainSources = @($sources | Where-Object { [System.IO.Path]::GetFileName($_) -notmatch '(^Program\.cs$|^Native\.cs$|^CampaignNative\.cs$|^GrindCli\.cs$|^FishingAudioNative\.cs$|^AssemblyInfo\.cs$|Form\.cs$)' })
+foreach ($testName in @('CampaignSettingsTests','RecoveryWorkflowTests','VendorWorkflowTests','CampaignEngineTests','CampaignSessionTests','CampaignSimulatorTests','RuntimeEvidenceTests','OperationsTelemetryTests','CampaignBundleTests','CampaignCheckpointTests','FeedbackSummaryTests','CampaignPreflightTests','GrindSafetyTests','GrindHealerApproachTests','FishingTests','FishingSimulatorTests','FishingAudioFormatTests','FishingPerceptionTests','FishingSessionTests')) {
+    & $compiler @common /target:exe "/out:$bin\$testName.exe" @domainSources "$projectRoot\tests\CampaignFixtures.cs" "$projectRoot\tests\FishingFixtures.cs" "$projectRoot\tests\$testName.cs"
     if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
     & "$bin\$testName.exe"
     if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
@@ -57,10 +57,17 @@ if ($LASTEXITCODE -ne 0) { throw 'Readiness UI test compilation failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Grind CLI integration test compilation failed.' }
 & "$bin\GrindCliIntegrationTests.exe"
 if ($LASTEXITCODE -ne 0) { throw 'Grind CLI integration tests failed.' }
+& $compiler @common /target:exe /main:FishingFreshnessTests "/out:$bin\FishingFreshnessTests.exe" @sources "$projectRoot\tests\FishingFixtures.cs" "$projectRoot\tests\FishingFreshnessTests.cs"
+if ($LASTEXITCODE -ne 0) { throw 'Fishing parent freshness test compilation failed.' }
+& "$bin\FishingFreshnessTests.exe"
+if ($LASTEXITCODE -ne 0) { throw 'Fishing source freshness tests failed.' }
+Copy-Item -LiteralPath "$projectRoot\assets" -Destination $bin -Recurse -Force
+& $compiler @common /target:winexe /main:FishingUiTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\FishingUiTests.exe" @sources "$projectRoot\tests\FishingFixtures.cs" "$projectRoot\tests\FishingUiTests.cs"
+if ($LASTEXITCODE -ne 0) { throw 'Fishing UI test compilation failed.' }
 Write-Output "BUILD_OK $bin\WoWProbe.exe"
 if ($Package) {
     $dist = Join-Path $projectRoot 'dist'
-    $releaseName = 'WoWProbe-Complete-0.6.1'
+    $releaseName = 'WoWProbe-Complete-0.7.0'
     $release = Join-Path $dist $releaseName
     New-Item -ItemType Directory -Path $release -Force | Out-Null
     Copy-Item -LiteralPath "$bin\WoWProbe.exe" -Destination $release -Force
@@ -81,6 +88,7 @@ if ($Package) {
         New-Item -ItemType Directory -Path (Split-Path -Parent $destination) -Force | Out-Null
         Copy-Item -LiteralPath $document.FullName -Destination $destination -Force
     }
+    Copy-Item -LiteralPath "$projectRoot\assets" -Destination $release -Recurse -Force
     $routeExamples = Join-Path $release 'routes\examples'
     New-Item -ItemType Directory -Path $routeExamples -Force | Out-Null
     Copy-Item -Path "$projectRoot\routes\examples\*.json" -Destination $routeExamples -Force

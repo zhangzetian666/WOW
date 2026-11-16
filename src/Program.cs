@@ -66,12 +66,13 @@ namespace WoWProbe
         RouteForm routeWindow;
         FarmForm farmWindow;
         CampaignForm campaignWindow;
+        FishingForm fishingWindow;
         volatile int calibratedCellSize=8;
         readonly Dictionary<string, ushort> keyCodes=new Dictionary<string, ushort>();
 
         public ProbeForm()
         {
-            Text="状态检测 · 路线、打怪与完整流程  v0.6.1";
+            Text="状态检测 · 路线、打怪与完整流程  v0.7.0";
             Font=new Font("Microsoft YaHei UI",9F);
             BackColor=Color.FromArgb(247,249,252);
             ForeColor=Color.FromArgb(24,35,52);
@@ -147,11 +148,12 @@ namespace WoWProbe
             bottom.Controls.Add(Button("路线录制与巡航",OpenRoutes));
             bottom.Controls.Add(Button("目标与基础打怪",OpenFarming));
             bottom.Controls.Add(Button("完整运行与恢复",OpenCampaign));
+            bottom.Controls.Add(Button("自动钓鱼",OpenFishing));
             bottom.Controls.Add(new Label {AutoSize=true,Text="支持无游戏离线模拟。",Margin=new Padding(10,10,0,0)});
             poll.Interval=200;poll.Tick+=delegate { ReadTick(); };poll.Start();
             picker.Interval=1000;picker.Tick+=delegate { PickTick(); };
             watchdog=new System.Threading.Timer(delegate { try { InputGuard g=guard;if(g!=null){g.Tick();if(g.Status=="Faulted")inputSafety.Fail(g.LastReason);} } catch { InputGuard g=guard;if(g!=null){g.Stop("输入监控异常");if(g.Status=="Faulted")inputSafety.Fail(g.LastReason);} } },null,25,25);
-            FormClosing+=delegate { closing=true;poll.Stop();picker.Stop();Stop("检测工具关闭");if(routeWindow!=null&&!routeWindow.IsDisposed)routeWindow.Close();if(farmWindow!=null&&!farmWindow.IsDisposed)farmWindow.Close();if(campaignWindow!=null&&!campaignWindow.IsDisposed)campaignWindow.Close();watchdog.Dispose();if(lastGrid!=null)lastGrid.Dispose(); };
+            FormClosing+=delegate { closing=true;poll.Stop();picker.Stop();Stop("检测工具关闭");if(routeWindow!=null&&!routeWindow.IsDisposed)routeWindow.Close();if(farmWindow!=null&&!farmWindow.IsDisposed)farmWindow.Close();if(campaignWindow!=null&&!campaignWindow.IsDisposed)campaignWindow.Close();if(fishingWindow!=null&&!fishingWindow.IsDisposed)fishingWindow.Close();watchdog.Dispose();if(lastGrid!=null)lastGrid.Dispose(); };
             RefreshWindows();
         }
 
@@ -169,13 +171,14 @@ namespace WoWProbe
         { lock(stateLock) return !inputSafety.Faulted && InputEligibility.Allows(packet,FrameFresh(clock.ElapsedMilliseconds)); }
 
         void Stop(string reason)
-        { Log(reason);InputGuard g=guard;if(g!=null){g.Stop(reason);if(g.Status=="Faulted")inputSafety.Fail(g.LastReason);}if(routeWindow!=null&&!routeWindow.IsDisposed)routeWindow.StopWorkspace(reason);if(farmWindow!=null&&!farmWindow.IsDisposed)farmWindow.StopWorkspace(reason);if(campaignWindow!=null&&!campaignWindow.IsDisposed)campaignWindow.StopWorkspace(reason);if(!closing) {consent.Checked=false;actionStatus.Text=reason;} }
+        { Log(reason);InputGuard g=guard;if(g!=null){g.Stop(reason);if(g.Status=="Faulted")inputSafety.Fail(g.LastReason);}if(routeWindow!=null&&!routeWindow.IsDisposed)routeWindow.StopWorkspace(reason);if(farmWindow!=null&&!farmWindow.IsDisposed)farmWindow.StopWorkspace(reason);if(campaignWindow!=null&&!campaignWindow.IsDisposed)campaignWindow.StopWorkspace(reason);if(fishingWindow!=null&&!fishingWindow.IsDisposed)fishingWindow.StopWorkspace(reason);if(!closing) {consent.Checked=false;actionStatus.Text=reason;} }
         RouteTelemetry RouteSnapshot()
         {lock(stateLock)return new RouteTelemetry{Packet=packet,Fresh=FrameFresh(clock.ElapsedMilliseconds)};}
+        void RequireNoFishingRecording(){if(fishingWindow!=null&&!fishingWindow.IsDisposed&&fishingWindow.IsRecording)throw new InvalidOperationException("请先结束或取消钓鱼路线录制。");}
         void OpenRoutes()
         {
             if(routeWindow==null||routeWindow.IsDisposed)
-                routeWindow=new RouteForm(RouteSnapshot,delegate{return target==null?null:new WindowsInputBackend(target,Log);},delegate{Stop("已停止单次按键，准备路线操作");},Log,inputSafety);
+                routeWindow=new RouteForm(RouteSnapshot,delegate{return target==null?null:new WindowsInputBackend(target,Log);},delegate{RequireNoFishingRecording();Stop("已停止单次按键，准备路线操作");},Log,inputSafety);
             routeWindow.Show(this);routeWindow.Activate();
         }
         FarmObservation FarmSnapshot()
@@ -188,10 +191,21 @@ namespace WoWProbe
         {
             if(campaignWindow==null||campaignWindow.IsDisposed)
                 campaignWindow=new CampaignForm(OperationSnapshot,delegate{return target==null?null:new WindowsCampaignInputBackend(target,Log);},CaptureAvatar,CaptureGameClient,delegate{
+                    RequireNoFishingRecording();
                     if(routeWindow!=null&&!routeWindow.IsDisposed&&routeWindow.IsRecording)throw new InvalidOperationException("请先结束或取消路线录制。");
                     Stop("切换到完整运行工作区。");
                 },Log,inputSafety,ClickRegionAllowed);
             campaignWindow.Show(this);campaignWindow.Activate();
+        }
+        void OpenFishing()
+        {
+            if(fishingWindow==null||fishingWindow.IsDisposed)
+                fishingWindow=new FishingForm(OperationSnapshot,delegate{return target==null?null:new WindowsInputBackend(target,Log);},CaptureGameClient,delegate{
+                    RequireNoFishingRecording();
+                    if(routeWindow!=null&&!routeWindow.IsDisposed&&routeWindow.IsRecording)throw new InvalidOperationException("请先结束或取消路线录制。");
+                    Stop("切换到自动钓鱼工作区。");
+                },Log,inputSafety,Fresh);
+            fishingWindow.Show(this);fishingWindow.Activate();
         }
         Bitmap CaptureGameClient()
         {
@@ -208,6 +222,7 @@ namespace WoWProbe
         {
             if(farmWindow==null||farmWindow.IsDisposed)
                 farmWindow=new FarmForm(FarmSnapshot,delegate{return target==null?null:new WindowsInputBackend(target,Log);},CaptureAvatar,delegate{
+                    RequireNoFishingRecording();
                     if(routeWindow!=null&&!routeWindow.IsDisposed&&routeWindow.IsRecording)throw new InvalidOperationException("请先结束或取消路线录制。");
                     Stop("切换到基础打怪工作区");
                 },Log,inputSafety);
@@ -342,6 +357,7 @@ namespace WoWProbe
                 if(routeWindow!=null&&!routeWindow.IsDisposed&&routeWindow.NavigationBusy)throw new InvalidOperationException("请先停止路线模拟、录制或真实巡航，再进行单次按键测试。");
                 if(farmWindow!=null&&!farmWindow.IsDisposed&&farmWindow.Busy)throw new InvalidOperationException("请先停止打怪模拟或实机会话，再进行单次按键测试。");
                 if(campaignWindow!=null&&!campaignWindow.IsDisposed&&campaignWindow.Busy)throw new InvalidOperationException("请先停止完整流程，再进行单次按键测试。");
+                if(fishingWindow!=null&&!fishingWindow.IsDisposed&&fishingWindow.Busy)throw new InvalidOperationException("请先停止钓鱼或录制，再进行单次按键测试。");
                 if(!consent.Checked)throw new InvalidOperationException("请先核对游戏内按键和聊天框状态，再勾选确认。");
                 if(!CanInput())throw new InvalidOperationException("状态必须持续更新、关键状态可读且无读取错误后才能测试按键。请先导出报告排查不可读字段。");
                 if(guard==null)throw new InvalidOperationException("请重新选择游戏窗口。");
@@ -362,7 +378,7 @@ namespace WoWProbe
                 var checks=new List<object>();
                 foreach(DataGridViewRow row in checklist.Rows)checks.Add(new {item=row.Cells[0].Value,result=row.Cells[1].Value});
                 var report=new Dictionary<string,object>();
-                report["tool_version"]="0.6.1";report["report_kind"]="game_observation_pending_manual_acceptance";
+                report["tool_version"]="0.7.0";report["report_kind"]="game_observation_pending_manual_acceptance";
                 report["created_local"]=DateTimeOffset.Now.ToString("o");report["windows"]=Environment.OSVersion.VersionString;
                 report["process_bitness"]=IntPtr.Size*8;report["virtual_screen"]=SystemInformation.VirtualScreen.ToString();
                 report["selected_window"]=target==null?null:target.ToString();report["fresh_at_export"]=Fresh();report["status"]=lastError;

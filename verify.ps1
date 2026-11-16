@@ -41,10 +41,15 @@ try {
         if ($campaignFlow.ExitCode -ne 0) { throw 'Offline campaign UI integration failed. Inspect bin/test-output/campaign-ui-tests.json.' }
         $readinessFlow = Start-Process -FilePath "$projectRoot\bin\ReadinessUiTests.exe" -WindowStyle Hidden -Wait -PassThru
         if ($readinessFlow.ExitCode -ne 0) { throw 'Readiness handoff UI integration failed. Inspect bin/test-output/readiness-ui-tests.json.' }
+        $fishingPreview = Start-Process -FilePath "$projectRoot\bin\IntegrationTests.exe" -ArgumentList '--fishing-ui-preview' -WindowStyle Hidden -Wait -PassThru
+        if ($fishingPreview.ExitCode -ne 0) { throw 'Fishing UI preview failed.' }
+        $fishingFlow = Start-Process -FilePath "$projectRoot\bin\FishingUiTests.exe" -WindowStyle Hidden -Wait -PassThru
+        if ($fishingFlow.ExitCode -ne 0) { throw 'Fishing offline UI integration failed. Inspect bin/test-output/fishing-ui-tests.json.' }
+
     }
     if ($SkipDesktopSmoke) {
         Write-Output 'VERIFICATION_OK: All C# domain suites including portable plans, checkpoints, feedback and preflight, Lua51, WP1/WC3/WO4 protocol and isolated startup-failure regressions passed. Desktop and full workflow/readiness UI checks were skipped. No real game was tested; stress duration is virtual.'
     } else {
-        Write-Output 'VERIFICATION_OK: C# domain suites, Lua51, WP1/WC3/WO4 protocol, desktop capture and route/farm/campaign/readiness UI checks passed. No real game was tested; stress duration is virtual.'
+        Write-Output 'VERIFICATION_OK: C# domain suites, Lua51, WP1/WC3/WO4 protocol, desktop capture and route/farm/campaign/readiness/fishing UI checks passed. No real game was tested; stress duration is virtual.'
     }
 } finally { Pop-Location }

@@ -17,6 +17,7 @@ namespace WoWProbe
             if(args.Length>0&&args[0]=="--route-ui-preview")return RoutePreview();
             if(args.Length>0&&args[0]=="--farm-ui-preview")return FarmPreview();
             if(args.Length>0&&args[0]=="--campaign-ui-preview")return CampaignPreview();
+            if(args.Length>0&&args[0]=="--fishing-ui-preview")return FishingPreview();
             return args.Length>0 && args[0]=="--ui-preview"?Preview():Run();
         }
         public static int RoutePreview()
@@ -52,6 +53,13 @@ namespace WoWProbe
             using(var form=new CampaignForm(delegate{return new OperationObservation();},delegate{return null;},null,null,null,null,new InputFailureLatch()))
             using(var timer=new System.Windows.Forms.Timer{Interval=500})
             {timer.Tick+=delegate{timer.Stop();try{exit=SaveUiPreview(form,directory,"campaign-ui");}finally{form.Close();}};form.Shown+=delegate{form.Hide();form.Show();form.Refresh();timer.Start();};Application.Run(form);}return exit;
+        }
+        public static int FishingPreview()
+        {
+            string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output");Directory.CreateDirectory(directory);int exit=1;
+            using(var form=new FishingForm(delegate{return new OperationObservation();},delegate{return null;},null,null,null,new InputFailureLatch()))
+            using(var timer=new System.Windows.Forms.Timer{Interval=500})
+            {timer.Tick+=delegate{timer.Stop();try{exit=SaveUiPreview(form,directory,"fishing-ui");}finally{form.Close();}};form.Shown+=delegate{form.Hide();form.Show();form.Refresh();timer.Start();};Application.Run(form);}return exit;
         }
         public static int Preview()
         {
