@@ -99,6 +99,15 @@ class FarmSessionTests
             Check(s.LastCommand.Action>=FarmAction.Skill1&&s.LastCommand.Action<=FarmAction.Skill4);
             Check(f.Downs.Count>0&&Attack(f.Downs[f.Downs.Count-1]));
         });
+        Run("blind swings ignore a known-but-false range bit",delegate{
+            // Live 2026-11-16: the verified client reports the range slot as known but false
+            // forever, which used to veto every blind skill with "moved out of range".
+            var f=new Fake();var s=New(f);var p=Profile();p.BlindGrind=true;p.SkillSequence="2";
+            observation.RangeKnown=true;observation.RangeSlot=1;observation.TargetInRange=false;
+            observation.TargetPositionKnown=false;observation.TargetHealth=255;
+            s.Start(Route(),p,false,false,0);Pump(s,true);
+            Check(s.LastCommand.Action==FarmAction.Skill2&&f.Downs.Contains(0x32));s.Stop("done");
+        });
         Run("blind negative action usability does not veto the planned damaging skill",delegate{
             var f=new Fake();var s=New(f);var p=Profile();p.BlindGrind=true;p.SkillSequence="2";
             observation.RangeKnown=false;observation.TargetInRange=false;observation.TargetPositionKnown=false;

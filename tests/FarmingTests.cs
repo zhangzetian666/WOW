@@ -45,6 +45,7 @@ internal static class FarmingTests
         Run("blind falling target health keeps the fight alive", BlindDamageKeepsFighting);
         Run("blind stalled damage repositions twice then disengages", BlindStalledDamageRepositionsThenAbandons);
         Run("blind secret target health disengages on its deadline", BlindSecretHealthAbortsOnDeadline);
+        Run("blind known-false range bit fights until the target dies", BlindKnownFalseBitKeepsSwinging);
         Run("blind disengage does not immediately relock the same mob", BlindAbandonDoesNotRelock);
         Run("blind pulses stay inside the session bounded input window", BlindPulsesStayBounded);
         Run("blind combat never toggles the plain Attack slot", BlindNeverTogglesAttackSlot);
@@ -422,6 +423,26 @@ internal static class FarmingTests
         Check(abandoned, "secret target health must hit the blind combat deadline and disengage");
         Check(abandonedAt > 29000 && abandonedAt <= 31000, "secret-health chase abort must happen around 30s, got " + abandonedAt);
     }
+    private static void BlindKnownFalseBitKeepsSwinging()
+    {
+        // Live 2026-11-16 21:35: target health is secret AND the configured range slot reads
+        // known-but-false forever. The 30s chase abort fired before any swing could kill, and
+        // FarmSession vetoed each skill ("moved out of range"). In that telemetry state the
+        // encounter must run to TargetDead frames or the combat deadline instead.
+        BattleProfile p = BlindProfile("223");
+        FarmObservation o = BlindStalled();
+        o.RangeKnown = true; o.RangeSlot = 1; o.TargetHealth = 255;
+        FarmEngine e = Locked(p, o);
+        for (long t = 500; t <= 35000; t += 500)
+        {
+            FarmCommand c = Next(e, o, t);
+            Check(c.Action != FarmAction.Stop, "known-false range bit must not stop the session: " + c.Reason);
+            Check(e.EncounterActive, "known-false range bit must not abort the encounter before 35s");
+        }
+        Dead(o);
+        Next(e, o, 36000); Next(e, o, 36400);
+        Equal("Loot", e.Status, "a dead target confirms into loot despite the stuck range bit");
+    }
     private static void BlindPulsesStayBounded()
     {
         // A live run once faulted with "Unbounded farming pulse rejected" after a blind pulse
@@ -448,9 +469,13 @@ internal static class FarmingTests
     }
     private static void BlindDistanceDrivenChase()
     {
+        // Updated 2026-11-16 21:35 live evidence: on the verified client the known range slot
+        // stays false FOREVER, even while a boar is chewing on the rogue. The old contract
+        // ("save energy while false") starved every encounter — it died without one swing.
+        // Blind combat now swings on cadence while closing and trusts TargetDead for the kill.
         BattleProfile p = BlindProfile("2");
         FarmObservation o = SecretRangeMonster();
-        o.RangeKnown = true; o.TargetInRange = false; // WC3 CheckInteractDistance fallback says "too far"
+        o.RangeKnown = true; o.TargetInRange = false; // verified client: this bit never turns true
         o.UsableActionsMask = 15; o.TargetHealth = 255;
         FarmEngine e = Locked(p, o);
         int forward = 0, turns = 0, skills = 0;
@@ -463,12 +488,12 @@ internal static class FarmingTests
         }
         Check(forward > 0, "out-of-range target must still be chased with forward pulses");
         Check(turns > 0, "out-of-range chase must sweep for a name-targeted mob");
-        Equal(0, skills, "energy must be saved while the target is still outside melee range");
+        Check(skills > 0, "the stuck-false range bit must not starve the swing cadence");
         o.TargetInRange = true;
         bool swung = false;
         for (long t = 6100; t <= 16000; t += 100)
             if (Next(e, o, t).Action == FarmAction.Skill2) { swung = true; break; }
-        Check(swung, "entering melee range must start the damaging rotation");
+        Check(swung, "entering melee range must keep the damaging rotation");
     }
     private static void BlindAbandonDoesNotRelock()
     {

@@ -164,6 +164,12 @@ namespace WoWProbe
             // character walked into the mob without ever swinging. Fight immediately instead; short
             // advance pulses inside Combat close the remaining distance.
             if (Blind && !o.RangeKnown) { nextBlindAdvance = now + 600; EnterCombat(now); return None("Blind mode: range is secret, entering combat while closing distance."); }
+            // Live 2026-11-16 21:35: the verified client also reports the range slot as KNOWN
+            // but false forever. With the target position secret there is nothing to steer an
+            // approach with (the blind chase below sweeps blind arcs waiting for a distance bit
+            // that never turns true), so the encounter died in approach without a single swing.
+            // A false range bit is only trusted as "genuinely far" when the position is known.
+            if (Blind && !o.TargetInRange && !o.TargetPositionKnown) { nextBlindAdvance = now + 600; EnterCombat(now); return None("Blind mode: target position is secret and the range bit is unreliable; entering combat while closing distance."); }
             if (o.TargetInRange) { EnterCombat(now); return None("Saved, attackable non-player target locked in range."); }
             return EnterApproach(o, now);
         }
@@ -253,9 +259,17 @@ namespace WoWProbe
                 { lastDamagedHealth = o.TargetHealth; lastDamageAt = now; blindRetries = 0; }
                 if (!meleeReached && o.RangeKnown && o.TargetInRange)
                 { meleeReached = true; meleeReachedAt = now; }
+                // Verified client 2026-11-16: target health is secret (255) AND the range bit is
+                // known-but-false forever. Neither deadline signal works there — the only kill
+                // evidence is TargetDead frames, which DeadKnown=True does deliver. Running the
+                // 30s chase abort in that state stopped every encounter before a swing could
+                // kill, so the encounter instead runs to TargetDead or the combat deadline,
+                // with the existing closing/hold-and-sweep pulses keeping roughly faced.
+                bool bitStuck = !healthReadable && o.RangeKnown && !o.TargetInRange;
                 long since = meleeReached ? now - meleeReachedAt : now - encounterStarted;
                 long stalled = now - lastDamageAt;
                 bool noProgress = healthReadable ? stalled >= BlindNoDamageMs
+                    : bitStuck ? false
                     : since >= (meleeReached ? BlindMeleeMs : BlindChaseMs);
                 if (noProgress)
                 {

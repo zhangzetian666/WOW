@@ -179,7 +179,12 @@ namespace WoWProbe
                 if(!o.RangeKnown||o.RangeSlot!=p.RangeSlot){if(!p.BlindGrind)return "Configured range observation became unknown or changed slots.";}
                 // Blind + secret range: "unknown" must not veto a skill keypress, otherwise the
                 // engine's blind swing is discarded before it ever reaches the input backend.
-                if(skill&&!o.TargetInRange&&!(p.BlindGrind&&!o.RangeKnown))return "Locked skill target moved out of range.";
+                // Live 2026-11-16 21:35: the verified Forever client reports the configured
+                // range slot as KNOWN but false forever (the engine comment on the swing
+                // cadence already documents "whose 10yd distance bit never turns true"), so a
+                // known-but-false bit must not veto blind swings either. Blind combat confirms
+                // damage via falling target health and kills via TargetDead frames instead.
+                if(skill&&!p.BlindGrind&&!o.TargetInRange)return "Locked skill target moved out of range.";
                 // 255 = unavailable (secret value); skip target-health gating for blind combat mode.
                 if(before&&!(p.BlindGrind&&o.TargetHealth==255)&&(o.TargetHealth<=0||o.TargetHealth>100))return "Pending live-target action lacks known positive target health.";
                 // With secret action state the blind engine deliberately swings without telemetry;
