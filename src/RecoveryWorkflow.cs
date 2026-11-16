@@ -91,7 +91,7 @@ namespace WoWProbe
     {
         enum Phase{ConfirmDeath,Release,CorpseRun,Resurrect,ConfirmAlive,Rest,ReturnFarm,Completed,Stopped}
         readonly CampaignPlan plan;readonly int saved;Phase phase=Phase.ConfirmDeath;Navigator navigator;RouteDocument travelRoute;
-        bool hasTime,hasSequence,healIssued,manaIssued;int sequence,deathFrames,aliveFrames;long lastNow,stateStarted,corpseStarted,readySince=-1;double corpseX,corpseY;
+        bool hasTime,hasSequence,healIssued,manaIssued,skippedVitalThresholds;int sequence,deathFrames,aliveFrames;long lastNow,stateStarted,corpseStarted,readySince=-1;double corpseX,corpseY;
         public string Status{get{return phase.ToString();}}public string LastReason{get;private set;}public bool Completed{get;private set;}public int SavedFarmIndex{get{return saved;}}
         public RecoveryEngine(CampaignPlan plan,int savedFarmIndex)
         {
@@ -119,8 +119,8 @@ namespace WoWProbe
                     case Phase.ConfirmDeath:
                         if(o.Farm.PlayerGhost)return BeginCorpse(o,nowMs);
                         if(!o.Farm.PlayerDead)return Fail("Player is alive; release is not applicable.");
-                        if(o.Farm.Health!=0){deathFrames=0;return None("Death also requires known zero health.");}
-                        deathFrames++;if(deathFrames<plan.Settings.DeathConfirmFrames)return None("Confirming death from another distinct zero-health frame.");
+                        if(o.Farm.Health!=0&&!(plan.Battle.BlindGrind&&o.Farm.Health==255)){deathFrames=0;return None("Death also requires known zero health.");}
+                        deathFrames++;if(deathFrames<plan.Settings.DeathConfirmFrames)return None(o.Farm.Health==255?"Blind mode: confirming known death from another distinct frame; health is unreadable.":"Confirming death from another distinct zero-health frame.");
                         if(!o.ReleaseKnown)return Fail("Release dialog state is unknown.");
                         if(!o.ReleaseVisible||!o.ReleaseEnabled)return None("Waiting for a visible enabled release button.");
                         invalid=ButtonProblem(o,o.ReleaseRegion);if(invalid!=null)return Fail(invalid);
@@ -146,11 +146,11 @@ namespace WoWProbe
                         aliveFrames=0;Enter(Phase.ConfirmAlive,nowMs);return Click(OperationPurpose.Resurrect,o.ResurrectRegion,"Resurrect once after known zero cooldown; await two living frames.");
                     case Phase.ConfirmAlive:
                         if(o.Farm.PlayerDead||o.Farm.PlayerGhost){if(aliveFrames>0)return Fail("The player died or became a ghost again during resurrection confirmation.");return None("Waiting for actual life after the single resurrection click.");}
-                        if(o.Farm.Health!=255&&(o.Farm.Health<=0||o.Farm.Health>100))return Fail("Positive known health is required to confirm resurrection.");
+                        if(!FarmVitals.Percent(o.Farm.Health,plan.Battle.BlindGrind)||o.Farm.Health==0)return Fail("Positive known health is required to confirm resurrection unless blind mode explicitly permits unreadable health.");
                         if(!o.ResurrectKnown)return Fail("Resurrection dialog state became unknown.");
                         if(o.ResurrectVisible){aliveFrames=0;return None("Waiting for the resurrection dialog to close.");}
                         aliveFrames++;if(aliveFrames<2)return None("Confirming life with another distinct frame.");
-                        healIssued=manaIssued=false;Enter(Phase.Rest,nowMs);return None("Life confirmed; recover safely before returning to the saved farm anchor.");
+                        healIssued=manaIssued=false;Enter(Phase.Rest,nowMs);return None(o.Farm.Health==255?"Blind mode: living state confirmed while health remains unreadable; evaluate recovery thresholds next.":"Life confirmed; recover safely before returning to the saved farm anchor.");
                     case Phase.Rest:return Rest(o,nowMs);
                     case Phase.ReturnFarm:
                         if(o.Farm.PlayerDead||o.Farm.PlayerGhost)return Fail("Death interrupted the recorded return to farm.");
@@ -177,13 +177,14 @@ namespace WoWProbe
         OperationCommand Rest(OperationObservation o,long now)
         {
             var f=o.Farm;if(f.PlayerDead||f.PlayerGhost)return Fail("Player died again during recovery rest.");
-            if((f.Health!=255&&(f.Health<=0||f.Health>100))||(f.PowerType!=255&&f.PowerType<0)||(f.PowerType==0&&f.Power!=255&&(f.Power<0||f.Power>100)))return Fail("Recovery health or applicable mana is unknown.");
+            if(!FarmVitals.Percent(f.Health,plan.Battle.BlindGrind)||f.Health==0||!FarmVitals.Power(f,plan.Battle.BlindGrind))return Fail("Recovery health or applicable mana is unknown.");
             if(!f.CastingKnown)return Fail("Casting state is unknown during recovery rest.");
             if(f.Casting||f.Channeling)return None("Waiting for casting to finish before recovery supplies.");
-            bool healthReady=f.Health>=plan.Battle.RecoverTo,manaReady=f.PowerType!=0||f.Power>=plan.Battle.RecoverTo;
+            bool healthReady=plan.Battle.BlindGrind&&f.Health==255||f.Health>=plan.Battle.RecoverTo,manaReady=plan.Battle.BlindGrind&&(f.PowerType==255||f.PowerType==0&&f.Power==255)||f.PowerType!=0||f.Power>=plan.Battle.RecoverTo;
             if(healthReady&&manaReady)
             {
-                var route=TravelPlanner.FromCorpse(plan,o,saved);if(route==null)return Finish();travelRoute=route.Clone();navigator=new Navigator(route,plan.Battle.Calibration,false,false,0,NavigationPurpose.VendorReturn);Enter(Phase.ReturnFarm,now);return None("Recovery observed; follow recorded farm points back to the original anchor.");
+                skippedVitalThresholds=plan.Battle.BlindGrind&&FarmVitals.Unreadable(f);
+                var route=TravelPlanner.FromCorpse(plan,o,saved);if(route==null)return Finish();travelRoute=route.Clone();navigator=new Navigator(route,plan.Battle.Calibration,false,false,0,NavigationPurpose.VendorReturn);Enter(Phase.ReturnFarm,now);return None(skippedVitalThresholds?"Blind mode: unreadable vital thresholds skipped; restoration was not observed. Follow the recorded return to the original anchor.":"Recovery observed; follow recorded farm points back to the original anchor.");
             }
             if(!healthReady&&!healIssued){healIssued=true;return Key(0x38,"Use food once after resurrection; positive low health is allowed only in recovery rest.");}
             if(!manaReady&&!manaIssued){manaIssued=true;return Key(0x39,"Use water once and require observed mana recovery.");}
@@ -194,6 +195,8 @@ namespace WoWProbe
         {
             if(o==null||!o.Fresh||o.Farm==null||!o.Farm.Fresh||!o.Farm.KnownCore||o.Farm.ReadFailures!=0)return "Fresh known operation and core observations are required.";
             var f=o.Farm;if(o.MapId!=plan.FarmRoute.MapId||f.MapId!=plan.FarmRoute.MapId||f.MapMode!=plan.FarmRoute.MapMode||!String.Equals(f.Zone,plan.FarmRoute.Zone,StringComparison.Ordinal))return "Recovery map or zone changed.";
+            if(!FarmVitals.Percent(f.Health,plan.Battle.BlindGrind))return "Recovery health is invalid or unknown in strict mode.";
+            if(!f.PlayerDead&&!f.PlayerGhost&&!FarmVitals.Power(f,plan.Battle.BlindGrind))return "Recovery resources are invalid or unknown in strict mode.";
             if(!NavigationMath.InRange(f.X,0,1)||!NavigationMath.InRange(f.Y,0,1)||!NavigationMath.InRange(f.Facing,0,Math.PI*2))return "Recovery position or facing is unknown.";
             if(f.InCombat)return "Combat interrupted automatic recovery.";
             if(!o.IncomingResurrectionKnown)return "Incoming resurrection invitation state is unknown.";
@@ -223,7 +226,7 @@ namespace WoWProbe
             return null;
         }
         void Enter(Phase next,long now){phase=next;stateStarted=now;}
-        OperationCommand Finish(){Completed=true;phase=Phase.Completed;LastReason="Recovery complete; resume the exact saved farm index.";return Command(OperationAction.ResumeFarm,OperationPurpose.Travel,LastReason);}
+        OperationCommand Finish(){Completed=true;phase=Phase.Completed;LastReason=skippedVitalThresholds?"Blind recovery return complete; unreadable vital thresholds were skipped and restoration was not observed. Resume the exact saved farm index.":"Recovery complete; resume the exact saved farm index.";return Command(OperationAction.ResumeFarm,OperationPurpose.Travel,LastReason);}
         OperationCommand Fail(string why){Stop(why);return Command(OperationAction.Stop,OperationPurpose.Travel,LastReason);}
         OperationCommand None(string why){LastReason=why;return Command(OperationAction.None,OperationPurpose.Travel,why);}
         static OperationCommand Command(OperationAction action,OperationPurpose purpose,string why){return new OperationCommand{Action=action,Purpose=purpose,Reason=why};}

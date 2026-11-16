@@ -99,6 +99,36 @@ class FarmSessionTests
             Check(s.LastCommand.Action>=FarmAction.Skill1&&s.LastCommand.Action<=FarmAction.Skill4);
             Check(f.Downs.Count>0&&Attack(f.Downs[f.Downs.Count-1]));
         });
+        Run("blind negative action usability does not veto the planned damaging skill",delegate{
+            var f=new Fake();var s=New(f);var p=Profile();p.BlindGrind=true;p.SkillSequence="2";
+            observation.RangeKnown=false;observation.TargetInRange=false;observation.TargetPositionKnown=false;
+            observation.ActionsKnown=true;observation.UsableActionsMask=1;
+            s.Start(Route(),p,false,false,0);Pump(s,true);
+            Check(s.LastCommand.Action==FarmAction.Skill2&&f.Downs.Contains(0x32));s.Stop("done");
+        });
+        Run("blind pending skills reject a swapped player friendly or unverified target",delegate{
+            Action<FarmObservation>[] faults={o=>{o.TargetToken++;o.TargetIsPlayer=true;},o=>{o.TargetToken++;o.TargetCanAttack=false;},o=>{o.TargetToken++;o.TargetIdentityKnown=false;},o=>o.TargetExists=false};
+            foreach(var fault in faults){var f=new Fake();bool changed=false;var s=New(f,delegate(string text){if(text.StartsWith("Farm pulse Skill")){changed=true;fault(observation);}});var p=Profile();p.BlindGrind=true;p.SkillSequence="2";s.Start(Route(),p,false,false,0);Until(s,delegate{return changed;});Check(!s.IsActive&&f.Downs.Count==0);}
+        });
+        Run("blind skills retain a known unit token when the full name is secret",delegate{
+            var f=new Fake();var s=New(f);var p=Profile();p.BlindGrind=true;p.SkillSequence="2";
+            observation.NameHashKnown=false;observation.TargetNameHash=0;observation.TargetName="";
+            observation.RangeKnown=false;observation.TargetInRange=false;observation.TargetPositionKnown=false;
+            s.Start(Route(),p,false,false,0);Pump(s,true);
+            Check(s.LastCommand.Action==FarmAction.Skill2&&f.Downs.Contains(0x32));s.Stop("done");
+        });
+        Run("blind held skills release on a target swap instead of reaching a player",delegate{
+            var f=new Fake();var s=New(f);var p=Profile();p.BlindGrind=true;p.SkillSequence="2";
+            s.Start(Route(),p,false,false,0);Pump(s,true);int count=f.Downs.Count;
+            observation.TargetToken++;observation.TargetIsPlayer=true;now+=10;s.Tick();
+            Check(!s.IsActive&&!s.IsHolding&&f.Downs.Count==count&&f.Ups==count);
+        });
+        Run("strict session cannot arm with unreadable player vitals",delegate{
+            foreach(Action<FarmObservation> mutate in new Action<FarmObservation>[] {o=>o.Health=255,o=>o.Power=255,o=>o.PowerType=255}){var f=new Fake();var s=New(f);mutate(observation);Reject(delegate{s.Start(Route(),Profile(),false,false,0);});Check(f.Downs.Count==0);}
+        });
+        Run("strict pending skills reject unreadable target health",delegate{
+            var f=new Fake();var s=New(f);observation.TargetHealth=255;s.Start(Route(),Profile(),false,false,0);Until(s,delegate{return !s.IsActive;});Check(!f.Downs.Exists(Attack));
+        });
         Console.WriteLine("Farm session tests: "+passed+" passed, "+failed+" failed. Fake backend only.");return failed==0?0:1;
     }
 }

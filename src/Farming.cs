@@ -10,6 +10,15 @@ namespace WoWProbe
         public bool RequireDeadTarget, RequireAliveTarget;
         public string Reason;
     }
+    internal static class FarmVitals
+    {
+        internal static bool Percent(int value, bool blind)
+        { return value >= 0 && value <= 100 || blind && value == 255; }
+        internal static bool Power(FarmObservation o, bool blind)
+        { return (o.PowerType >= 0 && o.PowerType < 255 || blind && o.PowerType == 255) && (o.PowerType != 0 || Percent(o.Power, blind)); }
+        internal static bool Unreadable(FarmObservation o)
+        { return o.Health == 255 || o.PowerType == 255 || o.PowerType == 0 && o.Power == 255; }
+    }
     public sealed class FarmEngine
     {
         private enum Phase { Patrol, Scan, Approach, Combat, Loot, Skin, Rest, Stopped, Completed }
@@ -30,7 +39,7 @@ namespace WoWProbe
         private int lastDamagedHealth = 255, blindRetries;
         private long lastDamageAt, abandonedUntil, meleeReachedAt, nextBlindTurn;
         private bool meleeReached;
-        private uint abandonedHash;
+        private uint abandonedToken;
         private int pendingForwardMs;
         private uint lockedHash, lootOpenBase, lootCloseBase, skinBase, skinFailedBase, castSuccess;
         private double approachOriginX, approachOriginY, anchorX, anchorY;
@@ -61,20 +70,14 @@ namespace WoWProbe
             if (hasTime && phase == Phase.Patrol) navNow += nowMs - lastNow;
             hasTime = true; lastNow = nowMs;
             FarmObservation o = observation;
-            // Blind grind tolerance: a swapped live target (Tab drift, a mob killed by another
-            // player) re-locks onto the new attackable target instead of stopping the cycle.
-            if (Blind && EncounterActive && phase != Phase.Loot && phase != Phase.Skin &&
-                o.TargetExists && o.TargetIdentityKnown && o.NameHashKnown && o.TargetNameHash != lockedHash &&
-                o.AttackabilityKnown && !o.TargetIsPlayer && o.TargetCanAttack && o.TargetDeadKnown && !o.TargetDead)
-            {
-                LockedTargetToken = o.TargetToken; lockedHash = o.TargetNameHash;
-                lootOpenBase = o.LootOpened; lootCloseBase = o.LootClosed; deathFrames = 0; lootAttempts = 0;
-                lastEvidence = nowMs; unavailable = 0;
-                if (phase == Phase.Approach) ResetApproachProgress();
-            }
-            string unsafeState = UnsafeReason(observation);
+            bool distinct = o != null && (!hasSequence || o.Sequence != sequence);
+            // Replanning may adopt a newly observed verified unit between commands. A pending
+            // input retains its original unit token and is guarded separately by FarmSession.
+            bool relock = Blind && distinct && EncounterActive && phase != Phase.Loot && phase != Phase.Skin &&
+                CanBlindLock(o) && o.TargetToken != LockedTargetToken;
+            string unsafeState = UnsafeReason(observation, relock);
             if (unsafeState != null) return Fail(unsafeState);
-            bool distinct = !hasSequence || o.Sequence != sequence;
+            if (relock) { hasSequence = true; sequence = o.Sequence; return Lock(o, BlindTarget(o), nowMs); }
             if (distinct && EncounterActive && !o.TargetDead && (phase == Phase.Combat || phase == Phase.Approach))
             {
                 deathFrames = 0;
@@ -89,6 +92,9 @@ namespace WoWProbe
                     (Blind && o.InCombat)) lastEvidence = nowMs;
                 targetHealth = o.TargetHealth; castSuccess = o.CastSuccess;
             }
+            // A blind corpse timeout abandons only the corpse, including on a repeated frame;
+            // the generic strict-mode deadline must not stop the whole grind first.
+            if (Blind && phase == Phase.Loot && nowMs - stateStarted >= profile.LootTimeoutMs) return Loot(o, nowMs);
             string timeout = TimeoutReason(nowMs);
             if (timeout != null) return Fail(timeout);
             // Safety and clocks are always checked, including a repeated frame. Only distinct frames advance state.
@@ -105,17 +111,14 @@ namespace WoWProbe
                     BattleTarget match = TargetCatalog.Match(profile, o);
                     // After a blind disengage, do not immediately re-lock the same mob: it would
                     // undo the retreat on the very next frame and re-create the standing-still death.
-                    bool abandoned = Blind && nowMs < abandonedUntil && o.NameHashKnown && o.TargetNameHash == abandonedHash && abandonedHash != 0;
+                    bool abandoned = Blind && nowMs < abandonedUntil && o.TargetIdentityKnown && o.TargetToken == abandonedToken && abandonedToken != 0;
                     if (abandoned) match = null;
                     // Blind grind: any attackable non-player target is eligible, catalog match is preferred.
                     // Live 02:15: after /reload the client reported a target with identity and
                     // UnitCanAttack but no full-name hash, so requiring NameHashKnown left the
                     // engine scanning TAB forever with token=0 while the client held a valid mob.
                     // TargetToken is a per-unit GUID hash from WC3 and is a better identity anyway.
-                    if (match == null && !abandoned && Blind && o.TargetExists && o.TargetToken != 0 &&
-                        o.AttackabilityKnown && !o.TargetIsPlayer && o.TargetCanAttack && o.TargetDeadKnown && !o.TargetDead)
-                        match = new BattleTarget { Name = String.IsNullOrEmpty(o.TargetName) ? "unknown" : o.TargetName,
-                            NameHash = o.NameHashKnown && o.TargetNameHash != 0 ? o.TargetNameHash : o.TargetToken, Kind = "monster" };
+                    if (match == null && !abandoned && Blind && CanBlindLock(o)) match = BlindTarget(o);
                     if (match != null) return Lock(o, match, nowMs);
                     if (phase == Phase.Scan)
                     {
@@ -321,7 +324,7 @@ namespace WoWProbe
         // here would end the run; the abandoned hash prevents an immediate re-lock of the same mob.
         private FarmCommand AbortEncounter(long now, string why)
         {
-            abandonedHash = lockedHash; abandonedUntil = now + BlindAbandonMs;
+            abandonedToken = LockedTargetToken; abandonedUntil = now + BlindAbandonMs;
             LockedTargetToken = 0; lockedHash = 0;
             Enter(Phase.Patrol, now); nextScan = now + 9000;
             // Maximum allowed turn pulse (250ms) plus the following patrol forward pulse
@@ -386,9 +389,11 @@ namespace WoWProbe
         }
         private FarmCommand Rest(FarmObservation o, long now)
         {
-            bool healthReady = o.Health >= profile.RecoverTo, manaReady = o.PowerType != 0 || o.Power >= profile.RecoverTo;
+            bool skipped = Blind && FarmVitals.Unreadable(o);
+            bool healthReady = Blind && o.Health == 255 || o.Health >= profile.RecoverTo;
+            bool manaReady = Blind && (o.PowerType == 255 || o.PowerType == 0 && o.Power == 255) || o.PowerType != 0 || o.Power >= profile.RecoverTo;
             if (healthReady && manaReady)
-            { Enter(Phase.Patrol, now); nextScan = now; return None("Observed health and applicable mana recovered; resuming the same route index."); }
+            { Enter(Phase.Patrol, now); nextScan = now; return None(skipped ? "Blind mode: unreadable vital thresholds skipped; restoration was not observed. Resuming the same route index." : "Observed health and applicable mana recovered; resuming the same route index."); }
             if (o.Casting || o.Channeling) return None("Waiting for the current cast while resting.");
             if (!healthReady && !healIssued) { healIssued = true; return Command(FarmAction.Heal, 120, "Using food once; observed recovery is required.", false, false); }
             if (!manaReady && !manaIssued) { manaIssued = true; return Command(FarmAction.Mana, 120, "Using water once for a mana power type; observed recovery is required.", false, false); }
@@ -404,14 +409,24 @@ namespace WoWProbe
         private FarmCommand Select(long now)
         { scans++; nextScan = now + profile.ScanIntervalMs; return Command(FarmAction.SelectTarget, 120, "Bounded target scan " + scans + "/" + profile.ScanLimit + ".", false, false); }
         private bool NeedsRest(FarmObservation o) { return o.Health < profile.HealBelow || (o.PowerType == 0 && o.Power < profile.ManaBelow); }
-        private string UnsafeReason(FarmObservation o)
+        private static bool CanBlindLock(FarmObservation o)
+        {
+            return o != null && o.Fresh && o.KnownCore && o.ReadFailures == 0 && o.TargetExists &&
+                o.TargetIdentityKnown && o.TargetToken != 0 && o.AttackabilityKnown && !o.TargetIsPlayer &&
+                o.TargetCanAttack && o.TargetDeadKnown && !o.TargetDead && (!o.NameHashKnown || o.TargetNameHash != 0);
+        }
+        private static BattleTarget BlindTarget(FarmObservation o)
+        {
+            return new BattleTarget { Name = String.IsNullOrEmpty(o.TargetName) ? "unknown" : o.TargetName,
+                NameHash = o.NameHashKnown ? o.TargetNameHash : 0, Kind = "monster" };
+        }
+        private string UnsafeReason(FarmObservation o, bool relock)
         {
             if (o == null || !o.Fresh || !o.KnownCore || o.ReadFailures != 0) return "Fresh, known core and matching combat observations without read failures are required.";
             if (o.PlayerDead || o.PlayerGhost || o.BagFull) return "Player death, ghost or full bags stopped farming.";
-            // 255 = unavailable (secret value on Forever client); skip validation for unreadable fields.
-            if (o.Health != 255 && (o.Health < 0 || o.Health > 100)) return "Health data is invalid.";
-            if (o.PowerType != 255 && o.PowerType < 0) return "Power type data is invalid.";
-            if (o.PowerType == 0 && o.Power != 255 && (o.Power < 0 || o.Power > 100)) return "Mana data is invalid.";
+            // The unknown sentinel is permitted only by explicit blind-mode opt-in.
+            if (!FarmVitals.Percent(o.Health, Blind)) return "Health data is invalid or unknown in strict mode.";
+            if (!FarmVitals.Power(o, Blind)) return "Power type or applicable mana is invalid or unknown in strict mode.";
             if (o.Health != 255 && o.Health <= profile.CriticalHealth) return "Critical player health stopped farming immediately.";
             if (o.MapId != route.MapId || o.MapMode != route.MapMode || !String.Equals(o.Zone, route.Zone, StringComparison.Ordinal)) return "Farming map, mode or zone changed.";
             if (!NavigationMath.InRange(o.X, 0, 1) || !NavigationMath.InRange(o.Y, 0, 1) || !NavigationMath.Finite(o.Facing)) return "Player position or facing is unknown or invalid.";
@@ -420,7 +435,8 @@ namespace WoWProbe
             if (o.InCombat && !EncounterActive && !Blind) return "Unexpected combat occurred before a saved target was locked.";
             if (EncounterActive)
             {
-                if (!o.TargetExists || !o.TargetIdentityKnown || o.TargetToken != LockedTargetToken || !o.NameHashKnown || o.TargetNameHash != lockedHash)
+                if (!o.TargetExists || !o.TargetIdentityKnown || o.TargetToken == 0 ||
+                    (!relock && (o.TargetToken != LockedTargetToken || ((!Blind || lockedHash != 0) && (!o.NameHashKnown || o.TargetNameHash != lockedHash)))))
                     return "Locked target disappeared or its identity changed.";
                 if (!o.TargetDeadKnown || !o.AttackabilityKnown || o.TargetIsPlayer || (!o.TargetDead && !o.TargetCanAttack)) return "Locked target death or attackability is unknown or unsafe.";
                 if (!Blind && (phase == Phase.Combat || phase == Phase.Approach) && !o.TargetDead && (!o.RangeKnown || o.RangeSlot != profile.RangeSlot)) return "Locked target range is unknown or the range slot changed.";

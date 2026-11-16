@@ -137,7 +137,7 @@ namespace WoWProbe
             if(c.Action==NavigationAction.None)return None(c.Reason);
             return new OperationCommand{Action=OperationAction.Key,Purpose=OperationPurpose.Travel,Key=plan.Battle.Movement.For(c.Action),HoldMilliseconds=c.HoldMilliseconds,Reason=c.Reason};
         }
-        bool IsSavedNpc(FarmObservation f){return f.TargetExists&&f.TargetIdentityKnown&&f.TargetToken!=0&&f.NameHashKnown&&names.Contains(f.TargetNameHash)&&f.AttackabilityKnown&&!f.TargetCanAttack&&!f.TargetIsPlayer&&f.TargetDeadKnown&&!f.TargetDead&&(f.TargetHealth==255||(f.TargetHealth>0&&f.TargetHealth<=100));}
+        bool IsSavedNpc(FarmObservation f){return f.TargetExists&&f.TargetIdentityKnown&&f.TargetToken!=0&&f.NameHashKnown&&names.Contains(f.TargetNameHash)&&f.AttackabilityKnown&&!f.TargetCanAttack&&!f.TargetIsPlayer&&f.TargetDeadKnown&&!f.TargetDead&&(plan.Battle.BlindGrind&&f.TargetHealth==255||(f.TargetHealth>0&&f.TargetHealth<=100));}
         bool SameNpc(FarmObservation f){return IsSavedNpc(f)&&f.TargetToken==vendorToken&&f.TargetNameHash==vendorHash;}
         string MerchantProblem(OperationObservation o)
         {
@@ -154,7 +154,8 @@ namespace WoWProbe
             if(o==null||!o.Fresh||o.Farm==null||!o.Farm.Fresh||!o.Farm.KnownCore||o.Farm.ReadFailures!=0)return "Fresh matching observations with known core state are required for vendor travel.";
             var f=o.Farm;if(f.PlayerDead||f.PlayerGhost)return "Death or ghost state interrupted the vendor workflow.";
             if(f.InCombat&&phase!=Phase.WaitCombat)return "Combat interrupted the vendor workflow.";
-            if(f.Health!=255&&(f.Health<=plan.Battle.CriticalHealth||f.Health>100))return "Unknown or critical health stopped vendor travel.";
+            if(!FarmVitals.Percent(f.Health,plan.Battle.BlindGrind)||f.Health!=255&&f.Health<=plan.Battle.CriticalHealth)return "Unknown or critical health stopped vendor travel.";
+            if(!FarmVitals.Power(f,plan.Battle.BlindGrind))return "Unknown resource type or applicable mana stopped vendor travel.";
             if(!f.CastingKnown)return "Casting state is unknown during vendor travel.";
             if(phase!=Phase.WaitCombat&&(f.Casting||f.Channeling))return "Unexpected casting interrupted the vendor workflow.";
             if(f.MapId!=plan.FarmRoute.MapId||f.MapMode!=plan.FarmRoute.MapMode||!String.Equals(f.Zone,plan.FarmRoute.Zone,StringComparison.Ordinal))return "Vendor map identity or zone changed.";

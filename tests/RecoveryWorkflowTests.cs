@@ -47,7 +47,18 @@ internal static class RecoveryWorkflowTests
         Test("starting as ghost completes without a release click",delegate{RunCycle(true,false,false);});
         Test("resurrection cooldown waits for known zero and does not click early",delegate{RunCycle(true,true,false);});
         Test("missing supplies cannot fabricate recovery completion",delegate{RunCycle(false,false,true);});
+        Test("strict recovery cannot treat unreadable health or mana as restored",delegate{foreach(int variant in new[]{0,1,2}){var p=Plan();var e=new RecoveryEngine(p,2);var o=AtRecoveryRest(e);if(variant==0)o.Farm.Health=255;else if(variant==1)o.Farm.Power=255;else o.Farm.PowerType=255;Next(o);Equal(OperationAction.Stop,e.Step(o,800).Action,"unknown strict recovery vitals");}});
+        Test("blind recovery identifies skipped unknown thresholds without claiming observed restoration",delegate{var p=Plan();p.Battle.BlindGrind=true;var e=new RecoveryEngine(p,2);var o=AtRecoveryRest(e);o.Farm.Health=o.Farm.Power=o.Farm.PowerType=255;Next(o);var c=e.Step(o,800);Check(c.Action!=OperationAction.Stop&&c.Reason.Contains("unreadable")&&!c.Reason.Contains("Recovery observed"),"unknown vitals were reported as observed recovery");});
+        Test("blind release needs two distinct known-dead frames when health is unreadable",delegate{var p=Plan();p.Battle.BlindGrind=true;var e=new RecoveryEngine(p,2);var o=Observe(1,true,false,.51,.5);o.Farm.Health=255;Equal(OperationAction.None,e.Step(o,0).Action,"first unknown-health dead frame");Equal(OperationAction.None,e.Step(o,100).Action,"duplicate cannot confirm death");Next(o);var c=e.Step(o,200);Check(c.Action==OperationAction.LeftClick&&c.Purpose==OperationPurpose.Release,"known death did not permit blind release");});
+        Test("strict resurrection confirmation cannot accept unreadable positive health",delegate{var e=new RecoveryEngine(Plan(),2);var o=Observe(1,true,true,.51,.5);e.Step(o,0);Next(o);Check(e.Step(o,200).Purpose==OperationPurpose.Resurrect,"fixture did not issue a resurrection command");o.Farm.PlayerDead=o.Farm.PlayerGhost=false;o.Farm.Health=255;o.ResurrectVisible=false;Next(o);Equal(OperationAction.Stop,e.Step(o,400).Action,"unknown strict health must not confirm life");});
         Console.WriteLine("Recovery workflow tests: "+passed+" passed, "+failed+" failed. Pure observations only; no input backend.");return failed==0?0:1;
+    }
+    static OperationObservation AtRecoveryRest(RecoveryEngine e)
+    {
+        var o=Observe(1,true,true,.51,.5);e.Step(o,0);Next(o);var click=e.Step(o,200);
+        Equal(OperationPurpose.Resurrect,click.Purpose,"fixture must reach actual resurrection command");
+        o.Farm.PlayerDead=o.Farm.PlayerGhost=false;o.Farm.Health=o.Farm.Power=90;o.ResurrectVisible=false;
+        Next(o);e.Step(o,400);Next(o);e.Step(o,600);Equal("Rest",e.Status,"actual life confirmations reach recovery rest");return o;
     }
     static void RunCycle(bool startsGhost,bool cooldown,bool noSupplies)
     {

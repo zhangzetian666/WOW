@@ -49,6 +49,15 @@ internal static class FarmingTests
         Run("blind pulses stay inside the session bounded input window", BlindPulsesStayBounded);
         Run("blind combat never toggles the plain Attack slot", BlindNeverTogglesAttackSlot);
         Run("readable distance drives the chase and saves energy", BlindDistanceDrivenChase);
+        Run("blind unknown names retain a verified unit identity across frames", BlindUnknownNameIdentity);
+        Run("blind fallback refuses an unverified unit identity", BlindUnknownIdentityRejected);
+        Run("blind planner can relock a different unit with the same full name", BlindSameNameRelock);
+        Run("blind missing observations stop instead of throwing during an encounter", BlindMissingObservation);
+        Run("blind corpse deadline abandons the corpse and resumes patrol", BlindLootDeadline);
+        Run("blind abandon cooldown follows the unit token even when names are secret", BlindAbandonIdentity);
+        Run("strict farming rejects unknown vitals and invalid resource types", StrictUnknownVitals);
+        Run("blind farming explicitly tolerates unreadable vitals", BlindUnknownVitals);
+        Run("blind rest does not describe unreadable vitals as observed recovery", BlindUnknownRest);
         Console.WriteLine("Farming tests: {0} passed, {1} failed. Synthetic observations only; no OS input.", passed, failed);
         return failed == 0 ? 0 : 1;
     }
@@ -149,8 +158,7 @@ internal static class FarmingTests
     }
     private static void SafetyFaults()
     {
-        // Health 255 is the sanctioned "unreadable" sentinel on secret-value clients and is
-        // tolerated (never a stop), so it is excluded from the stop-fault list.
+        // Unreadable vitals require explicit blind-mode opt-in; covered separately below.
         Action<FarmObservation>[] faults = { o => o.Fresh = false, o => o.KnownCore = false, o => o.PlayerDead = true, o => o.PlayerGhost = true, o => o.BagFull = true,
             o => o.ReadFailures = 1, o => o.MapId++, o => o.MapMode = 1, o => o.Zone = "other", o => o.X = Double.NaN, o => o.Facing = Double.NaN, o => o.InCombat = true };
         foreach (Action<FarmObservation> fault in faults)
@@ -473,5 +481,64 @@ internal static class FarmingTests
         Check(abandonedAt > 0, "must have abandoned first");
         for (long t = abandonedAt + 500; t < abandonedAt + 12000; t += 500)
         { Next(e, o, t); Check(!e.EncounterActive, "abandoned mob must not be re-locked during the cooldown"); }
+    }
+    private static void BlindUnknownNameIdentity()
+    {
+        var o = SecretRangeMonster(); o.NameHashKnown = false; o.TargetNameHash = 0; o.TargetName = "";
+        var e = Locked(BlindProfile("2"), o);
+        Check(Next(e, o, 200).Action != FarmAction.Stop, "same known unit token must survive a secret full name");
+        Equal((uint)77, e.LockedTargetToken, "known unit identity is retained");
+    }
+    private static void BlindUnknownIdentityRejected()
+    {
+        var o = SecretRangeMonster(); o.TargetIdentityKnown = false;
+        var e = Engine(BlindProfile("2")); e.Step(o, 0);
+        Check(!e.EncounterActive, "a nonzero token without identity knowledge cannot be locked");
+    }
+    private static void BlindSameNameRelock()
+    {
+        var o = SecretRangeMonster(); var e = Locked(BlindProfile("2"), o);
+        o.TargetToken = 78;
+        Check(Next(e, o, 200).Action != FarmAction.Stop, "a verified new unit can be replanned between commands");
+        Equal((uint)78, e.LockedTargetToken, "relock must follow unit token rather than full-name difference");
+    }
+    private static void BlindMissingObservation()
+    {
+        var o = SecretRangeMonster(); var e = Locked(BlindProfile("2"), o);
+        Equal(FarmAction.Stop, e.Step(null, 200).Action, "missing observation stops safely");
+    }
+    private static void BlindLootDeadline()
+    {
+        var o = Monster(true); var p = BlindProfile("2"); var e = LootReady(p, o);
+        Check(Next(e, o, 400 + p.LootTimeoutMs).Action != FarmAction.Stop, "blind loot timeout must not stop the session");
+        Check(!e.EncounterActive && e.Status == "Patrol", "loot deadline releases the corpse and resumes patrol");
+    }
+    private static void BlindAbandonIdentity()
+    {
+        var o = BlindStalled(); o.TargetHealth = 255; o.NameHashKnown = false; o.TargetNameHash = 0;
+        var e = Locked(BlindProfile("2"), o); long abandonedAt = 0;
+        for (long t = 500; t <= 60000; t += 500)
+        { Next(e, o, t); if (!e.EncounterActive) { abandonedAt = t; break; } }
+        Check(abandonedAt > 0, "nameless unit must reach the abandon deadline");
+        Next(e, o, abandonedAt + 500); Check(!e.EncounterActive, "same unit is suppressed without a readable name");
+        o.TargetToken = 78; Next(e, o, abandonedAt + 1000);
+        Equal((uint)78, e.LockedTargetToken, "another verified unit is not suppressed by the prior abandon");
+    }
+    private static void StrictUnknownVitals()
+    {
+        foreach(Action<FarmObservation> mutate in new Action<FarmObservation>[] {o=>o.Health=255,o=>o.Power=255,o=>o.PowerType=255,o=>o.PowerType=256})
+        { var o=Observation();mutate(o);Equal(FarmAction.Stop,Engine(Profile()).Step(o,0).Action,"strict mode must reject unknown vitals"); }
+    }
+    private static void BlindUnknownVitals()
+    {
+        var o=Observation();o.Health=o.Power=o.PowerType=255;
+        Check(Engine(BlindProfile("2")).Step(o,0).Action!=FarmAction.Stop,"explicit blind mode accepts unreadable vitals without inventing values");
+        o.PowerType=256;Equal(FarmAction.Stop,Engine(BlindProfile("2")).Step(o,0).Action,"invalid resource type is not an unknown sentinel");
+    }
+    private static void BlindUnknownRest()
+    {
+        var o=Observation();o.Health=30;o.Power=20;var e=Engine(BlindProfile("2"));e.Step(o,0);
+        o.Health=o.Power=255;var c=Next(e,o,200);
+        Check(c.Action!=FarmAction.Stop&&c.Reason.Contains("unreadable")&&!c.Reason.Contains("Observed health"),"skipped thresholds must be identified as unreadable");
     }
 }

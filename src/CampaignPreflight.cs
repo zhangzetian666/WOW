@@ -47,9 +47,15 @@ namespace WoWProbe
             Add(r,"map","当前地图",o.MapId==p.FarmRoute.MapId&&f.MapId==o.MapId&&f.MapMode==p.FarmRoute.MapMode&&String.Equals(f.Zone,p.FarmRoute.Zone,StringComparison.Ordinal),"与方案绑定的地图、模式和区域一致。","当前地图与路线不一致；不要直接套用合成演示坐标。");
             Add(r,"geometry","客户区尺寸",o.GeometryKnown&&o.LayoutToken!=0&&o.ClientWidth==s.ClientWidth&&o.ClientHeight==s.ClientHeight,"布局可读且尺寸与已核对设置一致。","读取当前客户区尺寸，重新定位并核对窗口布局。");
             Add(r,"position","当前坐标与朝向",NavigationMath.InRange(f.X,0,1)&&NavigationMath.InRange(f.Y,0,1)&&NavigationMath.InRange(f.Facing,0,Math.PI*2),"坐标和朝向可读。","坐标或朝向未知、超范围，请先完成只读验证。");
-            Add(r,"health","角色血量",f.Health==255||(f.Health>=0&&f.Health<=100&&(f.PlayerDead||f.PlayerGhost||f.Health>b.CriticalHealth)),f.Health==255?"血量不可读（瞎子模式）：无血量阈值保护，已按不可读豁免。":"当前血量状态可由对应流程处理。","血量未知或活着时低于紧急停止阈值，请先人工处理。");
+            if(b.BlindGrind&&f.Health==255)Pending(r,"health","角色血量","已显式启用盲战：血量不可读，跳过血量阈值；这不表示已恢复血量，也没有低血量保护。");
+            else Add(r,"health","角色血量",FarmVitals.Percent(f.Health,false)&&(f.PlayerDead||f.PlayerGhost||f.Health>b.CriticalHealth),"当前血量状态可由对应流程处理。","血量未知或活着时低于紧急停止阈值，请先人工处理。");
             Add(r,"combat","当前战斗",!f.InCombat,"当前没有意外战斗。","请先脱战；不能在未锁定本会话怪物时启动。");
-            if(!f.PlayerDead&&!f.PlayerGhost)Add(r,"power","资源与施法状态",f.CastingKnown&&(f.PowerType==255||(f.PowerType>=0&&f.PowerType<255))&&(f.PowerType!=0||f.Power==255||(f.Power>=0&&f.Power<=100))&&!f.Casting&&!f.Channeling,"当前资源类型、必要法力和施法状态有效。","资源或施法状态未知，或当前仍在施法/引导。");
+            if(!f.PlayerDead&&!f.PlayerGhost)
+            {
+                bool powerValid=FarmVitals.Power(f,b.BlindGrind)&&f.CastingKnown&&!f.Casting&&!f.Channeling;
+                if(powerValid&&b.BlindGrind&&(f.PowerType==255||f.PowerType==0&&f.Power==255))Pending(r,"power","资源与施法状态","已显式启用盲战：资源不可读，跳过对应阈值；不将未知值视为恢复完成。");
+                else Add(r,"power","资源与施法状态",powerValid,"当前资源类型、必要法力和施法状态有效。","资源或施法状态未知，或当前仍在施法/引导。");
+            }
             Add(r,"cursor","鼠标指针状态",o.CursorKnown&&o.CursorEmpty,"指针未携带物品。","先放回指针上的物品；状态未知时不能自动输入。");
             Add(r,"popup","阻挡弹窗",o.ConfirmationKnown&&!o.ConfirmationVisible,"没有需要人工确认的弹窗。","处理确认弹窗；弹窗状态未知时先检查默认界面适配。");
             if(o.IncomingResurrectionKnown&&o.IncomingResurrection||s.EnableRecovery&&(f.PlayerDead||f.PlayerGhost))Add(r,"resurrection_invite","他人复活邀请",o.IncomingResurrectionKnown&&!o.IncomingResurrection,"没有待人工处理的他人复活邀请。","先人工处理复活邀请或验证对应只读能力。");else Pending(r,"resurrection_invite","他人复活邀请","进入死亡恢复后再次验证，不能自动接受邀请。");

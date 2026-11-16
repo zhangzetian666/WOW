@@ -104,7 +104,8 @@ namespace WoWProbe
             if(o==null||!o.Fresh||o.Farm==null||!o.Farm.Fresh||!o.Farm.KnownCore||o.Farm.ReadFailures!=0||o.Sequence!=o.Farm.Sequence)return "完整流程状态过期、序号不配或必要能力未知。";
             if(!o.FreeSlotsKnown||o.FreeSlots<0)return "背包空位未知，停止完整流程。";
             var f=o.Farm;if(f.MapId!=plan.FarmRoute.MapId||o.MapId!=f.MapId||f.MapMode!=plan.FarmRoute.MapMode||!String.Equals(f.Zone,plan.FarmRoute.Zone,StringComparison.Ordinal))return "完整流程地图或区域不匹配。";
-            if(!NavigationMath.InRange(f.X,0,1)||!NavigationMath.InRange(f.Y,0,1)||!NavigationMath.Finite(f.Facing)||(f.Health!=255&&(f.Health<0||f.Health>100)))return "角色位置、朝向或血量无效。";return null;
+            if(!NavigationMath.InRange(f.X,0,1)||!NavigationMath.InRange(f.Y,0,1)||!NavigationMath.Finite(f.Facing)||!FarmVitals.Percent(f.Health,plan.Battle.BlindGrind))return "角色位置、朝向或血量无效。";
+            if(!f.PlayerDead&&!f.PlayerGhost&&!FarmVitals.Power(f,plan.Battle.BlindGrind))return "资源类型或必要法力未知，停止完整流程。";return null;
         }
         OperationCommand Fail(string why){Stop(why);return Result(OperationAction.Stop,LastReason);}
         static OperationCommand Result(OperationAction a,string reason){return new OperationCommand{Action=a,Reason=reason};}

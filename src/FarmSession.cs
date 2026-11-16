@@ -102,7 +102,7 @@ namespace WoWProbe
                         return;
                     }
                     if(waiting&&current.Sequence==releaseSequence)return;waiting=false;
-                    FarmCommand next=engine.Step(current,time);command=next;uint expectedHash=current.TargetNameHash;
+                    FarmCommand next=engine.Step(current,time);command=next;uint expectedHash=current.NameHashKnown?current.TargetNameHash:0;
                     if(next.Action==FarmAction.Stop){StopCore(next.Reason);return;}
                     if(next.Action==FarmAction.Completed){running=false;status="Completed";reason=next.Reason;WriteLog("Farm cycle completed.");return;}
                     if(next.Action==FarmAction.None){status="WaitingForFrame";reason=next.Reason;return;}
@@ -165,13 +165,9 @@ namespace WoWProbe
             if(c==null)return null;
             if(before&&(o.Casting||o.Channeling))return "Casting or channeling changed before pending input.";
             if(c.ExpectedTargetToken==0)return null;
-            if(!o.TargetExists||!o.TargetIdentityKnown||o.TargetToken!=c.ExpectedTargetToken||!o.NameHashKnown||expectedHash==0||o.TargetNameHash!=expectedHash)
-            {
-                // Blind grind: the engine re-locks swapped live targets; only corpse actions
-                // (loot/skin) still require the exact confirmed identity.
-                if(p.BlindGrind&&c.Action!=FarmAction.Interact&&c.Action!=FarmAction.Skin)return null;
-                return "Locked target identity or full-name hash changed.";
-            }
+            if(!o.TargetExists||!o.TargetIdentityKnown||o.TargetToken==0||o.TargetToken!=c.ExpectedTargetToken)return "Locked target identity changed.";
+            if((!p.BlindGrind||expectedHash!=0)&&(!o.NameHashKnown||expectedHash==0||o.TargetNameHash!=expectedHash))return "Locked target full-name hash changed.";
+            if(o.NameHashKnown&&o.TargetNameHash==0)return "Known target full-name hash is invalid.";
             if(o.TargetIsPlayer)return "A player cannot receive this farming action.";
             if(!o.TargetDeadKnown||!o.AttackabilityKnown)return "Locked target death or attackability became unknown.";
             if(c.RequireDeadTarget&&!o.TargetDead)return "Loot and skin input requires an explicitly confirmed dead target.";
@@ -185,11 +181,11 @@ namespace WoWProbe
                 // engine's blind swing is discarded before it ever reaches the input backend.
                 if(skill&&!o.TargetInRange&&!(p.BlindGrind&&!o.RangeKnown))return "Locked skill target moved out of range.";
                 // 255 = unavailable (secret value); skip target-health gating for blind combat mode.
-                if(before&&o.TargetHealth!=255&&(o.TargetHealth<=0||o.TargetHealth>100))return "Pending live-target action lacks known positive target health.";
+                if(before&&!(p.BlindGrind&&o.TargetHealth==255)&&(o.TargetHealth<=0||o.TargetHealth>100))return "Pending live-target action lacks known positive target health.";
                 // With secret action state the blind engine deliberately swings without telemetry;
                 // do not re-veto that decision here. When telemetry exists the fallback slot was
                 // chosen from the usable mask, so this check still passes.
-                if(before&&skill&&!(p.BlindGrind&&!o.ActionsKnown))
+                if(before&&skill&&!p.BlindGrind)
                 {
                     int mask=1<<((int)c.Action-(int)FarmAction.Skill1);
                     if(!o.ActionsKnown||(o.KnownActionsMask&mask)==0||(o.ReadyActionsMask&mask)==0||(o.UsableActionsMask&mask)==0)return "Pending skill is no longer known, ready and usable.";
@@ -214,9 +210,8 @@ namespace WoWProbe
             if(!o.KnownCore||o.ReadFailures!=0)return "Required core state is unknown or an API read failed.";
             if(o.PlayerDead||o.PlayerGhost)return "Player death or ghost state stopped farming.";
             if(o.BagFull)return "Full bags stopped farming.";
-            if(o.Health!=255&&(o.Health<0||o.Health>100||o.Health<=p.CriticalHealth))return "Health is unknown or critical.";
-            if(o.PowerType!=255&&o.PowerType<0)return "Required power type is unknown.";
-            if(o.PowerType==0&&o.Power!=255&&(o.Power<0||o.Power>100))return "Required mana is unknown.";
+            if(!FarmVitals.Percent(o.Health,p.BlindGrind)||(o.Health!=255&&o.Health<=p.CriticalHealth))return "Health is unknown or critical.";
+            if(!FarmVitals.Power(o,p.BlindGrind))return "Required power type or mana is unknown.";
             if(!o.CastingKnown)return "Casting state became unknown.";
             if(o.MapId!=route.MapId||o.MapMode!=route.MapMode||!String.Equals(o.Zone,route.Zone,StringComparison.Ordinal))return "Farming map identity or zone changed.";
             if(!Finite(o.X)||!Finite(o.Y)||o.X<0||o.X>1||o.Y<0||o.Y>1||!Finite(o.Facing)||o.Facing<0||o.Facing>Math.PI*2)return "Player position or facing is invalid.";
