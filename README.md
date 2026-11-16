@@ -1,9 +1,10 @@
 # WOW 脚本开发
 
-本仓库保存脚本源代码、辅助插件及项目 Markdown 文档。当前完整开发版为 0.6.0，在路线、战斗、死亡恢复、包满售卖和返回续跑基础上增加完整方案交接、启动前检查及只读测试反馈摘要。用户授权先完成开发、稍后提供游戏测试反馈；真实客户端效果与连续运行验收仍保留为待测。开发侧执行结果见 [验证记录](docs/verification.md)。
+本仓库保存脚本源代码、辅助插件及项目 Markdown 文档。当前完整开发版为 0.6.1，在路线、战斗、死亡恢复、包满售卖和返回续跑基础上增加完整方案交接、启动前检查及只读测试反馈摘要。用户授权先完成开发、稍后提供游戏测试反馈；真实客户端效果与连续运行验收仍保留为待测。开发侧执行结果见 [验证记录](docs/verification.md)。
 
 ## 项目文档
 
+- [2026-11-16 实测改动复核与修复](docs/recorded-issues-2026-11-16.md)
 - [功能需求](docs/requirements/functional-requirements.md)
 - [产品设计](docs/requirements/product-design.md)
 - [开发流程与周期](docs/development-workflow.md)
@@ -44,11 +45,11 @@
 
 “检查启动条件”会区分当前已满足、未满足与运行时再查的条件；真实启动前还会重新自检。“读取测试反馈”只读已有报告目录并整理来源、最后状态和停止原因，可保存 Markdown 摘要。准备条件满足、模拟完成或报告显示已完成，都不等于实机验收通过。详见 [交接与反馈说明](docs/readiness-testing.md)。
 
-Windows 工具为 0.6.0，插件仍使用兼容的 0.5.0 WP1/WC3/WO4 只读协议；组件版本不同不是游戏兼容性证明。旧 0.5.0 及 Phase1/Phase2/Phase3 测试包保留。
+Windows 工具为 0.6.1，插件仍使用兼容的 0.5.1 WP1/WC3/WO4 只读协议；组件版本不同不是游戏兼容性证明。旧 0.5.0 及 Phase1/Phase2/Phase3 测试包保留。
 
 ## 完整开发版快速开始
 
-解压 `dist/WoWProbe-Complete-0.6.0.zip`，运行 `WoWProbe.exe` 并进入完整流程工作区，先使用默认演示计划运行离线模拟。演示包含死亡恢复和包满返商人，再回原路线；支持失败注入和两小时虚拟时间压力场景。虚拟时长与实际耗时分别记录，模拟不代表游戏连续运行两小时。
+解压 `dist/WoWProbe-Complete-0.6.1.zip`，运行 `WoWProbe.exe` 并进入完整流程工作区，先使用默认演示计划运行离线模拟。演示包含死亡恢复和包满返商人，再回原路线；支持失败注入和两小时虚拟时间压力场景。虚拟时长与实际耗时分别记录，模拟不代表游戏连续运行两小时。
 
 示例由 `complete-farm.json`、`complete-corpse.json`、`complete-vendor.json` 三条路线，以及 `complete-battle.json`、`complete-settings.json` 两份配置组成，均在对应 examples 目录。真实计划须用自己录制的路线、完整目标名称、地图标定及确认过的键位和布局。默认只售卖有明确证据的灰色物品，并保留消耗品、任务物品、保留 ID 与未知物品。
 
@@ -60,7 +61,7 @@ Windows 工具为 0.6.0，插件仍使用兼容的 0.5.0 WP1/WC3/WO4 只读协�
 
 目标按保存的完整名称哈希和实时身份匹配，只选择可攻击的非玩家怪物。头像可保存为人工核对的参考图，不参与图像识别，也不能代替身份或射程证据。旧客户端若无法提供同地图目标坐标，自动接近保持关闭；启用接近但能力未知时停止，不猜方向移动。完整说明见 [第三阶段指南](docs/phase3-testing.md)。
 
-第三阶段历史包为 `dist/WoWProbe-Phase3.zip`。当前 `build.ps1 -Package` 生成 `dist/WoWProbe-Complete-0.6.0.zip` 及 SHA256 文件，包含兼容插件、三类路线、配置示例及 Markdown 指南。游戏电脑不需要开发用 Python 或 Lua 测试依赖。
+第三阶段历史包为 `dist/WoWProbe-Phase3.zip`。当前 `build.ps1 -Package` 生成 `dist/WoWProbe-Complete-0.6.1.zip` 及 SHA256 文件，包含兼容插件、三类路线、配置示例及 Markdown 指南。游戏电脑不需要开发用 Python 或 Lua 测试依赖。
 
 ## 第二阶段快速开始
 
