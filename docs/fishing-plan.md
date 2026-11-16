@@ -14,9 +14,9 @@
 - 每杆30秒，只接收本杆开始后且过最小延迟的一个水花候选；只F一次。自身拾取事件/库存变化确认后等1秒再抛；F无反馈等待原30秒截止，不补F。
 - 音频模板来自视频中单次水花片段；语音与顶部固定区域的“物品栏已满”形状/颜色匹配、已知0空位组合确认。仅匹配一类短提示，不宣称通用OCR/语音转写或能预先辨认他人水花。
 - NPC完整名称哈希、单位身份和商人身份均核对；只F交互，必须见库存版本与真实空位恢复才返回；商店关闭或超时不是成功。
-- 钓点接在可逆vendor_return路线首点；严格同图、标定和记录走廊；逆序原路返回并恢复保存朝向。不猜测路线或新地形。
+- 钓点接在可逆vendor_return路线首点；严格同图、标定和记录走廊。初始不在钓点时，只能从已记录节点加入逆序剩余路线；到点恢复保存朝向再抛竿，初始归位不计售卖次数。不猜测路线或新地形。
 - 配置导入和断点读取不自动启动；人工确认绑定、F收杆、Auto Loot、音频和自动售卖插件。默认未知/失效停止，战斗/死亡交回人工处理。
-- F12/失焦/过期/地图变化取消拥有的按键，部分失败匹配释放、锁存；与其他工作区互斥。Ctrl+F12在F12释放后才启动倒计时，不能屏蔽急停。
+- F12/失焦/过期/地图变化取消拥有的按键，部分失败匹配释放、锁存；与其他工作区互斥。Ctrl+F12在Ctrl和F12均释放后才启动倒计时，不能屏蔽急停。用户持有Ctrl/Alt/Shift时停止，保留用户按键所有权，近期停止不会被同次组合键误重启。
 
 ## 文件与接口契约
 
@@ -26,9 +26,9 @@
 
 - `FishingSettings`：CastKey=0x31、InteractKey=0x46、SelectKey=9、TapMs=80；CastTimeoutMs=30000、PostCatchDelayMs=1000、LootWaitMs=3000、MinimumBiteDelayMs=700、BiteDebounceMs=1000、BagFusionMs=1000、BagCandidateMs=2000、VendorWaitMs=15000、ScanIntervalMs=1000、ScanLimit=12、MinimumFreeSlots=2。`EnableVendor=false` 默认站桩，`RequireAudio=true`。确认项 `BindingsConfirmed,AutoLootConfirmed,AudioConfirmed,AutoSellConfirmed` 默认false。
 - `FishingPlan`：SchemaVersion=1、Name、Settings、Calibration(NavigationCalibration)、Movement(RouteKeyBindings)、Spot(Waypoint)、Facing(double)、VendorRoute(RouteDocument，可选)、Vendor(BattleTarget，kind=npc，可选)。Clone/Validate/Fingerprint；启用返程才要求路线/NPC，路线首点连接Spot、AllowReverse且同地图。
-- `FishingPlanStore.Save(path,plan)` / `Load(path)`：有界严格JSON，确认字段及Calibration.Confirmed保存/载入均清空。另有 `FishingCheckpointStore.Save/Load` 只记录计划指纹、阶段和路点，恢复要用户确认且重新校验当前点；不能恢复未释放的按键/旧声音事件。
+- `FishingPlanStore.Save(path,plan)` / `Load(path)`：有界严格JSON，确认字段及Calibration.Confirmed保存/载入均清空。另有 `FishingCheckpointStore.Save/Load` 记录计划指纹、阶段和路点；商店等待阶段还保留原空位、库存版本、NPC身份和已观察商店的证据。恢复要用户确认且重新校验当前点；不能恢复未释放的按键、旧声音事件或旧抛竿时限。
 - `FishingObservation`：`Game`(OperationObservation)、`CapturedAtMs`、`AudioReady`、`LastBiteAtMs=-1,LastBagVoiceAtMs=-1,LastBagTextAtMs=-1`、三个Confidence(double)。`Clone()` 深拷贝Game。时间统一来自主工作区单调时钟，候选带起始时间；历史/未来/过期候选不可跨杆使用。
-- `FishingCommand`：`Action`(FishingAction.None/Key/Stop/Completed)、`Purpose`(FishingPurpose.Cast/Reel/Travel/SelectNpc/OpenMerchant/RestoreFacing)、`Key`、`HoldMilliseconds`、`ExpectedTargetToken,ExpectedNameHash`、`ExpectedBiteAtMs`、Reason。不得出现鼠标指令。
+- `FishingCommand`：`Action`(FishingAction.None/Key/Stop/Completed)、`Purpose`(FishingPurpose.Cast/Reel/Travel/SelectNpc/OpenMerchant/CloseMerchant/RestoreFacing)、`Key`、`HoldMilliseconds`、`ExpectedTargetToken,ExpectedNameHash`、`ExpectedBiteAtMs`、Reason。不得出现鼠标指令。
 - `FishingEngine(plan)`、`Step(observation,nowMs)`、`Stop(reason)`；只产命令，不创建原生输入。公开 `Status,LastReason,RouteIndex,Casts,Reels,ConfirmedCatches,VendorVisits,CurrentCheckpoint`，`ValidateLiveObservation(plan,o)`供会话复核。状态与超时在重复帧也检查，只有新帧推进路点/确认计数。
 - `FishingSimulator` 持有真实FishingEngine，用合成Game/声音推进正常循环、无咬钩、误音/重复音、包满往返、错误NPC/不清包、过期/死亡等场景；输入事件固定0。模拟与真实报告始终分开。
 
@@ -58,9 +58,9 @@
 
 ## 实施与交付
 
-- [ ] 需求与视频核验，建立小型参考模板及负样本检查。
-- [ ] 决策/文件/模拟先写失败回归后实现，含30秒、1秒、一次F及商人往返。
-- [ ] WASAPI与感知适配，验证异常/断续不会复用旧正例。
-- [ ] 输入会话、工作区与热键接入，复核模式互斥与释放。
-- [ ] 素材回放、完整旧回归、UI预览/离线流程、独立审查。
+- [x] 需求与视频核验，建立小型参考模板及负样本检查。
+- [x] 决策/文件/模拟先写失败回归后实现，含30秒、1秒、一次F及商人往返。
+- [x] WASAPI与感知适配，验证异常/断续不会复用旧正例。
+- [x] 输入会话、工作区与热键接入，复核模式互斥与释放。
+- [x] 素材回放、完整旧回归、UI预览/离线流程、独立审查。
 - [ ] 更新Markdown与能力矩阵、0.7.0打包核对、按模块提交并同步GitHub；实际F收杆/音频延迟/自动售卖/两小时游戏运行保留待测。

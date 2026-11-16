@@ -192,3 +192,42 @@ C#域检查509项、Lua5.1检查66项，共575项通过、0失败；CLI实际辅
 脚本语法、UTF8 BOM和源集一致性通过；本机没有.NET SDK，只使用系统Framework编译器验证，不声称SDK项目构建已经运行。0.6.1包核对43个归档项、41文件、36个发布源文件、78个Markdown相对链接；执行文件0.6.1.0、插件0.5.1、默认确认关闭且仅售灰色，不含用户数据或测试程序。旧完整包与历史阶段包保留，最终文档已同步入包并重新核对旁置SHA256；代码和Markdown按模块提交，fast-forward合入main并同步GitHub，远程与本地一致，未改写历史。
 
 医者位置不可读时本版本明确停止，未实现独立交互距离协议；固定界面按钮的现场布局、实际技能命中与地形、自动医者复活和真实两小时运行仍待游戏电脑验证。此前重解析点实际对象探针的限制也保留，没有扩大为本轮已通过项目。
+
+# 2026-11-16 / 0.7.0 自动钓鱼验证
+
+Windows程序0.7.0.0，现有插件0.5.1。本轮新增纯键盘钓鱼、系统播放声音环回、固定包满提示识别、记录路线往返和人工断点恢复，详见 [使用与实测指南](fishing-testing.md)、[需求归档](requirements/fishing-requirements.md)。生产程序没有新增NuGet、Python或视频解码工具依赖。
+
+## 完整自动回归
+
+执行 `verify.ps1 -PythonPath <本机 bundled Python>`，未跳过桌面捕获。最终日志 `test-output/verify-fishing-070-final.log` 以 `VERIFICATION_OK` 结束，0失败：C#领域637项、Lua 5.1共66项，合计703项。通道交叉检查重复执行的原有基础断言不重复计数。
+
+| 新增钓鱼领域套件 | 通过数 |
+| --- | --- |
+| FishingTests | 52/52 |
+| FishingSimulatorTests | 7/7 |
+| FishingAudioFormatTests | 17/17 |
+| FishingPerceptionTests | 12/12 |
+| FishingSessionTests | 36/36 |
+| 钓鱼领域合计 | 124/124 |
+
+原509项C#增加钓鱼124项及FeedbackSummary的4项版本边界回归后为637项；FeedbackSummary共29项。首轮全量的Readiness界面6/7失败原因是旧反馈读取器拒绝0.7.x campaign报告；先新增回归观察失败，再仅兼容0.7.x并完整重跑。错误schema、未来版本和钓鱼独立报告仍不按campaign导入。
+
+另行通过CLI集成5项、钓鱼来源/声音/热键缓存复核5项、WP1/WC3/WO4跨语言及像素几何5项。核心/会话回归覆盖先观察失败再修复的断点商店证据、初始GoSpot归位、修饰键停止、发送前新鲜度和缓存重置；这些检查不打开真实声音设备或发送真实游戏按键。
+
+钓鱼界面10场景通过：保存点/路线/NPC、严格方案往返、导入清空人工确认、损坏文件保护、正常循环、无水花、未清包、错误NPC及报告隔离；`native_backend_requests=0`、`input_events=0`。旧Route界面流程、Farm6场景、Campaign6场景及2项预检、Readiness7场景和启动失败2项全部通过。启动失败检查的1次后端请求仅为注入的假工厂；真实Windows后端未构造。
+
+主窗口、路线、战斗、完整流程及钓鱼五幅预览为 `owned_form_render`，已逐一查看，不能算游戏截图。单独的真实桌面色块烟测结果为 `screen_capture=true`、`packet_decoded=true`、`input_emitted=false`，只验证专用模拟窗口的捕获与解码。
+
+## 素材回放与虚拟压力
+
+可选开发脚本 `tests/fishing_media_replay.py` 使用用户原始视频和本机解码工具调用实际C#检测器，根代理独立运行通过。日志 `test-output/fishing-reference-replay-root.log`；本次隔离目录 `test-output/fishing-reference-replay/run-072c1ddf16ce458cbc835237b579529c/`，重跑不复用旧帧。原视频和解码音频未放入Git或安装包。
+
+水花音轨得到4次候选、0次包满语音，包满音轨得到1次包满语音、0次水花；水花样本算法窗口约130至138ms。图像抽查水花52帧均不报包满，包满22帧中10帧达到默认0.8阈值。模板来自相同参考素材，这些结果只说明回放链路及正负边界一致，不能推算独立准确率、旁人水花排除率或真实端到端200ms目标。
+
+钓鱼虚拟压力：`virtual_elapsed_ms=7200010`、`steps=51893`、`catches=1018`、`vendors=508`、`wall_ms=309`、`input=0`。旧完整流程：`virtual_elapsed_ms=7200136`、`steps=37202`、恢复/商人各88、`wall_ms=36`、`input=0`。两者均是合成时钟，不能登记为真实游戏两小时验收。
+
+## 发布核对与待实测
+
+构建脚本仅使用系统Framework编译器，已核对脚本语法、UTF8 BOM、源码集合及差异格式。0.7.0包核对52归档项、49文件、44个发布源文件逐字节一致，94个Markdown本地链接有效；执行文件0.7.0.0、插件0.5.1，示例人工确认默认关闭。音频生产资产仅特征JSON与小型提示参考图，不含原始系统录音；包内无用户数据、测试程序或开发解码工具。SHA256置于zip旁，旧0.5、0.6、0.6.1及三个阶段包保留。
+
+实际声音设备采集、客户端F收杆、Auto Loot、误音/多人环境、不同UI布局、自动售卖插件、真实路线地形、端到端延迟和至少两小时游戏运行仍待游戏电脑验证。所有本轮自动报告的 `game_validation` 保持 `pending`，未伪造现场验收。Git提交与最终同步状态在交付收尾中补记。
