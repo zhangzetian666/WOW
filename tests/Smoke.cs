@@ -67,13 +67,14 @@ namespace WoWProbe
             }
             return exit;
         }
-        // Only UI previews may fall back to rendering their owned form. Run() below
-        // continues to require a real desktop capture and packet roundtrip.
+        // A desktop rectangle may contain an unrelated window covering this form.
+        // Render only the owned form for layout QA; Run() separately requires a real
+        // desktop capture with a decoded known packet, never this rendered preview.
         static int SaveUiPreview(Form form,string directory,string name)
         {
             try{
-                try{using(var image=Native.Capture(form.Bounds))image.Save(Path.Combine(directory,name+".png"),System.Drawing.Imaging.ImageFormat.Png);File.WriteAllText(Path.Combine(directory,name+"-preview.txt"),"desktop_capture");}
-                catch(Exception captureError){using(var image=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(image,new Rectangle(Point.Empty,form.Size));image.Save(Path.Combine(directory,name+".png"),System.Drawing.Imaging.ImageFormat.Png);}File.WriteAllText(Path.Combine(directory,name+"-preview.txt"),"owned_form_render; desktop capture unavailable: "+captureError.Message);}
+                using(var image=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(image,new Rectangle(Point.Empty,form.Size));image.Save(Path.Combine(directory,name+".png"),System.Drawing.Imaging.ImageFormat.Png);}
+                File.WriteAllText(Path.Combine(directory,name+"-preview.txt"),"owned_form_render; layout preview only, not desktop capture");
                 return 0;
             }catch(Exception ex){File.WriteAllText(Path.Combine(directory,name+"-error.txt"),ex.ToString());return 1;}
         }
