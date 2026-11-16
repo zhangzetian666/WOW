@@ -10,7 +10,13 @@ P.rangeSlot = 1
 P.counters = { lootOpened=0, lootClosed=0, castSuccess=0, castFailed=0, skinSuccess=0 }
 
 local function finite(n)
-    return type(n) == "number" and n == n and n > -math.huge and n < math.huge
+    if type(n) ~= "number" then return false end
+    -- Forever client: secret number values throw on comparison. pcall catches
+    -- the engine-level error and treats the value as invalid instead of crashing.
+    local ok, result = pcall(function()
+        return n == n and n > -math.huge and n < math.huge
+    end)
+    return ok and result == true
 end
 local function integer(n, max)
     return finite(n) and n >= 0 and n <= max and floor(n) == n
@@ -49,9 +55,14 @@ local function readPercent(name, currentAPI, maxAPI, unit)
     local a, current = call(name, currentAPI, unit)
     local b, maximum = call(name .. "Max", maxAPI, unit)
     if a and b then
-        local result = percent(current, maximum)
-        if result ~= nil then return result end
-        invalid(name)
+        if finite(current) and finite(maximum) then
+            local result = percent(current, maximum)
+            if result ~= nil then return result end
+            invalid(name)
+        end
+        -- Secret value: API exists and returns a value, but the value is not
+        -- readable by tainted code. Not a read failure -- just unavailable.
+        return nil
     end
     return nil
 end
@@ -273,8 +284,9 @@ function P.BuildPacket()
         if P.bagFullUntil and now < P.bagFullUntil then flags = flags + 128 end
     else invalid("bagFull", "UI_ERROR_MESSAGE observation, ERR_INV_FULL or plugin clock unavailable"); failed(4) end
 
-    local health = section("health", 1, function() return readPercent("UnitHealth", UnitHealth, UnitHealthMax, "player") end)
-    if health ~= nil then caps = caps + 4 else failed(1) end
+    local health = section("health", nil, function() return readPercent("UnitHealth", UnitHealth, UnitHealthMax, "player") end)
+    if health ~= nil then caps = caps + 4 end
+    -- Secret health is not a read failure; do not call failed(1).
     put(8, health or 255)
     local power, powerType = section("power", 1, function()
         local name, current, maximum
@@ -289,7 +301,8 @@ function P.BuildPacket()
         if not ok or not integer(kind, 254) then kind = 255 end
         return readPercent(name, current, maximum, "player"), kind
     end)
-    if power ~= nil then caps = caps + 8 else failed(1) end
+    if power ~= nil then caps = caps + 8 end
+    -- Secret power is not a read failure; do not call failed(1).
     put(9, power or 255); put(11, powerType or 255)
 
     local target = section("target", 2, function()
@@ -303,7 +316,8 @@ function P.BuildPacket()
         if targetDead then flags = flags + 16 end
         if knownDead then knownFlags = knownFlags + 16 else failed(2) end
         local h = readPercent("UnitHealth", UnitHealth, UnitHealthMax, "target")
-        if h ~= nil then result.health = h else failed(2) end
+        if h ~= nil then result.health = h end
+        -- Secret target health is not a read failure; do not call failed(2).
         local ok, name = call("UnitName", UnitName, "target")
         if ok and type(name) == "string" and #name > 0 then
             result.name = P.UTF8Truncate(name, 32)
@@ -513,9 +527,21 @@ function P.BuildCombatPacket(core)
         if attack~=nil then caps=caps+2;if attack then flags=flags+1 end;if player then flags=flags+2 end end
         local range=section("range",function()
             local slot=actionSlot(P.rangeSlot)
-            if not slot then return nil end
-            local ok,value=call("IsActionInRange",IsActionInRange,slot,"target")
-            if ok then local result,known=strictBool(value,false);if known then return result end end
+            if slot then
+                local ok,value=call("IsActionInRange",IsActionInRange,slot,"target")
+                if ok then local result,known=strictBool(value,false);if known then return result end end
+            end
+            -- Forever client taints IsActionInRange, so WC3 reported RangeKnown=False
+            -- and the grind engine had no way to tell "20 yards away" from "in melee".
+            -- CheckInteractDistance is a passive query that survives the taint on this
+            -- build: index 3 is the duel sphere (~10yd), index 2 the trade sphere (~11yd).
+            -- Feed the tightest readable distance back into the existing WC3 range bit
+            -- so the C# decoder needs no protocol change.
+            if type(CheckInteractDistance)=="function" then
+                local ok,near=call("CheckInteractDistance(3)",CheckInteractDistance,"target",3)
+                if ok then local r,k=strictBool(near,true);if k then return r end end
+            end
+            return nil
         end)
         if range~=nil then caps=caps+4;if range then flags=flags+4 end end
         local x,y=section("targetPosition",function()
@@ -737,13 +763,113 @@ function P.Command(command)
         local slot=tonumber(argument)
         if integer(slot,4) and slot>=1 then P.rangeSlot=slot;WoWProbeDB.rangeSlot=slot;update()
         else printLine("Range slot must be 1..4: /wowprobe range 2") end
+    elseif command == "errors" then
+        local errors = type(WoWProbeDB) == "table" and WoWProbeDB.errors or nil
+        if type(errors) ~= "table" then printLine("errors: none recorded")
+        else
+            local any = false
+            for key, item in pairs(errors) do
+                any = true
+                if type(item) == "table" then
+                    printLine(string.format("ERR %s count=%s last=%s msg=%s", tostring(key), tostring(item.count), tostring(item.lastTime), tostring(item.message)))
+                else
+                    printLine("ERR " .. tostring(key) .. " = " .. tostring(item))
+                end
+            end
+            if not any then printLine("errors: none recorded") end
+        end
     elseif command == "info" then
         captureBindings(); update()
         local c, last = WoWProbeDB.client, WoWProbeDB.lastPacket or {}
         printLine(string.format("client %s build %d interface %d; packet WP1 seq %d; capabilities %d; known flags %d; failures %d; map mode %d.",
             c.version, c.build, c.interface, P.sequence, last.capabilities or 0, last.knownFlags or 0, last.readFailures or 0, last.mapMode or 0))
         printLine("SavedVariables: WoWProbeDB (build, detected APIs, key bindings, errors). Real game verification is still required.")
-    else printLine("Commands: /wowprobe show | hide | info | reset | range 1..4. Read-only status; no actions or key bindings are changed.") end
+    elseif command == "actions" then
+        -- Read-only bar 1 dump: slot -> spell/item/macro name (Midnight C_Spell API first).
+        local lines = {}
+        local spellName = function(id)
+            if C_Spell and C_Spell.GetSpellInfo then
+                local ok, info = pcall(C_Spell.GetSpellInfo, id)
+                if ok and type(info) == "table" then return info.name end
+                if ok and type(info) == "string" then return info end
+                return nil
+            end
+            local ok, name = pcall(GetSpellInfo, id)
+            return ok and name or nil
+        end
+        local itemName = function(id)
+            if C_Spell and C_Spell.GetItemInfo then
+                local ok, name = pcall(C_Spell.GetItemInfo, id)
+                if ok then return name end
+            end
+            local ok2, name2 = pcall(GetItemInfo, id)
+            return ok2 and name2 or nil
+        end
+        for slot=1,12 do
+            local ok, t, id = pcall(GetActionInfo, slot)
+            if ok and id then
+                if t == "spell" then
+                    lines[#lines+1] = string.format("slot %d: spell id=%s name=%s", slot, tostring(id), tostring(spellName(id)))
+                elseif t == "item" then
+                    lines[#lines+1] = string.format("slot %d: item id=%s name=%s", slot, tostring(id), tostring(itemName(id)))
+                elseif t == "macro" then
+                    local okm, txt = pcall(GetActionText, slot)
+                    lines[#lines+1] = string.format("slot %d: macro %s", slot, tostring(okm and txt or "?"))
+                else
+                    lines[#lines+1] = string.format("slot %d: type=%s id=%s", slot, tostring(t), tostring(id))
+                end
+            end
+        end
+        WoWProbeDB.actionsDump = lines
+        if #lines == 0 then printLine("No actions found on bar 1 slots 1-12.") end
+        for i=1,#lines do printLine(lines[i]) end
+    elseif command == "rez" then
+        -- Hardware-event assisted revival: target nearest friendly NPC, interact, pick first gossip option.
+        local log = {}
+        local ok1 = pcall(function()
+            if C_Targeting and C_Targeting.TargetNearestFriend then C_Targeting.TargetNearestFriend()
+            elseif TargetNearestFriend then TargetNearestFriend() end
+        end)
+        log[#log+1] = "target: " .. tostring(ok1)
+        C_Timer.After(0.6, function()
+            local ok2 = pcall(function() InteractUnit("target") end)
+            log[#log+1] = "interact: " .. tostring(ok2)
+            C_Timer.After(1.4, function()
+                local ok3, chosen = pcall(function()
+                    local infos = C_GossipInfo and C_GossipInfo.GetOptions and C_GossipInfo.GetOptions()
+                    if infos and #infos > 0 then
+                        C_GossipInfo.SelectOption(infos[1].gossipOptionID)
+                        return infos[1].name
+                    end
+                    return nil
+                end)
+                log[#log+1] = "gossip: " .. tostring(ok3) .. " option=" .. tostring(chosen)
+                WoWProbeDB.rezLog = log
+                for i=1,#log do printLine(log[i]) end
+            end)
+        end)
+    elseif command == "dist" then
+        -- One-shot read-only probe of every distance/identity API on the current target.
+        -- Used to find a feedback channel the tainted client still exposes.
+        local function probe(label, fn, ...)
+            local ok, a = pcall(fn, ...)
+            printLine(label .. " ok=" .. tostring(ok) .. " val=" .. tostring(a))
+        end
+        local okName, name = pcall(UnitName, "target")
+        local slot = actionSlot(P.rangeSlot)
+        printLine("dist: target=" .. tostring(okName and name) .. " exists=" .. tostring(UnitExists and UnitExists("target")) ..
+            " rangeSlot=" .. tostring(P.rangeSlot) .. " actionSlot=" .. tostring(slot))
+        probe("IsActionInRange", function() if slot then return IsActionInRange(slot, "target") end return "no slot" end)
+        probe("CheckInteractDistance(3)", CheckInteractDistance, "target", 3)
+        probe("CheckInteractDistance(2)", CheckInteractDistance, "target", 2)
+        probe("CheckInteractDistance(1)", CheckInteractDistance, "target", 1)
+        probe("UnitInRange", UnitInRange, "target")
+        probe("UnitCanAttack", UnitCanAttack, "player", "target")
+        probe("UnitLevel", UnitLevel, "target")
+        probe("UnitHealth", UnitHealth, "target")
+        probe("UnitHealthMax", UnitHealthMax, "target")
+        probe("GetActionInfo(1)", GetActionInfo, 1)
+    else printLine("Commands: /wowprobe show | hide | info | reset | range 1..4 | actions | dist. Read-only status; no actions or key bindings are changed.") end
 end
 function P.Initialize()
     if P.initialized then return end

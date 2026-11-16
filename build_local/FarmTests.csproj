@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Test harness mirroring build.ps1 source subsets. Usage:
+       dotnet build FarmTests.csproj -c Release -p:TestName=FarmingTests [-p:Subset=farm|route|domain] -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net472</TargetFramework>
+    <LangVersion>5</LangVersion>
+    <AssemblyName>$(TestName)</AssemblyName>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <PlatformTarget>x64</PlatformTarget>
+    <Prefer32Bit>false</Prefer32Bit>
+    <GenerateAssemblyInfo>false</GenerateAssemblyInfo>
+    <AutoGenerateBindingRedirects>false</AutoGenerateBindingRedirects>
+    <DebugType>none</DebugType>
+    <NoWarn>CS0618;CS0612;CS0219;CS0169;CS0414;CS0649</NoWarn>
+    <Optimize>true</Optimize>
+    <AppendTargetFrameworkToOutputPath>false</AppendTargetFrameworkToOutputPath>
+    <OutputPath>bin\$(TestName)\</OutputPath>
+    <TestName Condition="'$(TestName)'==''">FarmingTests</TestName>
+    <Subset Condition="'$(Subset)'==''">farm</Subset>
+  </PropertyGroup>
+  <ItemGroup Condition="'$(Subset)'=='route'">
+    <Compile Include="..\src\Core.cs" />
+    <Compile Include="..\src\Routes.cs" />
+    <Compile Include="..\src\Navigation.cs" />
+    <Compile Include="..\src\RouteSession.cs" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(Subset)'=='farm'">
+    <Compile Include="..\src\Core.cs" />
+    <Compile Include="..\src\Routes.cs" />
+    <Compile Include="..\src\Navigation.cs" />
+    <Compile Include="..\src\RouteSession.cs" />
+    <Compile Include="..\src\CombatTelemetry.cs" />
+    <Compile Include="..\src\BattleProfiles.cs" />
+    <Compile Include="..\src\Farming.cs" />
+    <Compile Include="..\src\FarmSimulator.cs" />
+    <Compile Include="..\src\FarmSession.cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Compile Include="..\tests\$(TestName).cs" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="System.Windows.Forms" />
+    <Reference Include="System.Drawing" />
+    <Reference Include="System.Web.Extensions" />
+    <Reference Include="System.IO.Compression" />
+    <Reference Include="System.IO.Compression.FileSystem" />
+  </ItemGroup>
+</Project>

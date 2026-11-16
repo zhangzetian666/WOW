@@ -14,11 +14,14 @@ namespace WoWProbe
         public ushort Forward=0x57,Backward=0x53,TurnLeft=0x51,TurnRight=0x45,StrafeLeft=0x41,StrafeRight=0x44,Jump=0x20;
         public void Validate()
         {
+            // 0x25-0x28 (arrow keys) are allowed: the Forever client binds only the
+            // arrow keys for keyboard turning; Q/E/D were observed unbound there.
             ushort[] keys={Forward,Backward,TurnLeft,TurnRight,StrafeLeft,StrafeRight,Jump};
             for(int i=0;i<keys.Length;i++)
             {
-                if(keys[i]!=0x57&&keys[i]!=0x53&&keys[i]!=0x51&&keys[i]!=0x45&&keys[i]!=0x41&&keys[i]!=0x44&&keys[i]!=0x20)
-                    throw new ArgumentException("Only W,S,A,D,Q,E and Space are movement keys in this release.");
+                if(keys[i]!=0x57&&keys[i]!=0x53&&keys[i]!=0x51&&keys[i]!=0x45&&keys[i]!=0x41&&keys[i]!=0x44&&keys[i]!=0x20
+                    &&keys[i]!=0x25&&keys[i]!=0x26&&keys[i]!=0x27&&keys[i]!=0x28)
+                    throw new ArgumentException("Only W,S,A,D,Q,E,Space and the arrow keys are movement keys in this release.");
                 for(int j=0;j<i;j++)if(keys[i]==keys[j])throw new ArgumentException("Movement key bindings must be distinct.");
             }
         }

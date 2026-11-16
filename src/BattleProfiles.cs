@@ -69,6 +69,9 @@ namespace WoWProbe
             CombatTimeoutMs = 60000, LootTimeoutMs = 4000, SkinWaitMs = 1500, SkinTimeoutMs = 6000, RestTimeoutMs = 25000,
             HealBelow = 40, ManaBelow = 35, RecoverTo = 85, CriticalHealth = 15, RangeSlot = 1;
         public bool Skinning, AllowApproach, ApproachPositionConfirmed, BindingsConfirmed;
+        // Blind grind (Forever secret-value clients): tolerate unreadable health, roam for
+        // targets, keep fighting aggro without stopping, and skip loot while in combat.
+        public bool BlindGrind;
         public NavigationCalibration Calibration = new NavigationCalibration();
         public RouteKeyBindings Movement = new RouteKeyBindings();
         public void Validate()
@@ -114,7 +117,7 @@ namespace WoWProbe
     public static class BattleProfileStore
     {
         private const int MaxBytes = 1024 * 1024;
-        private const string ProfileFields = "schema_version,name,targets,skill_sequence,skill_interval_ms,scan_limit,scan_interval_ms,approach_timeout_ms,combat_timeout_ms,loot_timeout_ms,skin_wait_ms,skin_timeout_ms,rest_timeout_ms,heal_below,mana_below,recover_to,critical_health,range_slot,skinning,allow_approach,approach_position_confirmed,bindings_confirmed,calibration,movement";
+        private const string ProfileFields = "schema_version,name,targets,skill_sequence,skill_interval_ms,scan_limit,scan_interval_ms,approach_timeout_ms,combat_timeout_ms,loot_timeout_ms,skin_wait_ms,skin_timeout_ms,rest_timeout_ms,heal_below,mana_below,recover_to,critical_health,range_slot,skinning,allow_approach,approach_position_confirmed,bindings_confirmed,calibration,movement,blind_grind";
         public static void Save(string path, BattleProfile profile)
         {
             if (profile == null) throw new ArgumentNullException("profile"); BattleProfile copy = profile.Clone(); copy.Validate();
@@ -139,7 +142,7 @@ namespace WoWProbe
                 data = new RouteJson.Parser(RouteFiles.Utf8.GetString(bytes, start, bytes.Length - start)).Parse();
             }
             catch (DecoderFallbackException ex) { throw new FormatException("Battle profile must contain valid UTF8.", ex); }
-            Dictionary<string, object> root = RouteJson.Object(data); RouteJson.Keys(root, ProfileFields, null);
+            Dictionary<string, object> root = RouteJson.Object(data); RouteJson.Keys(root, ProfileFields, "blind_grind");
             BattleProfile p = new BattleProfile {
                 SchemaVersion = Int(root, "schema_version"), Name = RouteJson.String(root, "name"), SkillSequence = RouteJson.String(root, "skill_sequence"),
                 SkillIntervalMs = Int(root, "skill_interval_ms"), ScanLimit = Int(root, "scan_limit"), ScanIntervalMs = Int(root, "scan_interval_ms"),
@@ -148,6 +151,7 @@ namespace WoWProbe
                 HealBelow = Int(root, "heal_below"), ManaBelow = Int(root, "mana_below"), RecoverTo = Int(root, "recover_to"), CriticalHealth = Int(root, "critical_health"),
                 RangeSlot = Int(root, "range_slot"), Skinning = RouteJson.Boolean(root, "skinning"), AllowApproach = RouteJson.Boolean(root, "allow_approach"),
                 ApproachPositionConfirmed = RouteJson.Boolean(root, "approach_position_confirmed"), BindingsConfirmed = RouteJson.Boolean(root, "bindings_confirmed") };
+            p.BlindGrind = root.ContainsKey("blind_grind") && RouteJson.Boolean(root, "blind_grind");
             List<object> targets = root["targets"] as List<object>;
             if (targets == null || targets.Count < 1 || targets.Count > 200) throw new FormatException("Expected 1 through 200 battle targets.");
             foreach (object value in targets)
@@ -185,7 +189,7 @@ namespace WoWProbe
             w.Int("approach_timeout_ms", p.ApproachTimeoutMs); w.Int("combat_timeout_ms", p.CombatTimeoutMs); w.Int("loot_timeout_ms", p.LootTimeoutMs);
             w.Int("skin_wait_ms", p.SkinWaitMs); w.Int("skin_timeout_ms", p.SkinTimeoutMs); w.Int("rest_timeout_ms", p.RestTimeoutMs);
             w.Int("heal_below", p.HealBelow); w.Int("mana_below", p.ManaBelow); w.Int("recover_to", p.RecoverTo); w.Int("critical_health", p.CriticalHealth); w.Int("range_slot", p.RangeSlot);
-            w.Bool("skinning", p.Skinning); w.Bool("allow_approach", p.AllowApproach); w.Bool("approach_position_confirmed", p.ApproachPositionConfirmed); w.Bool("bindings_confirmed", p.BindingsConfirmed);
+            w.Bool("skinning", p.Skinning); w.Bool("allow_approach", p.AllowApproach); w.Bool("approach_position_confirmed", p.ApproachPositionConfirmed); w.Bool("bindings_confirmed", p.BindingsConfirmed); w.Bool("blind_grind", p.BlindGrind);
             NavigationCalibration c = p.Calibration; JsonWriter cw = new JsonWriter();
             cw.Number("axis_scale", c.AxisScale); cw.Number("facing_sign", c.FacingSign); cw.Number("facing_offset", c.FacingOffset);
             cw.Number("turn_radians_per_second", c.TurnRadiansPerSecond); cw.Number("forward_units_per_second", c.ForwardUnitsPerSecond);

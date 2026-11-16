@@ -90,6 +90,15 @@ class FarmSessionTests
             Action<FarmObservation>[] faults={o=>o.SkinKnown=false,o=>o.SkinSuccessKnown=false,o=>o.CastEventsKnown=false,o=>o.LootKnown=false};
             foreach(var fault in faults){var f=new Fake();var s=HeldCorpseAction(f,true);fault(observation);now+=10;s.Tick();Check(!s.IsActive&&!s.IsHolding&&f.Ups==f.Downs.Count);}
         });
+        Run("blind secret range and secret actions still press a skill key",delegate{
+            var f=new Fake();var p=Profile();p.BlindGrind=true;p.SkillSequence="223";
+            var s=New(f);
+            observation.RangeKnown=false;observation.TargetInRange=false;observation.TargetPositionKnown=false;
+            observation.ActionsKnown=false;observation.KnownActionsMask=0;observation.ReadyActionsMask=0;observation.UsableActionsMask=0;
+            s.Start(Route(),p,false,false,0);Pump(s,true);
+            Check(s.LastCommand.Action>=FarmAction.Skill1&&s.LastCommand.Action<=FarmAction.Skill4);
+            Check(f.Downs.Count>0&&Attack(f.Downs[f.Downs.Count-1]));
+        });
         Console.WriteLine("Farm session tests: "+passed+" passed, "+failed+" failed. Fake backend only.");return failed==0?0:1;
     }
 }

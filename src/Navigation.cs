@@ -58,17 +58,17 @@ namespace WoWProbe
         private readonly NavigationPurpose purpose;
         private bool stopped, hasTime, hasSequence, hasForwardAnchor, retreating;
         private int sequence, arrivalCount, lastReached = -1, pendingForwardMs;
-        private long lastTime, targetStarted, arrivalTime, pendingIssued, forwardMs;
+        private long lastTime, targetStarted, arrivalTime, pendingIssued, forwardMs, waypointDeadlineMs = 120000;
         private double anchorX, anchorY;
 
         public Navigator(RouteDocument original, NavigationCalibration calibration, bool reverse, bool loop, int startIndex)
             :this(original,calibration,reverse,loop,startIndex,NavigationPurpose.Patrol) { }
-        public Navigator(RouteDocument original, NavigationCalibration calibration, bool reverse, bool loop, int startIndex,NavigationPurpose purpose)
+        public Navigator(RouteDocument original, NavigationCalibration calibration, bool reverse, bool loop, int startIndex,NavigationPurpose purpose,long waypointDeadline=120000)
         {
             if(purpose!=NavigationPurpose.Patrol&&purpose!=NavigationPurpose.CorpseRun&&purpose!=NavigationPurpose.VendorReturn)throw new ArgumentOutOfRangeException("purpose");
             route = NavigationMath.Prepare(original, calibration, reverse, loop, startIndex);
             this.calibration = calibration.Clone();
-            this.loop = loop;this.purpose=purpose;
+            this.loop = loop;this.purpose=purpose;waypointDeadlineMs=waypointDeadline;
             TargetIndex = startIndex;
             Completed = startIndex == route.Points.Count;
             Status = Completed ? "Completed" : "Ready";
@@ -89,7 +89,7 @@ namespace WoWProbe
             lastTime = nowMs;
             string invalid = UnsafeReason(sample);
             if (invalid != null) return Fail(invalid);
-            if (nowMs - targetStarted > 120000) return Fail("Waypoint exceeded its 120-second deadline.");
+            if (nowMs - targetStarted > waypointDeadlineMs) return Fail("Waypoint exceeded its deadline.");
             // Duplicate frames never plan movement or change arrival/recovery counters. The safety gate above still runs.
             if (hasSequence && sequence == sample.Sequence)
                 return Command(NavigationAction.None, 0, "Awaiting a distinct frame.");

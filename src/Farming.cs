@@ -19,16 +19,29 @@ namespace WoWProbe
         private Phase phase;
         private bool hasTime, hasSequence, scanScheduled, skillIssued, combatClock, healIssued, manaIssued, skinIssued, approachingAnchor;
         private int sequence, scans, skillIndex, unavailable, deathFrames, lootAttempts, targetHealth;
-        private long lastNow, navNow, stateStarted, nextScan, nextSkill, encounterStarted, lastEvidence, skinIssuedAt, pendingForwardAt, approachForwardMs;
+        private long lastNow, navNow, stateStarted, nextScan, nextSkill, encounterStarted, lastEvidence, skinIssuedAt, pendingForwardAt, approachForwardMs, nextBlindAdvance;
+        // Blind combat progress. Live 01:55 found the real reason for zero kills: all 104 skill
+        // pulses were slot 1, which is the plain "Attack" toggle (spell 6603) on this rogue.
+        // Pressing it repeatedly switches auto-attack off and deals no damage. With the WC3
+        // CheckInteractDistance fallback the client now reports a readable melee-ish distance,
+        // so the chase and the melee phase get separate, much longer deadlines: walking away
+        // after 16s never gave a 45-energy Sinister Strike time to land.
+        private const int BlindNoDamageMs = 8000, BlindChaseMs = 30000, BlindMeleeMs = 45000, BlindAbandonMs = 30000;
+        private int lastDamagedHealth = 255, blindRetries;
+        private long lastDamageAt, abandonedUntil, meleeReachedAt, nextBlindTurn;
+        private bool meleeReached;
+        private uint abandonedHash;
         private int pendingForwardMs;
         private uint lockedHash, lootOpenBase, lootCloseBase, skinBase, skinFailedBase, castSuccess;
         private double approachOriginX, approachOriginY, anchorX, anchorY;
+        private bool Blind { get { return profile.BlindGrind; } }
 
         public FarmEngine(RouteDocument route, BattleProfile profile, bool reverse, bool loop, int startIndex)
         {
             if (profile == null) throw new ArgumentNullException("profile");
             this.profile = profile.Clone(); this.profile.Validate();
-            navigator = new Navigator(route, this.profile.Calibration, reverse, loop, startIndex);
+            navigator = new Navigator(route, this.profile.Calibration, reverse, loop, startIndex,
+                NavigationPurpose.Patrol, this.profile.BlindGrind ? 300000L : 120000L);
             this.route = navigator.WorkingRoute;
             Completed = navigator.Completed; phase = Completed ? Phase.Completed : Phase.Patrol;
             LastReason = Completed ? "The supplied checkpoint is complete." : "Awaiting a healthy farming observation.";
@@ -47,9 +60,20 @@ namespace WoWProbe
             if (nowMs < 0 || (hasTime && nowMs < lastNow)) return Fail("Monotonic farming clock is invalid or moved backwards.");
             if (hasTime && phase == Phase.Patrol) navNow += nowMs - lastNow;
             hasTime = true; lastNow = nowMs;
+            FarmObservation o = observation;
+            // Blind grind tolerance: a swapped live target (Tab drift, a mob killed by another
+            // player) re-locks onto the new attackable target instead of stopping the cycle.
+            if (Blind && EncounterActive && phase != Phase.Loot && phase != Phase.Skin &&
+                o.TargetExists && o.TargetIdentityKnown && o.NameHashKnown && o.TargetNameHash != lockedHash &&
+                o.AttackabilityKnown && !o.TargetIsPlayer && o.TargetCanAttack && o.TargetDeadKnown && !o.TargetDead)
+            {
+                LockedTargetToken = o.TargetToken; lockedHash = o.TargetNameHash;
+                lootOpenBase = o.LootOpened; lootCloseBase = o.LootClosed; deathFrames = 0; lootAttempts = 0;
+                lastEvidence = nowMs; unavailable = 0;
+                if (phase == Phase.Approach) ResetApproachProgress();
+            }
             string unsafeState = UnsafeReason(observation);
             if (unsafeState != null) return Fail(unsafeState);
-            FarmObservation o = observation;
             bool distinct = !hasSequence || o.Sequence != sequence;
             if (distinct && EncounterActive && !o.TargetDead && (phase == Phase.Combat || phase == Phase.Approach))
             {
@@ -61,7 +85,8 @@ namespace WoWProbe
             if (distinct && phase == Phase.Combat)
             {
                 if ((o.TargetHealth >= 0 && o.TargetHealth <= 100 && o.TargetHealth != targetHealth) ||
-                    (o.CastEventsKnown && o.CastSuccess != castSuccess) || o.Casting || o.Channeling) lastEvidence = nowMs;
+                    (o.CastEventsKnown && o.CastSuccess != castSuccess) || o.Casting || o.Channeling ||
+                    (Blind && o.InCombat)) lastEvidence = nowMs;
                 targetHealth = o.TargetHealth; castSuccess = o.CastSuccess;
             }
             string timeout = TimeoutReason(nowMs);
@@ -78,6 +103,19 @@ namespace WoWProbe
                     if (NeedsRest(o)) { Enter(Phase.Rest, nowMs); healIssued = manaIssued = false; return None("Low health or mana requires observed recovery before patrol."); }
                     if (o.Casting || o.Channeling) return None("Waiting for the current cast before patrol or target selection.");
                     BattleTarget match = TargetCatalog.Match(profile, o);
+                    // After a blind disengage, do not immediately re-lock the same mob: it would
+                    // undo the retreat on the very next frame and re-create the standing-still death.
+                    bool abandoned = Blind && nowMs < abandonedUntil && o.NameHashKnown && o.TargetNameHash == abandonedHash && abandonedHash != 0;
+                    if (abandoned) match = null;
+                    // Blind grind: any attackable non-player target is eligible, catalog match is preferred.
+                    // Live 02:15: after /reload the client reported a target with identity and
+                    // UnitCanAttack but no full-name hash, so requiring NameHashKnown left the
+                    // engine scanning TAB forever with token=0 while the client held a valid mob.
+                    // TargetToken is a per-unit GUID hash from WC3 and is a better identity anyway.
+                    if (match == null && !abandoned && Blind && o.TargetExists && o.TargetToken != 0 &&
+                        o.AttackabilityKnown && !o.TargetIsPlayer && o.TargetCanAttack && o.TargetDeadKnown && !o.TargetDead)
+                        match = new BattleTarget { Name = String.IsNullOrEmpty(o.TargetName) ? "unknown" : o.TargetName,
+                            NameHash = o.NameHashKnown && o.TargetNameHash != 0 ? o.TargetNameHash : o.TargetToken, Kind = "monster" };
                     if (match != null) return Lock(o, match, nowMs);
                     if (phase == Phase.Scan)
                     {
@@ -90,7 +128,7 @@ namespace WoWProbe
                     NavigationCommand movement = navigator.Step(new NavigationSample {
                         X = o.X, Y = o.Y, Facing = o.Facing, MapId = o.MapId, MapMode = o.MapMode, Zone = o.Zone,
                         Sequence = o.Sequence, Fresh = o.Fresh, KnownCore = o.KnownCore, ReadFailures = o.ReadFailures,
-                        Dead = o.PlayerDead, Ghost = o.PlayerGhost, Combat = o.InCombat, BagFull = o.BagFull }, navNow);
+                        Dead = o.PlayerDead, Ghost = o.PlayerGhost, Combat = o.InCombat && !Blind, BagFull = o.BagFull }, navNow);
                     if (movement.Action == NavigationAction.Stop) return Fail(movement.Reason);
                     if (movement.Action == NavigationAction.Completed)
                     { Completed = true; phase = Phase.Completed; return Command(FarmAction.Completed, 0, "Farming patrol completed.", false, false); }
@@ -115,7 +153,14 @@ namespace WoWProbe
             lootOpenBase = o.LootOpened; lootCloseBase = o.LootClosed; deathFrames = 0; lootAttempts = 0;
             skillIndex = unavailable = 0; skillIssued = false; combatClock = false;
             targetHealth = o.TargetHealth; castSuccess = o.CastSuccess; lastEvidence = now; nextSkill = now;
-            if (!o.RangeKnown || o.RangeSlot != profile.RangeSlot) return Fail("The selected range action is unknown or does not match the profile.");
+            lastDamagedHealth = o.TargetHealth; lastDamageAt = now; blindRetries = 0; nextBlindAdvance = now + 600;
+            meleeReached = false; meleeReachedAt = now; nextBlindTurn = now + 1800;
+            if (!Blind && (!o.RangeKnown || o.RangeSlot != profile.RangeSlot)) return Fail("The selected range action is unknown or does not match the profile.");
+            // Blind + secret range: "unknown" is not "out of range". Entering Approach here used to
+            // trap the engine in endless forward pulses (and Combat bounced back after 4s), so the
+            // character walked into the mob without ever swinging. Fight immediately instead; short
+            // advance pulses inside Combat close the remaining distance.
+            if (Blind && !o.RangeKnown) { nextBlindAdvance = now + 600; EnterCombat(now); return None("Blind mode: range is secret, entering combat while closing distance."); }
             if (o.TargetInRange) { EnterCombat(now); return None("Saved, attackable non-player target locked in range."); }
             return EnterApproach(o, now);
         }
@@ -136,6 +181,36 @@ namespace WoWProbe
         {
             if (o.TargetDead) return ConfirmDeath(o, now);
             if (o.TargetInRange) { EnterCombat(now); return None("New range evidence permits combat."); }
+            // Blind survival: if something is already hitting us, fight back immediately
+            // instead of walking into it defenceless.
+            if (Blind && o.InCombat) { EnterCombat(now); return None("Blind mode entered combat because the player is under attack."); }
+            // Blind chase cap: walking far from the encounter origin into a hostile camp is how
+            // blind characters die; drop the target and let the next scan pick a closer one.
+            if (Blind && NavigationMath.Distance(o.X - approachOriginX, o.Y - approachOriginY, profile.Calibration.AxisScale) > 0.03)
+            {
+                LockedTargetToken = 0; lockedHash = 0; Enter(Phase.Patrol, now); nextScan = now;
+                return None("Blind chase exceeded its 0.03 distance cap; target dropped for a closer scan.");
+            }
+            if (Blind && !o.TargetPositionKnown)
+            {
+                // Blind chase: no verified target map position. /target <name> can select a mob
+                // 20-40 yards away in any direction, so walking straight ahead used to miss it.
+                // Sweep a slow arc while advancing at high duty cycle; the WC3 distance bit is
+                // the feedback that ends the chase. A failed chase abandons only this mob, it
+                // must not stop the whole patrol.
+                if (o.Casting || o.Channeling) return None("Waiting for casting before a blind approach pulse.");
+                if (pendingForwardMs != 0)
+                { approachForwardMs += Math.Min((long)pendingForwardMs, now - pendingForwardAt); pendingForwardMs = 0; }
+                if (approachForwardMs >= profile.ApproachTimeoutMs)
+                    return AbortEncounter(now, "blind chase reached its deadline without entering melee range");
+                if (now >= nextBlindTurn)
+                {
+                    nextBlindTurn = now + 4500;
+                    return Command(FarmAction.TurnRight, 100, "Blind chase: sweeping for the locked target.", false, false);
+                }
+                pendingForwardAt = now; pendingForwardMs = 240;
+                return Command(FarmAction.Forward, 240, "Blind chase advance pulse; distance feedback decides when to fight.", true, false);
+            }
             if (pendingForwardMs != 0)
             { approachForwardMs += Math.Min((long)pendingForwardMs, now - pendingForwardAt); pendingForwardMs = 0; }
             NavigationCalibration c = profile.Calibration;
@@ -156,22 +231,111 @@ namespace WoWProbe
         }
         private FarmCommand Combat(FarmObservation o, long now)
         {
+            // Death beats everything: report it as the actual stop reason instead of
+            // letting the unusable-skill counter mask it (dead players can use no skill).
+            if (o.PlayerDead || o.PlayerGhost) return Fail("Player death or ghost stopped combat.");
             if (o.TargetDead) return ConfirmDeath(o, now);
             deathFrames = 0;
-            if (!o.TargetInRange) return EnterApproach(o, now);
+            if (!Blind && !o.TargetInRange) return EnterApproach(o, now);
+            // With a readable distance bit, Combat owns the chase too. Bouncing back to Approach
+            // every few seconds resets approach progress and used to leave the rogue walking
+            // forever; the forward/turn pulses below close the gap without a state switch.
+            // Blind mode cannot read player health or target position. A falling target health
+            // is the only proof our swings landed; when it is secret, use separate deadlines for
+            // "still chasing" and "in melee" so a 45-energy skill has time to actually land.
+            if (Blind)
+            {
+                bool healthReadable = o.TargetHealth >= 0 && o.TargetHealth <= 100;
+                if (healthReadable && o.TargetHealth < lastDamagedHealth)
+                { lastDamagedHealth = o.TargetHealth; lastDamageAt = now; blindRetries = 0; }
+                if (!meleeReached && o.RangeKnown && o.TargetInRange)
+                { meleeReached = true; meleeReachedAt = now; }
+                long since = meleeReached ? now - meleeReachedAt : now - encounterStarted;
+                long stalled = now - lastDamageAt;
+                bool noProgress = healthReadable ? stalled >= BlindNoDamageMs
+                    : since >= (meleeReached ? BlindMeleeMs : BlindChaseMs);
+                if (noProgress)
+                {
+                    if (!healthReadable || blindRetries >= 2)
+                        return AbortEncounter(now, healthReadable ? "target stopped taking damage after two repositionings" :
+                            (meleeReached ? "melee phase ran out of time without a kill" : "could not close to melee range before the chase deadline"));
+                    blindRetries++; lastDamageAt = now;
+                    return Command(blindRetries == 1 ? FarmAction.TurnRight : FarmAction.TurnLeft,
+                        blindRetries == 1 ? 130 : 240,
+                        "Blind combat: no target damage for " + stalled + "ms; repositioning (attempt " + blindRetries + ").", false, false);
+                }
+            }
             if (o.Casting || o.Channeling) return None("Waiting for casting or channeling to finish.");
+            // Distance-driven chase. While out of range sweep and advance at a high duty cycle;
+            // FarmSession rejects any pulse outside 60..250ms, so raise the duty cycle by
+            // shortening the gap, never by lengthening an individual keypress.
+            if (Blind && !o.TargetPositionKnown && now >= nextBlindAdvance)
+            {
+                // Live 02:23: 52 consecutive forward pulses walked the rogue away from a mob
+                // that was already hitting it. Auto-attack and Sinister Strike both need a
+                // facing target, so a permanently moving back never landed a blow. Close hard
+                // for the first 8 seconds, then stand and turn slowly while swinging.
+                bool closing = now - encounterStarted < 8000;
+                if (now >= nextBlindTurn)
+                {
+                    nextBlindTurn = now + (closing ? 4500 : 2500);
+                    return Command(FarmAction.TurnRight, closing ? 100 : 250,
+                        closing ? "Blind combat: sweeping while closing the gap." : "Blind combat: turning to face the mob that closed on us.", false, false);
+                }
+                nextBlindAdvance = now + (closing ? 250 : 900);
+                return Command(FarmAction.Forward, closing ? 250 : 200,
+                    closing ? "Blind combat closing pulse." : "Blind combat hold-and-swing pulse.", true, false);
+            }
             if (skillIssued && now < nextSkill) return None("Waiting for the configured skill interval.");
-            int slot = profile.SkillSequence[skillIndex] - '1', mask = 1 << slot;
+            int slot = profile.SkillSequence[skillIndex] - '1';
+            if (slot < 0 || slot > 3) slot = 0;
+            int mask = 1 << slot;
             skillIndex = (skillIndex + 1) % profile.SkillSequence.Length;
+            // Keep the rotation at its configured cadence. Slowing it while "far" produced
+            // only 7 swings in 35s on a client whose 10yd distance bit never turns true.
             skillIssued = true; nextSkill = now + profile.SkillIntervalMs;
+            // Slot 1 on this character is the plain "Attack" toggle (spell 6603). All 104 live
+            // skill pulses landed there, dealing zero damage while switching auto-attack off.
+            // /startattack (issued on lock) owns auto-attack; never press this slot again.
+            if (Blind && slot == 0) return None("Slot 1 is the Attack toggle; auto-attack is preserved instead.");
             if (!o.ActionsKnown || (o.KnownActionsMask & mask) == 0 || (o.ReadyActionsMask & mask) == 0 || (o.UsableActionsMask & mask) == 0)
             {
+                if (Blind)
+                {
+                    // IsUsableAction reports only slot 1 while the rogue sits below 45 energy,
+                    // and on Forever clients the masks can be secret altogether. Press the
+                    // configured damaging skill anyway: skill_interval_ms is long enough for
+                    // energy to regenerate, and an uncastable keypress is harmless.
+                    unavailable = 0;
+                    return Command((FarmAction)((int)FarmAction.Skill1 + slot), 120,
+                        "Blind swing: damaging slot " + (slot + 1) + " despite secret/negative usability.", true, false);
+                }
                 unavailable++;
                 if (unavailable >= 3) return Fail("Three consecutive skill checks had no known, ready and usable action.");
                 return None("Configured skill is unknown, cooling down or unusable; no input sent.");
             }
             unavailable = 0;
             return Command((FarmAction)((int)FarmAction.Skill1 + slot), 120, "Using a known, ready and usable skill against the locked live target.", true, false);
+        }
+        // Give up on a mob we cannot damage and resume the patrol. Stopping the whole session
+        // here would end the run; the abandoned hash prevents an immediate re-lock of the same mob.
+        private FarmCommand AbortEncounter(long now, string why)
+        {
+            abandonedHash = lockedHash; abandonedUntil = now + BlindAbandonMs;
+            LockedTargetToken = 0; lockedHash = 0;
+            Enter(Phase.Patrol, now); nextScan = now + 9000;
+            // Maximum allowed turn pulse (250ms) plus the following patrol forward pulse
+            // breaks the mob's leash; a short nudge left the rogue in melee until it died.
+            return Command(FarmAction.TurnRight, 250,
+                "Blind disengage: " + why + "; abandoning this target and resuming patrol.", false, false);
+        }
+        // Lowest slot the client currently reports as known, ready and usable.
+        private static int FirstUsableSlot(FarmObservation o)
+        {
+            int usable = o.UsableActionsMask & o.ReadyActionsMask & o.KnownActionsMask & 15;
+            if (usable == 0) return -1;
+            for (int i = 0; i < 4; i++) if ((usable & (1 << i)) != 0) return i;
+            return -1;
         }
         private FarmCommand ConfirmDeath(FarmObservation o, long now)
         {
@@ -182,6 +346,12 @@ namespace WoWProbe
         }
         private FarmCommand Loot(FarmObservation o, long now)
         {
+            // Blind grind: survival first. Anything still fighting means skip this corpse.
+            if (Blind && o.InCombat) { LockedTargetToken = 0; lockedHash = 0; Enter(Phase.Patrol, now); nextScan = now + 4000;
+                return None("Combat is still active in blind mode; corpse abandoned without loot."); }
+            if (Blind && now - stateStarted >= profile.LootTimeoutMs)
+            { LockedTargetToken = 0; lockedHash = 0; Enter(Phase.Patrol, now); nextScan = now + 4000;
+                return None("Blind loot deadline elapsed; corpse abandoned without loot."); }
             if (!o.TargetDead) return Fail("The locked corpse is no longer confirmed dead.");
             if (!o.LootEventsKnown || !o.LootKnown) return Fail("Loot state and event evidence must be known.");
             bool opened = o.LootOpened != lootOpenBase, closed = o.LootClosed != lootCloseBase;
@@ -226,8 +396,9 @@ namespace WoWProbe
         }
         private FarmCommand FinishEncounter(FarmObservation o, long now)
         {
-            if (o.InCombat) return Fail("Combat remains active after the locked corpse interaction finished.");
-            LockedTargetToken = 0; lockedHash = 0; Enter(Phase.Patrol, now); nextScan = now + profile.ScanIntervalMs;
+            if (o.InCombat && !Blind) return Fail("Combat remains active after the locked corpse interaction finished.");
+            LockedTargetToken = 0; lockedHash = 0; Enter(Phase.Patrol, now);
+            nextScan = Blind ? now + 5000 : now + profile.ScanIntervalMs; // short blind pause: out-of-combat regen between kills
             return None("Encounter evidence complete; resuming the saved patrol index.");
         }
         private FarmCommand Select(long now)
@@ -237,25 +408,29 @@ namespace WoWProbe
         {
             if (o == null || !o.Fresh || !o.KnownCore || o.ReadFailures != 0) return "Fresh, known core and matching combat observations without read failures are required.";
             if (o.PlayerDead || o.PlayerGhost || o.BagFull) return "Player death, ghost or full bags stopped farming.";
-            if (o.Health < 0 || o.Health > 100 || o.PowerType < 0 || o.PowerType == 255 || (o.PowerType == 0 && (o.Power < 0 || o.Power > 100))) return "Required health or mana data is unknown or invalid.";
-            if (o.Health <= profile.CriticalHealth) return "Critical player health stopped farming immediately.";
+            // 255 = unavailable (secret value on Forever client); skip validation for unreadable fields.
+            if (o.Health != 255 && (o.Health < 0 || o.Health > 100)) return "Health data is invalid.";
+            if (o.PowerType != 255 && o.PowerType < 0) return "Power type data is invalid.";
+            if (o.PowerType == 0 && o.Power != 255 && (o.Power < 0 || o.Power > 100)) return "Mana data is invalid.";
+            if (o.Health != 255 && o.Health <= profile.CriticalHealth) return "Critical player health stopped farming immediately.";
             if (o.MapId != route.MapId || o.MapMode != route.MapMode || !String.Equals(o.Zone, route.Zone, StringComparison.Ordinal)) return "Farming map, mode or zone changed.";
             if (!NavigationMath.InRange(o.X, 0, 1) || !NavigationMath.InRange(o.Y, 0, 1) || !NavigationMath.Finite(o.Facing)) return "Player position or facing is unknown or invalid.";
-            if (RouteDistance(o.X, o.Y) > 0.02) return "Player moved outside the calibrated 0.02 safety corridor around the recorded route.";
+            if (!Blind && RouteDistance(o.X, o.Y) > 0.02) return "Player moved outside the calibrated 0.02 safety corridor around the recorded route.";
             if (!o.CastingKnown) return "Casting state is unknown; farming input is paused by stopping the engine.";
-            if (o.InCombat && !EncounterActive) return "Unexpected combat occurred before a saved target was locked.";
+            if (o.InCombat && !EncounterActive && !Blind) return "Unexpected combat occurred before a saved target was locked.";
             if (EncounterActive)
             {
                 if (!o.TargetExists || !o.TargetIdentityKnown || o.TargetToken != LockedTargetToken || !o.NameHashKnown || o.TargetNameHash != lockedHash)
                     return "Locked target disappeared or its identity changed.";
                 if (!o.TargetDeadKnown || !o.AttackabilityKnown || o.TargetIsPlayer || (!o.TargetDead && !o.TargetCanAttack)) return "Locked target death or attackability is unknown or unsafe.";
-                if ((phase == Phase.Combat || phase == Phase.Approach) && !o.TargetDead && (!o.RangeKnown || o.RangeSlot != profile.RangeSlot)) return "Locked target range is unknown or the range slot changed.";
+                if (!Blind && (phase == Phase.Combat || phase == Phase.Approach) && !o.TargetDead && (!o.RangeKnown || o.RangeSlot != profile.RangeSlot)) return "Locked target range is unknown or the range slot changed.";
                 if (phase == Phase.Approach && !o.TargetDead) return ApproachReason(o);
             }
             return null;
         }
         private string ApproachReason(FarmObservation o)
         {
+            if (Blind) return null; // Blind approach steers by whatever target evidence exists; corridor limits are suspended.
             if (!o.TargetPositionKnown || !NavigationMath.InRange(o.TargetX, 0, 1) || !NavigationMath.InRange(o.TargetY, 0, 1)) return "A verified target map position is required for approach.";
             if (!o.RangeKnown || o.RangeSlot != profile.RangeSlot) return "A matching known range action is required for approach.";
             double scale = profile.Calibration.AxisScale;
@@ -267,11 +442,13 @@ namespace WoWProbe
         {
             if (phase == Phase.Approach && now - stateStarted >= profile.ApproachTimeoutMs) return "Approach deadline elapsed.";
             if ((phase == Phase.Combat || phase == Phase.Approach) && combatClock && now - encounterStarted >= profile.CombatTimeoutMs) return "Combat deadline elapsed.";
-            if (phase == Phase.Combat && now - lastEvidence > 10000) return "Combat has no new casting or target-health evidence for ten seconds.";
+            // Blind mode owns its own no-progress handling in Combat(); the generic evidence
+            // deadline would otherwise stop the whole patrol before a disengage can happen.
+            if (phase == Phase.Combat && !Blind && now - lastEvidence > 10000) return "Combat has no new casting or target-health evidence for ten seconds.";
             if (phase == Phase.Loot && now - stateStarted >= profile.LootTimeoutMs) return "Loot confirmation deadline elapsed.";
             if (phase == Phase.Skin && now - stateStarted >= profile.SkinTimeoutMs) return "Skin confirmation deadline elapsed.";
             if (phase == Phase.Rest && now - stateStarted >= profile.RestTimeoutMs) return "Recovery deadline elapsed; supplies or recovery evidence are missing.";
-            if (phase == Phase.Scan && now - stateStarted > (long)(profile.ScanLimit + 1) * profile.ScanIntervalMs) return "Target scan stalled without distinct observations.";
+            if (phase == Phase.Scan && now - stateStarted > (long)(profile.ScanLimit + 2) * profile.ScanIntervalMs + 2000) return "Target scan stalled without distinct observations.";
             return null;
         }
         private double RouteDistance(double x, double y)

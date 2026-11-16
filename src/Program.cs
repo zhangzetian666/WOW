@@ -16,6 +16,8 @@ namespace WoWProbe
         static int Main(string[] args)
         {
             Native.SetProcessDPIAware();
+            if (args.Length > 0 && args[0] == "grind") { try { return GrindCli.Run(args); } catch (Exception ex) { Console.WriteLine("grind failure: " + ex); return 1; } }
+            if (args.Length > 0 && args[0] == "probe") { try { return GrindCli.Probe(args); } catch (Exception ex) { Console.WriteLine("probe failure: " + ex); return 1; } }
             Application.EnableVisualStyles();
             Application.SetCompatibleTextRenderingDefault(false);
             try
@@ -124,7 +126,7 @@ namespace WoWProbe
             AddKey("W  前进",0x57);AddKey("S  后退",0x53);AddKey("Q  按当前绑定",0x51);AddKey("E  按当前绑定",0x45);
             AddKey("A  按当前绑定",0x41);AddKey("D  按当前绑定",0x44);AddKey("TAB  选怪",9);AddKey("F  按当前绑定",0x46);
             foreach (int k in new int[] {1,2,3,4,5,8,9}) AddKey(k+"  动作条",(ushort)(0x30+k));
-            AddKey("空格  跳跃",32);keys.SelectedIndex=0;
+            AddKey("空格  跳跃",32);AddKey("←  转向左",0x25);AddKey("→  转向右",0x27);keys.SelectedIndex=0;
             actionRow.Controls.Add(keys);actionRow.Controls.Add(Button("5秒后发送一次（120毫秒）",Schedule));
             var stop=Button("立即取消 / 释放按键",delegate { Stop("用户点击停止"); });stop.ForeColor=Color.DarkRed;actionRow.Controls.Add(stop);
             actionStatus.Dock=DockStyle.Fill;actionStatus.Text="未启用按键。勾选确认后，每次只测试一个按键；倒计时中请切回游戏。";actions.Controls.Add(actionStatus);

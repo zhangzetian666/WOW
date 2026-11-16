@@ -57,7 +57,7 @@ namespace WoWProbe
                     if(startIndex<0||startIndex>=r.Points.Count)throw new ArgumentOutOfRangeException("startIndex");
                     FarmObservation initial=reader();string problem=GlobalProblem(initial,r,p);
                     if(problem!=null)throw new InvalidOperationException(problem);
-                    if(initial.InCombat)throw new InvalidOperationException("Cannot arm during unexpected combat.");
+                    if(initial.InCombat&&!p.BlindGrind)throw new InvalidOperationException("Cannot arm during unexpected combat.");
                     FarmEngine candidate=new FarmEngine(r,p,reverse,loop,startIndex);
                     long time=clock();if(time<0)throw new InvalidOperationException("Invalid monotonic clock.");
                     if(startTicket!=generation||safety.Faulted||faulted)throw new InvalidOperationException("Farming arming was cancelled or input safety failed.");
@@ -155,7 +155,7 @@ namespace WoWProbe
         string LiveProblem(FarmObservation o)
         {
             string problem=GlobalProblem(o,route,profile);if(problem!=null)return problem;
-            if(o.InCombat&&!engine.EncounterActive)return "Unexpected combat occurred before a saved target was locked.";
+            if(o.InCombat&&!engine.EncounterActive&&!profile.BlindGrind)return "Unexpected combat occurred before a saved target was locked.";
             return null;
         }
         bool CompletedInteraction(FarmObservation o)
@@ -165,7 +165,13 @@ namespace WoWProbe
             if(c==null)return null;
             if(before&&(o.Casting||o.Channeling))return "Casting or channeling changed before pending input.";
             if(c.ExpectedTargetToken==0)return null;
-            if(!o.TargetExists||!o.TargetIdentityKnown||o.TargetToken!=c.ExpectedTargetToken||!o.NameHashKnown||expectedHash==0||o.TargetNameHash!=expectedHash)return "Locked target identity or full-name hash changed.";
+            if(!o.TargetExists||!o.TargetIdentityKnown||o.TargetToken!=c.ExpectedTargetToken||!o.NameHashKnown||expectedHash==0||o.TargetNameHash!=expectedHash)
+            {
+                // Blind grind: the engine re-locks swapped live targets; only corpse actions
+                // (loot/skin) still require the exact confirmed identity.
+                if(p.BlindGrind&&c.Action!=FarmAction.Interact&&c.Action!=FarmAction.Skin)return null;
+                return "Locked target identity or full-name hash changed.";
+            }
             if(o.TargetIsPlayer)return "A player cannot receive this farming action.";
             if(!o.TargetDeadKnown||!o.AttackabilityKnown)return "Locked target death or attackability became unknown.";
             if(c.RequireDeadTarget&&!o.TargetDead)return "Loot and skin input requires an explicitly confirmed dead target.";
@@ -174,15 +180,21 @@ namespace WoWProbe
             {
                 if(o.TargetDead){if(before)return "Pending live-target action no longer has a live target.";return null;}
                 if(!o.TargetCanAttack)return "Locked live target is no longer attackable.";
-                if(!o.RangeKnown||o.RangeSlot!=p.RangeSlot)return "Configured range observation became unknown or changed slots.";
-                if(skill&&!o.TargetInRange)return "Locked skill target moved out of range.";
-                if(before&&(o.TargetHealth<=0||o.TargetHealth>100))return "Pending live-target action lacks known positive target health.";
-                if(before&&skill)
+                if(!o.RangeKnown||o.RangeSlot!=p.RangeSlot){if(!p.BlindGrind)return "Configured range observation became unknown or changed slots.";}
+                // Blind + secret range: "unknown" must not veto a skill keypress, otherwise the
+                // engine's blind swing is discarded before it ever reaches the input backend.
+                if(skill&&!o.TargetInRange&&!(p.BlindGrind&&!o.RangeKnown))return "Locked skill target moved out of range.";
+                // 255 = unavailable (secret value); skip target-health gating for blind combat mode.
+                if(before&&o.TargetHealth!=255&&(o.TargetHealth<=0||o.TargetHealth>100))return "Pending live-target action lacks known positive target health.";
+                // With secret action state the blind engine deliberately swings without telemetry;
+                // do not re-veto that decision here. When telemetry exists the fallback slot was
+                // chosen from the usable mask, so this check still passes.
+                if(before&&skill&&!(p.BlindGrind&&!o.ActionsKnown))
                 {
                     int mask=1<<((int)c.Action-(int)FarmAction.Skill1);
                     if(!o.ActionsKnown||(o.KnownActionsMask&mask)==0||(o.ReadyActionsMask&mask)==0||(o.UsableActionsMask&mask)==0)return "Pending skill is no longer known, ready and usable.";
                 }
-                if(!skill&&(!o.TargetPositionKnown||!Finite(o.TargetX)||!Finite(o.TargetY)||o.TargetX<0||o.TargetX>1||o.TargetY<0||o.TargetY>1||NavigationMath.Distance(o.TargetX-o.X,o.TargetY-o.Y,p.Calibration.AxisScale)>0.02))return "Approach lost its verified target position or distance limit.";
+                if(!skill&&(!p.BlindGrind)&&(!o.TargetPositionKnown||!Finite(o.TargetX)||!Finite(o.TargetY)||o.TargetX<0||o.TargetX>1||o.TargetY<0||o.TargetY>1||NavigationMath.Distance(o.TargetX-o.X,o.TargetY-o.Y,p.Calibration.AxisScale)>0.02))return "Approach lost its verified target position or distance limit.";
             }
             if(c.Action==FarmAction.Interact)
             {
@@ -202,12 +214,13 @@ namespace WoWProbe
             if(!o.KnownCore||o.ReadFailures!=0)return "Required core state is unknown or an API read failed.";
             if(o.PlayerDead||o.PlayerGhost)return "Player death or ghost state stopped farming.";
             if(o.BagFull)return "Full bags stopped farming.";
-            if(o.Health<0||o.Health>100||o.Health<=p.CriticalHealth)return "Health is unknown or critical.";
-            if(o.PowerType<0||o.PowerType>=255||(o.PowerType==0&&(o.Power<0||o.Power>100)))return "Required power type or mana is unknown.";
+            if(o.Health!=255&&(o.Health<0||o.Health>100||o.Health<=p.CriticalHealth))return "Health is unknown or critical.";
+            if(o.PowerType!=255&&o.PowerType<0)return "Required power type is unknown.";
+            if(o.PowerType==0&&o.Power!=255&&(o.Power<0||o.Power>100))return "Required mana is unknown.";
             if(!o.CastingKnown)return "Casting state became unknown.";
             if(o.MapId!=route.MapId||o.MapMode!=route.MapMode||!String.Equals(o.Zone,route.Zone,StringComparison.Ordinal))return "Farming map identity or zone changed.";
             if(!Finite(o.X)||!Finite(o.Y)||o.X<0||o.X>1||o.Y<0||o.Y>1||!Finite(o.Facing)||o.Facing<0||o.Facing>Math.PI*2)return "Player position or facing is invalid.";
-            if(FarmEngine.DistanceFromRoute(route,p.Calibration.AxisScale,o.X,o.Y)>0.02)return "Player moved outside the calibrated 0.02 safety corridor around the recorded route.";
+            if(!p.BlindGrind&&FarmEngine.DistanceFromRoute(route,p.Calibration.AxisScale,o.X,o.Y)>0.02)return "Player moved outside the calibrated 0.02 safety corridor around the recorded route.";
             return null;
         }
         static bool Finite(double d){return !Double.IsNaN(d)&&!Double.IsInfinity(d);}

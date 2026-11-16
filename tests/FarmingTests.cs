@@ -38,6 +38,17 @@ internal static class FarmingTests
         Run("engine owns snapshots and completed checkpoints never restart", SnapshotAndCompletion);
         Run("virtual cycle restores approaches kills loots skins and resumes patrol", FullSimulation);
         Run("virtual missing-position and missing-supplies faults stop without input", SimulatorFaults);
+        Run("blind secret range enters combat and swings the usable slot", BlindSecretRangeCombat);
+        Run("blind secret range never bounces combat back into approach", BlindSecretRangeStays);
+        Run("blind secret action state falls back to the observed usable slot", BlindSecretActions);
+        Run("blind with known out-of-range still uses approach", BlindKnownRangeApproach);
+        Run("blind falling target health keeps the fight alive", BlindDamageKeepsFighting);
+        Run("blind stalled damage repositions twice then disengages", BlindStalledDamageRepositionsThenAbandons);
+        Run("blind secret target health disengages on its deadline", BlindSecretHealthAbortsOnDeadline);
+        Run("blind disengage does not immediately relock the same mob", BlindAbandonDoesNotRelock);
+        Run("blind pulses stay inside the session bounded input window", BlindPulsesStayBounded);
+        Run("blind combat never toggles the plain Attack slot", BlindNeverTogglesAttackSlot);
+        Run("readable distance drives the chase and saves energy", BlindDistanceDrivenChase);
         Console.WriteLine("Farming tests: {0} passed, {1} failed. Synthetic observations only; no OS input.", passed, failed);
         return failed == 0 ? 0 : 1;
     }
@@ -138,8 +149,10 @@ internal static class FarmingTests
     }
     private static void SafetyFaults()
     {
+        // Health 255 is the sanctioned "unreadable" sentinel on secret-value clients and is
+        // tolerated (never a stop), so it is excluded from the stop-fault list.
         Action<FarmObservation>[] faults = { o => o.Fresh = false, o => o.KnownCore = false, o => o.PlayerDead = true, o => o.PlayerGhost = true, o => o.BagFull = true,
-            o => o.ReadFailures = 1, o => o.MapId++, o => o.MapMode = 1, o => o.Zone = "other", o => o.X = Double.NaN, o => o.Facing = Double.NaN, o => o.Health = 255, o => o.InCombat = true };
+            o => o.ReadFailures = 1, o => o.MapId++, o => o.MapMode = 1, o => o.Zone = "other", o => o.X = Double.NaN, o => o.Facing = Double.NaN, o => o.InCombat = true };
         foreach (Action<FarmObservation> fault in faults)
         { FarmEngine e = Engine(Profile()); FarmObservation o = Observation(); fault(o); Equal(FarmAction.Stop, e.Step(o, 0).Action, "unsafe state stops"); Check(!String.IsNullOrEmpty(e.LastReason), "reason retained"); }
     }
@@ -302,5 +315,163 @@ internal static class FarmingTests
             for (int i = 0; i < 1000; i++) { c = e.Step(sim.Sample(), sim.ElapsedMilliseconds); if (c.Action == FarmAction.Stop) break; sim.Apply(c); if (c.HoldMilliseconds == 0) sim.Advance(200); }
             Equal(FarmAction.Stop, c.Action, "virtual fault stops"); Equal(0, sim.Kills, "fault cannot complete a kill"); Equal(0, sim.InputEvents, "fault remains virtual");
         }
+    }
+    // ---- blind grind on secret-value clients ----
+    private static BattleProfile BlindProfile(string sequence)
+    { BattleProfile p = Profile(); p.BlindGrind = true; p.SkillSequence = sequence; return p; }
+    private static FarmObservation SecretRangeMonster()
+    {
+        FarmObservation o = Monster(false);
+        o.RangeKnown = false; o.TargetInRange = false; o.TargetPositionKnown = false;
+        o.TargetX = Double.NaN; o.TargetY = Double.NaN;
+        return o;
+    }
+    private static void BlindSecretRangeCombat()
+    {
+        BattleProfile p = BlindProfile("223");
+        FarmObservation o = SecretRangeMonster(); o.UsableActionsMask = 1;
+        FarmEngine e = Locked(p, o);
+        Equal("Combat", e.Status, "secret range must not trap blind combat in approach");
+        Equal(FarmAction.Skill2, Next(e, o, 200).Action, "configured damaging slot is pressed even when usability masks say no");
+    }
+    private static void BlindSecretRangeStays()
+    {
+        BattleProfile p = BlindProfile("223");
+        FarmObservation o = SecretRangeMonster(); o.UsableActionsMask = 1; o.InCombat = true;
+        FarmEngine e = Locked(p, o);
+        for (long t = 200; t <= 5200; t += 400)
+        {
+            FarmCommand c = Next(e, o, t);
+            Check(c.Action != FarmAction.Stop, "blind combat must not stop on secret range: " + c.Reason);
+            Equal("Combat", e.Status, "blind combat must stay in combat after four seconds");
+        }
+    }
+    private static void BlindSecretActions()
+    {
+        BattleProfile p = BlindProfile("223");
+        FarmObservation o = SecretRangeMonster(); o.InCombat = true;
+        o.ActionsKnown = false; o.KnownActionsMask = 0; o.ReadyActionsMask = 0; o.UsableActionsMask = 0;
+        FarmEngine e = Locked(p, o);
+        Equal(FarmAction.Skill2, Next(e, o, 200).Action, "secret action state still presses the configured damaging slot");
+        for (long t = 700; t <= 5200; t += 500)
+            Check(Next(e, o, t).Action != FarmAction.Stop, "secret action state must not stop the engine");
+    }
+    private static void BlindKnownRangeApproach()
+    {
+        FarmObservation o = Monster(false); // RangeKnown = true, TargetInRange = false, position known
+        FarmEngine e = Locked(BlindProfile("223"), o);
+        Equal("Approach", e.Status, "a known out-of-range observation still uses approach");
+    }
+    // ---- blind damage evidence and disengage ----
+    private static FarmObservation BlindStalled()
+    {
+        FarmObservation o = SecretRangeMonster();
+        o.UsableActionsMask = 15; o.InCombat = false; // hardest case: no combat flag refreshes evidence
+        return o;
+    }
+    private static void BlindDamageKeepsFighting()
+    {
+        BattleProfile p = BlindProfile("223");
+        FarmObservation o = BlindStalled(); o.TargetHealth = 100;
+        FarmEngine e = Locked(p, o);
+        for (long t = 1000; t <= 20000; t += 1000)
+        {
+            o.TargetHealth = Math.Max(1, 100 - (int)(t / 1000) * 4);
+            FarmCommand c = Next(e, o, t);
+            Check(c.Action != FarmAction.Stop, "falling target health must not abort: " + c.Reason);
+            Equal("Combat", e.Status, "continued damage keeps blind combat alive");
+        }
+    }
+    private static void BlindStalledDamageRepositionsThenAbandons()
+    {
+        BattleProfile p = BlindProfile("223");
+        FarmObservation o = BlindStalled(); o.TargetHealth = 100;
+        FarmEngine e = Locked(p, o);
+        int repositions = 0; bool abandoned = false;
+        for (long t = 500; t <= 30000; t += 500)
+        {
+            FarmCommand c = Next(e, o, t);
+            Check(c.Action != FarmAction.Stop, "stalled blind combat must disengage, not stop the session: " + c.Reason);
+            if (c.Action == FarmAction.TurnRight || c.Action == FarmAction.TurnLeft) repositions++;
+            if (!e.EncounterActive) { abandoned = true; break; }
+        }
+        Check(repositions >= 2, "two repositioning attempts before giving up, got " + repositions);
+        Check(abandoned, "stalled fight must be abandoned instead of standing still until death");
+        Equal("Patrol", e.Status, "disengage resumes patrol");
+    }
+    private static void BlindSecretHealthAbortsOnDeadline()
+    {
+        BattleProfile p = BlindProfile("223");
+        FarmObservation o = BlindStalled(); o.TargetHealth = 255; // secret value on Forever clients
+        FarmEngine e = Locked(p, o);
+        bool abandoned = false; long abandonedAt = -1;
+        for (long t = 500; t <= 60000; t += 500)
+        {
+            FarmCommand c = Next(e, o, t);
+            Check(c.Action != FarmAction.Stop, "secret health must disengage, not stop: " + c.Reason);
+            if (!e.EncounterActive) { abandoned = true; abandonedAt = t; break; }
+        }
+        Check(abandoned, "secret target health must hit the blind combat deadline and disengage");
+        Check(abandonedAt > 29000 && abandonedAt <= 31000, "secret-health chase abort must happen around 30s, got " + abandonedAt);
+    }
+    private static void BlindPulsesStayBounded()
+    {
+        // A live run once faulted with "Unbounded farming pulse rejected" after a blind pulse
+        // was widened to 400ms; FarmSession only accepts 60..250ms per keypress.
+        BattleProfile p = BlindProfile("223");
+        FarmObservation o = BlindStalled(); o.TargetHealth = 255;
+        FarmEngine e = Locked(p, o);
+        for (long t = 100; t <= 60000; t += 100)
+        {
+            FarmCommand c = Next(e, o, t);
+            if (c.Action == FarmAction.None || c.Action == FarmAction.Stop || c.Action == FarmAction.Completed) continue;
+            Check(c.HoldMilliseconds >= 60 && c.HoldMilliseconds <= 250,
+                "blind pulse outside bounded input window: " + c.Action + " " + c.HoldMilliseconds + "ms");
+        }
+    }
+    private static void BlindNeverTogglesAttackSlot()
+    {
+        // Live 01:55: slot 1 is spell 6603 "Attack", a toggle. 104 pulses there dealt no damage.
+        BattleProfile p = BlindProfile("1");
+        FarmObservation o = BlindStalled(); o.UsableActionsMask = 15; o.TargetHealth = 255;
+        FarmEngine e = Locked(p, o);
+        for (long t = 100; t <= 20000; t += 100)
+            Check(Next(e, o, t).Action != FarmAction.Skill1, "slot 1 is the Attack toggle and must never be pressed");
+    }
+    private static void BlindDistanceDrivenChase()
+    {
+        BattleProfile p = BlindProfile("2");
+        FarmObservation o = SecretRangeMonster();
+        o.RangeKnown = true; o.TargetInRange = false; // WC3 CheckInteractDistance fallback says "too far"
+        o.UsableActionsMask = 15; o.TargetHealth = 255;
+        FarmEngine e = Locked(p, o);
+        int forward = 0, turns = 0, skills = 0;
+        for (long t = 100; t <= 6000; t += 100)
+        {
+            FarmCommand c = Next(e, o, t);
+            if (c.Action == FarmAction.Forward) forward++;
+            if (c.Action == FarmAction.TurnRight || c.Action == FarmAction.TurnLeft) turns++;
+            if (c.Action == FarmAction.Skill1 || c.Action == FarmAction.Skill2) skills++;
+        }
+        Check(forward > 0, "out-of-range target must still be chased with forward pulses");
+        Check(turns > 0, "out-of-range chase must sweep for a name-targeted mob");
+        Equal(0, skills, "energy must be saved while the target is still outside melee range");
+        o.TargetInRange = true;
+        bool swung = false;
+        for (long t = 6100; t <= 16000; t += 100)
+            if (Next(e, o, t).Action == FarmAction.Skill2) { swung = true; break; }
+        Check(swung, "entering melee range must start the damaging rotation");
+    }
+    private static void BlindAbandonDoesNotRelock()
+    {
+        BattleProfile p = BlindProfile("223");
+        FarmObservation o = BlindStalled(); o.TargetHealth = 255;
+        FarmEngine e = Locked(p, o);
+        long abandonedAt = 0;
+        for (long t = 500; t <= 60000; t += 500)
+        { Next(e, o, t); if (!e.EncounterActive) { abandonedAt = t; break; } }
+        Check(abandonedAt > 0, "must have abandoned first");
+        for (long t = abandonedAt + 500; t < abandonedAt + 12000; t += 500)
+        { Next(e, o, t); Check(!e.EncounterActive, "abandoned mob must not be re-locked during the cooldown"); }
     }
 }

@@ -146,7 +146,7 @@ namespace WoWProbe
                         aliveFrames=0;Enter(Phase.ConfirmAlive,nowMs);return Click(OperationPurpose.Resurrect,o.ResurrectRegion,"Resurrect once after known zero cooldown; await two living frames.");
                     case Phase.ConfirmAlive:
                         if(o.Farm.PlayerDead||o.Farm.PlayerGhost){if(aliveFrames>0)return Fail("The player died or became a ghost again during resurrection confirmation.");return None("Waiting for actual life after the single resurrection click.");}
-                        if(o.Farm.Health<=0||o.Farm.Health>100)return Fail("Positive known health is required to confirm resurrection.");
+                        if(o.Farm.Health!=255&&(o.Farm.Health<=0||o.Farm.Health>100))return Fail("Positive known health is required to confirm resurrection.");
                         if(!o.ResurrectKnown)return Fail("Resurrection dialog state became unknown.");
                         if(o.ResurrectVisible){aliveFrames=0;return None("Waiting for the resurrection dialog to close.");}
                         aliveFrames++;if(aliveFrames<2)return None("Confirming life with another distinct frame.");
@@ -177,7 +177,7 @@ namespace WoWProbe
         OperationCommand Rest(OperationObservation o,long now)
         {
             var f=o.Farm;if(f.PlayerDead||f.PlayerGhost)return Fail("Player died again during recovery rest.");
-            if(f.Health<=0||f.Health>100||f.PowerType<0||f.PowerType>=255||(f.PowerType==0&&(f.Power<0||f.Power>100)))return Fail("Recovery health or applicable mana is unknown.");
+            if((f.Health!=255&&(f.Health<=0||f.Health>100))||(f.PowerType!=255&&f.PowerType<0)||(f.PowerType==0&&f.Power!=255&&(f.Power<0||f.Power>100)))return Fail("Recovery health or applicable mana is unknown.");
             if(!f.CastingKnown)return Fail("Casting state is unknown during recovery rest.");
             if(f.Casting||f.Channeling)return None("Waiting for casting to finish before recovery supplies.");
             bool healthReady=f.Health>=plan.Battle.RecoverTo,manaReady=f.PowerType!=0||f.Power>=plan.Battle.RecoverTo;

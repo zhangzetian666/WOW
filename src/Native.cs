@@ -5,6 +5,7 @@ using System.Diagnostics;
 using System.Drawing;
 using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Windows.Forms;
 
 namespace WoWProbe
@@ -45,6 +46,8 @@ namespace WoWProbe
         [DllImport("user32.dll")] static extern uint MapVirtualKey(uint code, uint mapType);
         [DllImport("user32.dll", SetLastError=true)] static extern uint SendInput(uint count, INPUT[] input, int size);
         [DllImport("user32.dll", SetLastError=true)] static extern bool SetCursorPos(int x,int y);
+        [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern short VkKeyScanW(char ch);
+        [DllImport("user32.dll")] static extern bool ClipCursor(IntPtr rect);
         public static int InputStructureSize { get { return Marshal.SizeOf(typeof(INPUT)); } }
 
         public static List<WindowInfo> Windows()
@@ -107,10 +110,12 @@ namespace WoWProbe
 
         public static void SendKey(ushort key, bool up)
         {
+            // VK-based injection: verified working on the Forever client for W/A and
+            // arrow keys. Scan-code injection silently no-ops for arrow keys here.
             uint scan = MapVirtualKey(key, 0);
             if (scan == 0) throw new ArgumentException("该按键没有可用的扫描码。");
             var input = new INPUT { Type=1, Data=new INPUTUNION { Keyboard=new KEYBDINPUT {
-                Key=0, Scan=(ushort)scan, Flags=8u | (up ? 2u : 0u), Extra=UIntPtr.Zero } } };
+                Key=key, Scan=(ushort)scan, Flags=(up ? 2u : 0u), Extra=UIntPtr.Zero } } };
             if (SendInput(1, new INPUT[] {input}, InputStructureSize) != 1)
                 throw new Win32Exception(Marshal.GetLastWin32Error(), "按键未发送。请确认工具与游戏以相同权限运行。");
         }
@@ -123,6 +128,43 @@ namespace WoWProbe
         {
             var input=new INPUT{Type=0,Data=new INPUTUNION{Mouse=new MOUSEINPUT{Flags=right?(up?16u:8u):(up?4u:2u),Extra=UIntPtr.Zero}}};
             if(SendInput(1,new INPUT[]{input},InputStructureSize)!=1)throw new Win32Exception(Marshal.GetLastWin32Error(),"鼠标按钮未发送。");
+        }
+        // Release any ClipCursor restriction a previous run left behind so physical
+        // clicks land where the operating system (and the operator) expect them.
+        public static void UnclipCursor() { try { ClipCursor(IntPtr.Zero); } catch { } }
+
+        // Chat typing: map a character to its virtual key plus shift state, then send
+        // real down/up events so the game's edit box receives them like a keyboard.
+        // Characters without a layout mapping (e.g. CJK names) use KEYEVENTF_UNICODE,
+        // which injects the raw code point and is accepted by the game's chat edit box.
+        public static void SendChar(char ch)
+        {
+            short vks=VkKeyScanW(ch);
+            ushort key=(ushort)(vks&0xFF);
+            if(key!=0 && (vks&0xFF)!=0xFF)
+            {
+                bool shift=(vks&0x100)!=0;
+                if(shift)SendKey(0x10,false);
+                try { SendKey(key,false); Thread.Sleep(15); SendKey(key,true); }
+                finally { if(shift)SendKey(0x10,true); }
+                Thread.Sleep(15);
+                return;
+            }
+            SendUnicodeChar(ch);
+        }
+        const uint KEYEVENTF_UNICODE=0x0004, KEYEVENTF_KEYUP=0x0002;
+        public static void SendUnicodeChar(char ch)
+        {
+            var down=new INPUT{Type=1,Data=new INPUTUNION{Keyboard=new KEYBDINPUT{Key=0,Scan=(ushort)ch,Flags=KEYEVENTF_UNICODE,Extra=UIntPtr.Zero}}};
+            var up=new INPUT{Type=1,Data=new INPUTUNION{Keyboard=new KEYBDINPUT{Key=0,Scan=(ushort)ch,Flags=KEYEVENTF_UNICODE|KEYEVENTF_KEYUP,Extra=UIntPtr.Zero}}};
+            var both=new INPUT[]{down,up};
+            if(SendInput(2,both,InputStructureSize)!=2)
+                throw new Win32Exception(Marshal.GetLastWin32Error(),"Unicode 字符未发送。");
+            Thread.Sleep(25);
+        }
+        public static void SendText(string text)
+        {
+            foreach(char ch in text)SendChar(ch);
         }
     }
 
