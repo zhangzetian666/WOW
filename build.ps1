@@ -34,8 +34,8 @@ foreach ($testName in @('CombatTelemetryTests','BattleProfileTests','FarmingTest
     & "$bin\$testName.exe"
     if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
 }
-$domainSources = @($sources | Where-Object { [System.IO.Path]::GetFileName($_) -notmatch '(^Program\.cs$|^Native\.cs$|^CampaignNative\.cs$|^AssemblyInfo\.cs$|Form\.cs$)' })
-foreach ($testName in @('CampaignSettingsTests','RecoveryWorkflowTests','VendorWorkflowTests','CampaignEngineTests','CampaignSessionTests','CampaignSimulatorTests','RuntimeEvidenceTests','OperationsTelemetryTests','CampaignBundleTests','CampaignCheckpointTests','FeedbackSummaryTests','CampaignPreflightTests')) {
+$domainSources = @($sources | Where-Object { [System.IO.Path]::GetFileName($_) -notmatch '(^Program\.cs$|^Native\.cs$|^CampaignNative\.cs$|^GrindCli\.cs$|^AssemblyInfo\.cs$|Form\.cs$)' })
+foreach ($testName in @('CampaignSettingsTests','RecoveryWorkflowTests','VendorWorkflowTests','CampaignEngineTests','CampaignSessionTests','CampaignSimulatorTests','RuntimeEvidenceTests','OperationsTelemetryTests','CampaignBundleTests','CampaignCheckpointTests','FeedbackSummaryTests','CampaignPreflightTests','GrindSafetyTests','GrindHealerApproachTests')) {
     & $compiler @common /target:exe "/out:$bin\$testName.exe" @domainSources "$projectRoot\tests\CampaignFixtures.cs" "$projectRoot\tests\$testName.cs"
     if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
     & "$bin\$testName.exe"
@@ -53,10 +53,14 @@ if ($LASTEXITCODE -ne 0) { throw 'Campaign UI test compilation failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Campaign startup failure test compilation failed.' }
 & $compiler @common /target:winexe /main:ReadinessUiTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\ReadinessUiTests.exe" @sources "$projectRoot\tests\CampaignFixtures.cs" "$projectRoot\tests\ReadinessUiTests.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Readiness UI test compilation failed.' }
+& $compiler @common /target:exe /main:GrindCliIntegrationTests "/out:$bin\GrindCliIntegrationTests.exe" @sources "$projectRoot\tests\GrindCliIntegrationTests.cs"
+if ($LASTEXITCODE -ne 0) { throw 'Grind CLI integration test compilation failed.' }
+& "$bin\GrindCliIntegrationTests.exe"
+if ($LASTEXITCODE -ne 0) { throw 'Grind CLI integration tests failed.' }
 Write-Output "BUILD_OK $bin\WoWProbe.exe"
 if ($Package) {
     $dist = Join-Path $projectRoot 'dist'
-    $releaseName = 'WoWProbe-Complete-0.6.0'
+    $releaseName = 'WoWProbe-Complete-0.6.1'
     $release = Join-Path $dist $releaseName
     New-Item -ItemType Directory -Path $release -Force | Out-Null
     Copy-Item -LiteralPath "$bin\WoWProbe.exe" -Destination $release -Force

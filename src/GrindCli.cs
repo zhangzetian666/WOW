@@ -30,6 +30,8 @@ namespace WoWProbe
         static object gate = new object();
         static StreamWriter logFile;
         static long lastShot;
+        static GrindInputGuard input;
+        static FarmSession activeSession;
 
         /// <summary>
         /// Read-only status probe. Locates the addon panels, warms up the heartbeat and
@@ -74,7 +76,9 @@ namespace WoWProbe
                 return 2;
             }
             string routePath = args[1], profilePath = args[2];
-            int cycles = args.Length > 3 ? int.Parse(args[3]) : 999;
+            int cycles = 999;
+            if (args.Length > 3 && (!Int32.TryParse(args[3], out cycles) || cycles < 1 || cycles > 10000))
+            { Console.WriteLine("cycles must be between 1 and 10000."); return 2; }
             string dir = Path.GetDirectoryName(Path.GetFullPath(routePath));
             logPath = Path.Combine(Path.GetDirectoryName(profilePath) ?? ".", "grind-log.txt");
             logFile = new StreamWriter(logPath, false, new UTF8Encoding(false)) { AutoFlush = true };
@@ -87,6 +91,8 @@ namespace WoWProbe
             }
             finally
             {
+                if (activeSession != null && activeSession.IsActive) activeSession.Stop("CLI exit; release owned input.");
+                activeSession = null; input = null;
                 // Release any cursor clipping and close the log so the machine is left clean for the operator.
                 Native.UnclipCursor();
                 if (logFile != null) { try { logFile.Dispose(); } catch { } }
@@ -110,8 +116,14 @@ namespace WoWProbe
 
             if (!LocatePanels(route)) { Log("未能自动定位插件色块，请确认游戏窗口化和插件已加载。"); return 1; }
 
-            // Keep the physical cursor out of the emergency corner while we drive the game.
-            try { Native.MoveMouse(new Point(client.X + client.Width - 40, client.Y + client.Height - 40)); } catch { }
+            // Establish sequence freshness before auxiliary input. The emergency corner
+            // remains an operator stop signal; never move the cursor out of it automatically.
+            for (int i = 0; i < 12; i++) { Snapshot(); Pause(150); }
+            var safety = new InputFailureLatch();
+            var backend = new WindowsInputBackend(target, m => Log(m));
+            input = new GrindInputGuard(backend, Snapshot, () => clock.ElapsedMilliseconds,
+                ms => Thread.Sleep(ms), safety, route.MapId, route.MapMode, route.Zone);
+            input.Ensure();
 
             // Live profile: blind grind on, all live confirmations granted by the CLI operator.
             BattleProfile profile = baseProfile.Clone();
@@ -133,13 +145,11 @@ namespace WoWProbe
             bool calibrated = false;
             for (int attempt = 1; attempt <= 5 && !calibrated; attempt++)
             {
-                if (attempt > 1) { Log("标定重试第 " + attempt + " 次（等待角色静止）..."); Thread.Sleep(3000); }
+                if (attempt > 1) { Log("标定重试第 " + attempt + " 次（等待角色静止）..."); Pause(3000); }
                 calibrated = MeasureCalibration(profile, route);
             }
             if (!calibrated) { Log("自动标定连续失败。"); return 1; }
 
-            var safety = new InputFailureLatch();
-            var backend = new WindowsInputBackend(target, m => Log(m));
             int completed = 0;
             // Kept across patrol rounds: the last mob we actually met is a much better /target
             // name than the profile's catalog entry, and TAB alone found ~1 target per 1000 presses.
@@ -161,9 +171,9 @@ namespace WoWProbe
                 int startIndex = NearestIndex(work, start.X, start.Y);
                 Log("=== 第 " + (cycle + 1) + " 轮（" + (reverse ? "反向" : "正向") + "，扩展 " + expand + "）：从路线点 " + startIndex + " 开始，当前位置 " + Pos(start) + " ===");
                 var session = new FarmSession(backend, () => clock.ElapsedMilliseconds, Snapshot, Log, safety);
+                activeSession = session;
                 try { session.Start(work, profile, false, false, startIndex); }
                 catch (Exception ex) { Log("启动失败: " + ex.Message); return 1; }
-                Activate(target.Handle);
                 bool capsLogged = false;
                 int capsPoll = 0;
                 uint attackToken = 0;
@@ -171,13 +181,15 @@ namespace WoWProbe
                 int lastObservedTargetHealth = -1;
                 while (session.IsActive)
                 {
-                    Thread.Sleep(40);
+                    Pause(40);
                     session.Tick();
+                    if (!session.IsActive) break;
+                    input.Ensure();
                     MaybeShot();
                     // Sample once per second: capability bits, real target-damage evidence and
                     // auto-attack. Without a target, FromPackets leaves range/attackability bits
                     // at false defaults, so a no-target probe cannot tell "secret" from "out of range".
-                    if ((++capsPoll % 25) == 0)
+                    if ((++capsPoll % 25) == 0 && !session.IsHolding && session.Status != "Countdown")
                     {
                         FarmObservation cap = Snapshot();
                         if (cap.TargetExists)
@@ -205,7 +217,7 @@ namespace WoWProbe
                             // /startattack keeps melee auto-attack running while the blind engine
                             // closes the gap. Skills alone need energy and a facing target, and the
                             // client hides range, so two long fights produced swings but no damage.
-                            if (cap.TargetToken != 0 && cap.TargetToken != attackToken)
+                            if (GrindRecoveryPolicy.CanAttack(cap) && cap.TargetToken != attackToken)
                             {
                                 attackToken = cap.TargetToken;
                                 // Learn the mob we actually met: TAB found only ~1 target per
@@ -214,17 +226,17 @@ namespace WoWProbe
                                 if (!String.IsNullOrEmpty(cap.TargetName) && cap.TargetName != "灵魂医者")
                                     namedQuarry = cap.TargetName;
                                 Log("锁定目标 " + cap.TargetName + "，发送 /startattack 开启自动近战攻击。");
-                                Chat(backend, "/startattack");
+                                ChatAttack(backend, cap.TargetToken);
                                 lastAutoAttackAt = clock.ElapsedMilliseconds;
                             }
-                            else if (cap.TargetToken != 0 && clock.ElapsedMilliseconds - lastAutoAttackAt >= 12000)
+                            else if (GrindRecoveryPolicy.CanAttack(cap) && clock.ElapsedMilliseconds - lastAutoAttackAt >= 12000)
                             {
                                 // Slot 1 is the Attack *toggle* so we never press it now, but a
                                 // dropped target or a movement state change can still clear
                                 // auto-attack. /startattack is idempotent: refreshing is safe.
                                 lastAutoAttackAt = clock.ElapsedMilliseconds;
                                 Log("刷新自动近战攻击 (/startattack)。");
-                                Chat(backend, "/startattack");
+                                ChatAttack(backend, cap.TargetToken);
                             }
                         }
                         else
@@ -250,36 +262,35 @@ namespace WoWProbe
                     {
                         var key = Console.ReadKey(true).Key;
                         if (key == ConsoleKey.Q) { session.Stop("手动退出"); return 0; }
-                        if (key == ConsoleKey.Enter) break;
+                        if (key == ConsoleKey.Enter) { session.Stop("CLI stopped by operator."); break; }
                     }
                 }
                 Log("本轮结束: " + session.Status + " / " + session.EngineState + " · " + session.LastReason);
                 if (safety.Faulted) { Log("输入安全闩触发，停止。"); break; }
                 FarmObservation end = Snapshot();
-                if (end.PlayerDead || end.PlayerGhost)
+                if (GrindRecoveryPolicy.ShouldRevive(session.Status, session.LastReason, end))
                 {
                     if (!WaitForRevival("本轮结束", profile)) { Log("自动复活失败，全部停止。"); break; }
                 }
+                else if (session.Status != "Completed") { Log("本轮已停止，不自动重新布防。"); break; }
                 if (session.Status == "Completed") { completed++; if (completed >= cycles) break; }
-                Thread.Sleep(1500);
+                Pause(1500);
             }
             Log("打怪循环退出。完成整轮 " + completed + " 次。");
-            return 0;
+            return completed >= cycles ? 0 : 1;
         }
 
         // ---- automatic revival (spirit healer flow) ----
         // Corpse state: ENTER activates the death dialog's default button (release spirit);
-        // ghost state: select the nearest friendly NPC (the spirit healer at the graveyard),
-        // walk to it using the panel's target position, press F (interact-with-target hardware key)
-        // to open gossip, then /click the first gossip option ("让我复活吧") and the confirmation
-        // popup's accept button. The addon's /wowprobe rez command performs the friendly targeting.
+        // Ghost state requires the spirit healer's verified identity and readable target position.
+        // Approach must prove arrival before the recorded interaction layout is used.
+        // The addon's /wowprobe rez command is read-only diagnostics and never selects a target.
         static bool WaitForRevival(string context, BattleProfile profile)
         {
             FarmObservation start = Snapshot();
             if (!start.PlayerDead && !start.PlayerGhost) return true;
             Log(context + "时角色处于死亡/幽魂状态，启动自动复活流程...");
             var backend = new WindowsInputBackend(target, m => Log(m));
-            int fullSearches = 0;
             for (int attempt = 1; attempt <= 12 && !HasKey(); attempt++)
             {
                 FarmObservation w = Snapshot();
@@ -287,114 +298,56 @@ namespace WoWProbe
                 if (w.PlayerDead && !w.PlayerGhost)
                 {
                     Log("尝试释放灵魂（回车触发死亡弹窗默认按钮，/click 兜底）...");
-                    Pulse(backend, 0x0D, 60); Thread.Sleep(1500);
+                    Pulse(backend, 0x0D, 60); Pause(1500);
                     Chat(backend, "/click StaticPopup1Button1");
-                    Thread.Sleep(2200);
+                    Pause(2200);
                     continue;
                 }
-                // Ghost: TargetNearestFriend/InteractUnit are hardware-gated even from chat
-                // (pcall succeeds but nothing happens). Select the spirit healer by NAME via the
-                // /target chat command (Unicode typed with KEYEVENTF_UNICODE), falling back to a
-                // real right-click sweep over the screen; the ghost spawns beside the healer.
+                // Select the healer by name, then verify full identity and readable coordinates.
+                // Missing position never authorizes a screen sweep or guessed graveyard movement.
                 w = Snapshot();
                 Log("幽魂目标状态: exists=" + w.TargetExists + " name=" + w.TargetName + " pos=" + w.TargetPositionKnown +
                     (w.TargetPositionKnown ? " (" + w.TargetX.ToString("F4") + "," + w.TargetY.ToString("F4") + ")" : "") +
                     "（该客户端幽魂形态下目标坐标通常保密）");
-                // Forever/Midnight keeps target map positions secret in ghost form: TargetExists
-                // can be true while TargetPositionKnown stays false forever. Requiring a position
-                // here deadlocked revival in an endless right-click sweep (2026-11-13 06:37).
-                // The spirit healer spawns right beside the ghost, so an existing friendly target
-                // is enough to attempt interaction directly.
+                // A friendly target alone cannot authorize healer interaction. Secret coordinates
+                // require manual revival; skill range is not evidence of interaction distance.
                 bool selected = IsHealerTarget(w);
                 if (!selected)
                 {
                     Log("幽魂状态：按名字选中灵魂医者（/target 灵魂医者）...");
                     Chat(backend, "/target 灵魂医者");
-                    Thread.Sleep(900);
+                    Pause(900);
                     w = Snapshot();
                     Log("按名字后目标状态: exists=" + w.TargetExists + " name=" + w.TargetName + " pos=" + w.TargetPositionKnown);
                     selected = IsHealerTarget(w);
                 }
-                for (int dir = 0; dir < 8 && !selected; dir++)
-                {
-                    if (dir == 0) Log("按名字未选中，改为右键网格扫描...");
-                    else
-                    {
-                        Pulse(backend, profile.Movement.TurnRight,
-                            Math.Max(40, (int)(Math.PI / 4 / Math.Max(0.1, profile.Calibration.TurnRadiansPerSecond) * 1000)));
-                        Thread.Sleep(450);
-                    }
-                    selected = ClickSweep();
-                }
                 if (!selected)
                 {
                     Log("未能选中任何目标，本轮放弃。");
-                    Thread.Sleep(1800);
+                    Pause(1800);
                     continue;
                 }
                 FarmObservation healer = Snapshot();
-                bool positioned = healer.TargetPositionKnown && !Double.IsNaN(healer.TargetX) && !Double.IsNaN(healer.TargetY);
+                bool positioned = GrindRecoveryPolicy.CanApproachHealer(healer);
                 if (positioned)
                 {
                     double stop = attempt >= 5 ? 0.0012 : attempt >= 3 ? 0.0018 : 0.0025;
                     Log(String.Format("灵魂医者坐标 ({0:F4},{1:F4})，走近至 {2}...", healer.TargetX, healer.TargetY, stop));
-                    WalkTo(backend, profile, healer.TargetX, healer.TargetY, stop);
-                    healer = Snapshot();
-                    if (NavigationMathF(healer)) FaceTo(backend, profile, healer.TargetX, healer.TargetY);
+                    if (!WalkTo(backend, profile, healer.TargetToken, healer.TargetX, healer.TargetY, stop))
+                    { Log("Healer arrival was not verified. Stop automatic revival and revive manually."); return false; }
                 }
                 else
                 {
-                    // Live 2026-11-14 09:45: blind rotate+forward made the ghost DRIFT away
-                    // from the graveyard (minimap 34.5,65.7 → 39.9,60.9) while the healer
-                    // stayed out of view. The ghost's own position AND the healer range bit
-                    // are both readable (probe: Pos/Facing KnownCore, RangeKnown=True,
-                    // TargetInRange=False), so search actively instead of guessing.
-                    bool closeRange = healer.RangeKnown && healer.TargetInRange;
-                    if (closeRange)
-                    {
-                        Log("灵魂医者已在互动范围内，直接互动。");
-                    }
-                    else if (healer.KnownCore && !Double.IsNaN(healer.X) && !Double.IsNaN(healer.Y))
-                    {
-                        // 2026-11-14: the spirit healer is a fixed graveyard fixture. Once its
-                        // graveyard point is known (operator-verified from the live minimap),
-                        // walk straight there instead of blindly sweeping spokes; the range bit
-                        // is checked on every step so an early pass close to the healer stops.
-                        if (fullSearches >= 2)
-                        {
-                            Log("多轮接近尝试均未成功，转入被动等待。");
-                            break;
-                        }
-                        fullSearches++;
-                        double gx, gyy;
-                        if (GraveyardPoint(healer.MapId, out gx, out gyy))
-                        {
-                            Log(String.Format("按已知墓地点 ({0:F4},{1:F4}) 直接步行接近...", gx, gyy));
-                            WalkTowardsHealer(backend, profile, gx, gyy, 160);
-                        }
-                        else
-                        {
-                            SeekHealer(backend, profile, healer);
-                        }
-                        FarmObservation afterSeek = Snapshot();
-                        if (!(afterSeek.RangeKnown && afterSeek.TargetInRange)) continue;
-                        Log("接近后医者进入互动范围。");
-                    }
-                    else
-                    {
-                        // Position unreadable: fall back to rotating so the healer model
-                        // enters the view for the F interact / model click.
-                        if (attempt > 1)
-                        {
-                            Log("自身坐标不可读；旋转 45° 让医者转入视野...");
-                            Pulse(backend, profile.Movement.TurnRight,
-                                Math.Max(40, (int)(Math.PI / 4 / Math.Max(0.1, profile.Calibration.TurnRadiansPerSecond) * 1000)));
-                            Thread.Sleep(450);
-                        }
-                    }
+                    Log("Healer position is unavailable. Skill range cannot prove interaction distance. Stop automatic revival and revive manually.");
+                    return false;
                 }
+                var arrivedHealer = Snapshot();
+                if (!GrindRecoveryPolicy.CanApproachHealer(arrivedHealer) || arrivedHealer.TargetToken != healer.TargetToken ||
+                    arrivedHealer.TargetX != healer.TargetX || arrivedHealer.TargetY != healer.TargetY || client.Width != 1920 || client.Height != 1080)
+                { Log("Healer identity or the recorded 1920x1080 interaction layout is unavailable."); return false; }
+
                 Log("与灵魂医者互动（F 键 + 医者模型右键）...");
-                Pulse(backend, 0x46, 60); Thread.Sleep(500);
+                Pulse(backend, 0x46, 60); Pause(500);
                 // The healer's projected position shifts with camera pitch and distance.
                 // (+20,+22) was the verified hit on 11-13, but after /reload the model was
                 // projected into the LOWER half of the client (its wings filled y=+160..+320),
@@ -407,32 +360,31 @@ namespace WoWProbe
                 Point hit = offsets[(attempt - 1) % offsets.Length];
                 try
                 {
-                    Native.MoveMouse(new Point(client.X + client.Width / 2 + hit.X, client.Y + client.Height / 2 + hit.Y));
-                    Native.SendMouseButton(true, false); Thread.Sleep(80); Native.SendMouseButton(true, true);
+                    Click(new Point(client.X + client.Width / 2 + hit.X, client.Y + client.Height / 2 + hit.Y), true);
                     Log("右键医者模型，中心偏移 (" + hit.X + "," + hit.Y + ")。");
                 }
-                catch { }
-                Thread.Sleep(900);
+                catch { throw; }
+                Pause(900);
                 // Gossip frame / confirmation popup positions on this 1920x1080, UI scale 1 client.
                 Log("选择复活对话（鼠标点选项 + /click 兜底）...");
                 LeftClick(new Point(client.X + 76, client.Y + 347)); // 「让我复活吧」
-                Thread.Sleep(700);
+                Pause(700);
                 Chat(backend, "/click GossipFrameGreetingButton1");
-                Thread.Sleep(1200);
+                Pause(1200);
                 Log("接受复活确认（本客户端需要连续两次接受）...");
                 LeftClick(new Point(client.X + 876, client.Y + 344)); // 「接受」
-                Thread.Sleep(700);
+                Pause(700);
                 LeftClick(new Point(client.X + 876, client.Y + 344));
-                Thread.Sleep(900);
+                Pause(900);
                 Chat(backend, "/click StaticPopup1Button1");
-                Thread.Sleep(500);
+                Pause(500);
                 Chat(backend, "/click StaticPopup1Button1");
-                Thread.Sleep(2200);
+                Pause(2200);
             }
             // passive tail: the operator may still be reviving the character manually
             for (int wait = 0; wait < 60 && !HasKey(); wait++)
             {
-                Thread.Sleep(5000);
+                Pause(5000);
                 FarmObservation w = Snapshot();
                 if (!w.PlayerDead && !w.PlayerGhost && w.Fresh && w.KnownCore) { Log("已复活。"); return true; }
             }
@@ -440,232 +392,37 @@ namespace WoWProbe
             return false;
         }
 
-        // Operator-verified graveyard spirit-healer points, normalized zone coordinates.
-        // Loch Modan (MapId 1432) Thelsamar graveyard, cross-checked from the live minimap
-        // against the panel position on 2026-11-14 (minimap y was visually misread as 65.7;
-        // probe ground truth is 0.457).
-        static bool GraveyardPoint(uint mapId, out double gx, out double gy)
-        {
-            gx = 0.3452; gy = 0.4568; // Loch Modan (MapId 1432) Thelsamar graveyard, see above.
-            return mapId == 1432;
-        }
-
-        // Walk toward a known world point while watching the healer range bit on every step.
-        // FaceTo re-steers every few steps; when the character stops moving (wall/chat box)
-        // a side-step maneuver slides around the obstacle instead of pushing into it.
-        static void WalkTowardsHealer(WindowsInputBackend backend, BattleProfile profile, double tx, double ty, int maxSteps)
-        {
-            double lastX = Double.NaN, lastY = Double.NaN;
-            int stuck = 0, slides = 0;
-            for (int step = 0; step < maxSteps && !HasKey(); step++)
-            {
-                FarmObservation o = Snapshot();
-                if (o.RangeKnown && o.TargetInRange)
-                {
-                    Log("步行接近途中：医者进入互动范围（步 " + (step + 1) + "）。");
-                    return;
-                }
-                if (!o.Fresh || !NavigationMathF(o)) { Thread.Sleep(150); continue; }
-                double dist = NavigationMath.Distance(tx - o.X, ty - o.Y, profile.Calibration.AxisScale);
-                if (dist <= 0.0022)
-                {
-                    Log("已抵达墓地点附近，医者仍在互动范围外；改用右键网格扫描...");
-                    bool selected = ClickSweep();
-                    if (!selected) Log("右键扫描未选中目标，转回旋转搜索。");
-                    return;
-                }
-                if (step % 3 == 0) FaceTo(backend, profile, tx, ty);
-                Pulse(backend, profile.Movement.Forward, 250);
-                Thread.Sleep(150);
-                if (o.KnownCore && !Double.IsNaN(o.X))
-                {
-                    double moved = Double.IsNaN(lastX) ? 1.0 : Math.Sqrt((o.X - lastX) * (o.X - lastX) + (o.Y - lastY) * (o.Y - lastY));
-                    lastX = o.X; lastY = o.Y;
-                    if (moved < 0.0004)
-                    {
-                        stuck++;
-                        if (stuck >= 3 && slides < 8)
-                        {
-                            stuck = 0; slides++;
-                            Log("接近途中被挡（步 " + (step + 1) + "），侧移绕行 #" + slides + "。");
-                            double turn = (slides % 2 == 1 ? 1 : -1) * Math.PI / 3;
-                            Pulse(backend, turn > 0 ? profile.Movement.TurnRight : profile.Movement.TurnLeft,
-                                Math.Max(40, (int)(Math.Abs(turn) / Math.Max(0.1, profile.Calibration.TurnRadiansPerSecond) * 1000)));
-                            Thread.Sleep(300);
-                            for (int slide = 0; slide < 3; slide++)
-                            {
-                                Pulse(backend, profile.Movement.Forward, 250);
-                                Thread.Sleep(120);
-                            }
-                            FaceTo(backend, profile, tx, ty);
-                            lastX = Double.NaN; lastY = Double.NaN;
-                        }
-                    }
-                    else stuck = 0;
-                }
-            }
-            Log("步行接近步数用尽。");
-        }
-
-        // Radial healer search for the ghost form. The ghost's own position and the healer
-        // range bit are readable (verified 2026-11-14 10:18: KnownCore=True, RangeKnown=True,
-        // TargetInRange=False while target coordinates stay secret), so walk short spokes in
-        // 8 directions and watch TargetInRange; return to the anchor after every miss so the
-        // search cannot drift (the earlier blind walk carried the ghost 100+ yards away).
-        // Rings at roughly 8/15/25 yards cover the graveyard spawn distance.
-        static void SeekHealer(WindowsInputBackend backend, BattleProfile profile, FarmObservation start)
-        {
-            double ax = start.X, ay = start.Y;
-            Log(String.Format("径向搜索灵魂医者：锚点 ({0:F4},{1:F4})...", ax, ay));
-            int[] pulsesPerRing = { 4, 8, 14 };
-            double lastX = ax, lastY = ay;
-            int stuck = 0, resets = 0;
-            for (int ring = 0; ring < pulsesPerRing.Length; ring++)
-            {
-                for (int dir = 0; dir < 8; dir++)
-                {
-                    if (HasKey()) return;
-                    if (dir > 0)
-                    {
-                        Pulse(backend, profile.Movement.TurnRight,
-                            Math.Max(40, (int)(Math.PI / 4 / Math.Max(0.1, profile.Calibration.TurnRadiansPerSecond) * 1000)));
-                        Thread.Sleep(400);
-                    }
-                    for (int step = 0; step < pulsesPerRing[ring]; step++)
-                    {
-                        Pulse(backend, profile.Movement.Forward, 250);
-                        Thread.Sleep(150);
-                        // Check after EVERY pulse: a spoke passing near the healer must stop
-                        // mid-walk, not only at its far end (the range bit flips back out of
-                        // range once the ghost walks past the healer).
-                        FarmObservation mid = Snapshot();
-                        if (mid.RangeKnown && mid.TargetInRange)
-                        {
-                            Log("径向搜索命中：医者进入互动范围（环 " + (ring + 1) + "，方向 " + (dir + 1) + "/8，步 " + (step + 1) + "）。");
-                            return;
-                        }
-                        if (mid.TargetPositionKnown && !Double.IsNaN(mid.TargetX) && !Double.IsNaN(mid.TargetY))
-                        {
-                            Log("径向搜索中目标坐标可读，直接走近。");
-                            WalkTo(backend, profile, mid.TargetX, mid.TargetY, 0.0022);
-                            return;
-                        }
-                        // Live 2026-11-14 10:43: a failed chat submit leaves the chat edit box
-                        // OPEN, and every forward pulse then types "w" into it instead of
-                        // moving — 24 spokes "walked" with zero displacement. The ghost's
-                        // position is readable, so detect stuck walking and self-heal: ENTER
-                        // submits/closes a stuck chat box (the common case), ESC closes a game
-                        // menu when ENTER did not help.
-                        if (mid.KnownCore && !Double.IsNaN(mid.X) && !Double.IsNaN(mid.Y))
-                        {
-                            double moved = Math.Sqrt((mid.X - lastX) * (mid.X - lastX) + (mid.Y - lastY) * (mid.Y - lastY));
-                            lastX = mid.X; lastY = mid.Y;
-                            if (moved < 0.0004) stuck++; else stuck = 0;
-                            if (stuck >= 2 && resets < 4)
-                            {
-                                stuck = 0; resets++;
-                                if (resets % 2 == 1)
-                                {
-                                    Log("连续无位移，疑似聊天框卡住：发送回车复位。");
-                                    Pulse(backend, 0x0D, 60);
-                                }
-                                else
-                                {
-                                    Log("回车无效，疑似游戏菜单挡住输入：发送 ESC 关闭。");
-                                    Pulse(backend, 0x1B, 60);
-                                }
-                                Thread.Sleep(500);
-                                lastX = Double.NaN; lastY = Double.NaN; // re-baseline after reset
-                                FarmObservation rebase = Snapshot();
-                                if (rebase.KnownCore && !Double.IsNaN(rebase.X)) { lastX = rebase.X; lastY = rebase.Y; }
-                            }
-                        }
-                    }
-                    Thread.Sleep(300);
-                    FarmObservation w = Snapshot();
-                    if (w.RangeKnown && w.TargetInRange)
-                    {
-                        Log("径向搜索命中：医者进入互动范围（环 " + (ring + 1) + "，方向 " + (dir + 1) + "/8）。");
-                        return;
-                    }
-                    // Bounded drift: walk back to the anchor before trying the next direction.
-                    if (w.KnownCore && !Double.IsNaN(w.X) && !Double.IsNaN(w.Y))
-                    {
-                        double dx = w.X - ax, dy = w.Y - ay;
-                        if (Math.Sqrt(dx * dx + dy * dy) > 0.0008)
-                            WalkTo(backend, profile, ax, ay, 0.0008);
-                    }
-                }
-            }
-            Log("径向搜索 24 条辐条均未进入互动范围。");
-        }
-
-        // A ghost cannot read target map positions on Forever clients, so selection is decided
-        // by target identity instead: a readable name must name the spirit healer, otherwise any
-        // existing non-attackable (friendly) target is accepted as the healer candidate.
         static bool IsHealerTarget(FarmObservation o)
-        {
-            if (o == null || !o.TargetExists) return false;
-            if (!String.IsNullOrEmpty(o.TargetName))
-                return o.TargetName.IndexOf("灵魂医者", StringComparison.Ordinal) >= 0;
-            return !o.TargetCanAttack;
-        }
-
-        // Right-click across the upper-central screen area (the healer model stands left/above
-        // the center from a fresh ghost camera). A hit selects the spirit healer with a real
-        // hardware event, immune to the client's tainted-call gating. Returns true when the
-        // panels then report an existing friendly target (position may remain secret).
-        static bool ClickSweep()
-        {
-            int cx = client.X + client.Width / 2, cy = client.Y + client.Height / 2;
-            var offsets = new[] {
-                new Point(0, 0), new Point(-170, 0), new Point(170, 0), new Point(0, -130), new Point(0, 130),
-                new Point(-340, -40), new Point(-340, -200), new Point(-500, -120), new Point(-180, -220),
-                new Point(180, -220), new Point(340, -120), new Point(-170, 130), new Point(170, 130) };
-            foreach (var off in offsets)
-            {
-                try
-                {
-                    Native.MoveMouse(new Point(cx + off.X, cy + off.Y));
-                    Native.SendMouseButton(true, false); Thread.Sleep(60); Native.SendMouseButton(true, true);
-                }
-                catch { }
-                Thread.Sleep(600);
-                FarmObservation w = Snapshot();
-                Log("右键 (" + off.X + "," + off.Y + "): exists=" + w.TargetExists + " pos=" + w.TargetPositionKnown +
-                    (w.TargetPositionKnown ? " (" + w.TargetX.ToString("F4") + "," + w.TargetY.ToString("F4") + ")" : ""));
-                if (IsHealerTarget(w))
-                {
-                    Log("右键命中：已选中目标" + (w.TargetPositionKnown
-                        ? "，坐标 (" + w.TargetX.ToString("F4") + "," + w.TargetY.ToString("F4") + ")"
-                        : "（坐标保密）") + "。");
-                    return true;
-                }
-            }
-            return false;
-        }
+        { return GrindRecoveryPolicy.IsHealer(o); }
 
         static void LeftClick(Point p)
         {
-            try
-            {
-                Native.MoveMouse(p);
-                Native.SendMouseButton(false, false); Thread.Sleep(70); Native.SendMouseButton(false, true);
-            }
-            catch { }
+            Click(p, false);
         }
+        static void Click(Point p, bool right)
+        { RequireInput().Click(p, right, point => Native.ClientBounds(target) == client && client.Contains(point), Native.MoveMouse, Native.SendMouseButton); }
+        static GrindInputGuard RequireInput()
+        { if (input == null) throw new InvalidOperationException("CLI input is not armed."); return input; }
 
         // Type one chat slash command: ENTER opens the edit box, per-character keys type it, ENTER submits.
+        static void ChatAttack(WindowsInputBackend backend, uint token)
+        { ChatChecked(backend, "/startattack", () => { var o=Snapshot(); return GrindRecoveryPolicy.CanAttack(o)&&o.TargetToken==token; }); }
         static void Chat(WindowsInputBackend backend, string text)
+        { ChatChecked(backend, text, null); }
+        static void CheckChatContext(Func<bool> context)
+        { RequireInput().Ensure(); if(context!=null&&!context())throw new InvalidOperationException("CLI chat target context changed."); }
+        static void ChatChecked(WindowsInputBackend backend, string text, Func<bool> context)
         {
             try
             {
-                Pulse(backend, 0x0D, 50); Thread.Sleep(180); // open the chat edit box
-                Native.SendText(text);
-                Thread.Sleep(80);
-                Pulse(backend, 0x0D, 50); Thread.Sleep(300); // submit
+                CheckChatContext(context);
+                Pulse(backend, 0x0D, 50); Pause(180); // open the chat edit box
+                RequireInput().TypeText(text, ch => { CheckChatContext(context); Native.SendChar(ch); });
+                Pause(80);
+                CheckChatContext(context);
+                Pulse(backend, 0x0D, 50); Pause(300); // submit
             }
-            catch (Exception ex) { Log("聊天输入失败: " + ex.Message); }
+            catch (Exception ex) { Log("聊天输入失败: " + ex.Message); throw; }
         }
 
         // Turn the character toward a world point using the live calibration mapping.
@@ -674,32 +431,24 @@ namespace WoWProbe
             for (int step = 0; step < 12; step++)
             {
                 FarmObservation o = Snapshot();
-                if (!o.Fresh || !NavigationMathF(o)) { Thread.Sleep(120); continue; }
+                if (!o.Fresh || !NavigationMathF(o)) { Pause(120); continue; }
                 double bearing = Math.Atan2((tx - o.X) * p.Calibration.AxisScale, -(ty - o.Y));
                 double facing = NavigationMath.Normalize(NavigationMath.Normalize(p.Calibration.FacingSign * o.Facing) + NavigationMath.Normalize(p.Calibration.FacingOffset));
                 double delta = NavigationMath.Normalize(bearing - facing);
                 if (Math.Abs(delta) <= 0.10) return;
                 int hold = NavigationMath.Pulse((int)(Math.Abs(delta) / p.Calibration.TurnRadiansPerSecond * 1000), 40, 220);
                 Pulse(backend, delta > 0 ? p.Movement.TurnRight : p.Movement.TurnLeft, hold);
-                Thread.Sleep(90);
+                Pause(90);
             }
         }
 
-        // Bounded blind walk toward a world point (mirrors the engine's approach pulses).
-        static void WalkTo(WindowsInputBackend backend, BattleProfile p, double tx, double ty, double stopDist)
+        // The pure approach planner preserves the same healer context and reports actual arrival.
+        static bool WalkTo(WindowsInputBackend backend, BattleProfile p, uint token, double tx, double ty, double stopDist)
         {
-            for (int step = 0; step < 60; step++)
-            {
-                FarmObservation o = Snapshot();
-                if (!o.Fresh || !NavigationMathF(o)) { Thread.Sleep(150); continue; }
-                double dist = NavigationMath.Distance(tx - o.X, ty - o.Y, p.Calibration.AxisScale);
-                if (dist <= stopDist) { Log("到达目标附近（距离 " + dist.ToString("F4") + "）。"); return; }
-                FaceTo(backend, p, tx, ty);
-                int hold = NavigationMath.Pulse((int)(Math.Min(dist - stopDist, 0.02) / p.Calibration.ForwardUnitsPerSecond * 1000), 100, 350);
-                Pulse(backend, p.Movement.Forward, hold);
-                Thread.Sleep(130);
-            }
-            Log("接近目标超时，按当前距离直接尝试互动。");
+            var approach = new GrindHealerApproach(Snapshot, (key, ms) => Pulse(backend, key, ms), Pause);
+            bool arrived = approach.Run(p, token, tx, ty, stopDist, 60);
+            Log(approach.LastReason);
+            return arrived;
         }
 
         static WindowInfo FindWowWindow()
@@ -715,7 +464,6 @@ namespace WoWProbe
         static void Activate(IntPtr h)
         {
             ShowWindow(h, 9);
-            Native.SendKey(0x12, false); Native.SendKey(0x12, true); // Alt tap unlocks foreground lock
             SetForegroundWindow(h);
         }
 
@@ -839,7 +587,7 @@ namespace WoWProbe
         static bool MeasureCalibration(BattleProfile profile, RouteDocument route)
         {
             // Warm up: freshness requires two observations with an advancing sequence.
-            for (int i = 0; i < 12; i++) { Snapshot(); Thread.Sleep(150); }
+            for (int i = 0; i < 12; i++) { Snapshot(); Pause(150); }
             FarmObservation o = Snapshot();
             if (!o.Fresh || !o.KnownCore) { Log("标定前需要新鲜数据。当前 Fresh=" + o.Fresh); return false; }
             if (o.InCombat) { Log("标定时不能处于战斗中，请先脱战。"); return false; }
@@ -854,7 +602,7 @@ namespace WoWProbe
                 o = Snapshot(); if (!o.Fresh || !NavigationMathF(o)) return false;
                 if (o.InCombat) { Log("标定中进入战斗，中止本次尝试。"); return false; }
                 double f0 = o.Facing;
-                Pulse(backend, profile.Movement.TurnRight, 250); Thread.Sleep(120);
+                Pulse(backend, profile.Movement.TurnRight, 250); Pause(120);
                 o = Snapshot(); if (!o.Fresh || !NavigationMathF(o)) return false;
                 double f1 = o.Facing;
                 double turnDelta = Wrap(f1 - f0); // signed radians reported by addon for a right-turn pulse
@@ -862,7 +610,7 @@ namespace WoWProbe
                 else turnRate = turnRate * 0.5 + 0.5 * (Math.Abs(turnDelta) / 0.25);
                 // forward displacement measurement
                 double x0 = o.X, y0 = o.Y;
-                Pulse(backend, profile.Movement.Forward, 250); forwardMs += 250; Thread.Sleep(120);
+                Pulse(backend, profile.Movement.Forward, 250); forwardMs += 250; Pause(120);
                 o = Snapshot(); if (!o.Fresh || !NavigationMathF(o)) return false;
                 double dx = o.X - x0, dy = o.Y - y0;
                 traveled += Math.Sqrt(dx * dx + dy * dy);
@@ -903,9 +651,12 @@ namespace WoWProbe
             return !Double.IsNaN(o.X) && !Double.IsNaN(o.Y) && !Double.IsNaN(o.Facing) && o.X >= 0 && o.X <= 1 && o.Y >= 0 && o.Y <= 1;
         }
 
+        static void Pause(int milliseconds)
+        { if (input == null) Thread.Sleep(milliseconds); else input.Wait(milliseconds); }
+
         static void Pulse(WindowsInputBackend backend, ushort key, int ms)
         {
-            backend.KeyDown(key); Thread.Sleep(ms); backend.KeyUp(key);
+            RequireInput().Pulse(key, ms);
         }
 
         static double Wrap(double a)

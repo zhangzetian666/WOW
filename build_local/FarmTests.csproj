@@ -36,6 +36,10 @@
     <Compile Include="..\src\FarmSimulator.cs" />
     <Compile Include="..\src\FarmSession.cs" />
   </ItemGroup>
+  <ItemGroup Condition="'$(Subset)'=='domain'">
+    <Compile Include="..\src\*.cs" Exclude="..\src\Program.cs;..\src\Native.cs;..\src\CampaignNative.cs;..\src\GrindCli.cs;..\src\AssemblyInfo.cs;..\src\*Form.cs" />
+    <Compile Include="..\tests\CampaignFixtures.cs" />
+  </ItemGroup>
   <ItemGroup>
     <Compile Include="..\tests\$(TestName).cs" />
   </ItemGroup>
