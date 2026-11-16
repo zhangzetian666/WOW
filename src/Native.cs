@@ -10,6 +10,35 @@ using System.Windows.Forms;
 
 namespace WoWProbe
 {
+    public sealed class CharacterInputSender
+    {
+        readonly Func<char,short> map;readonly Action<ushort,bool> sendKey;readonly Action<char,bool> sendUnicode;readonly Action<int> wait;
+        public CharacterInputSender(Func<char,short> map,Action<ushort,bool> sendKey,Action<char,bool> sendUnicode,Action<int> wait)
+        {
+            if(map==null||sendKey==null||sendUnicode==null||wait==null)throw new ArgumentNullException("character input dependencies");
+            this.map=map;this.sendKey=sendKey;this.sendUnicode=sendUnicode;this.wait=wait;
+        }
+        public void Send(char ch)
+        {
+            short mapped=map(ch);ushort key=(ushort)(mapped&255);
+            if(key==0||key==255){SendUnicode(ch);return;}
+            bool shift=(mapped&256)!=0;
+            bool shiftAttempted=false;
+            try
+            {
+                // A failed transport can have accepted the down event before
+                // reporting failure. Record attempted ownership before sending.
+                if(shift){shiftAttempted=true;sendKey(16,false);}
+                try{sendKey(key,false);wait(15);}
+                finally{sendKey(key,true);}
+            }
+            finally{if(shiftAttempted)sendKey(16,true);}
+            wait(15);
+        }
+        public void SendUnicode(char ch)
+        {try{sendUnicode(ch,false);}finally{sendUnicode(ch,true);}wait(25);}
+    }
+
     public sealed class WindowInfo
     {
         public IntPtr Handle;
@@ -137,30 +166,21 @@ namespace WoWProbe
         // real down/up events so the game's edit box receives them like a keyboard.
         // Characters without a layout mapping (e.g. CJK names) use KEYEVENTF_UNICODE,
         // which injects the raw code point and is accepted by the game's chat edit box.
+        static readonly CharacterInputSender characterInput = new CharacterInputSender(VkKeyScanW,SendKey,SendUnicodeEvent,Thread.Sleep);
         public static void SendChar(char ch)
         {
-            short vks=VkKeyScanW(ch);
-            ushort key=(ushort)(vks&0xFF);
-            if(key!=0 && (vks&0xFF)!=0xFF)
-            {
-                bool shift=(vks&0x100)!=0;
-                if(shift)SendKey(0x10,false);
-                try { SendKey(key,false); Thread.Sleep(15); SendKey(key,true); }
-                finally { if(shift)SendKey(0x10,true); }
-                Thread.Sleep(15);
-                return;
-            }
-            SendUnicodeChar(ch);
+            characterInput.Send(ch);
         }
         const uint KEYEVENTF_UNICODE=0x0004, KEYEVENTF_KEYUP=0x0002;
         public static void SendUnicodeChar(char ch)
         {
-            var down=new INPUT{Type=1,Data=new INPUTUNION{Keyboard=new KEYBDINPUT{Key=0,Scan=(ushort)ch,Flags=KEYEVENTF_UNICODE,Extra=UIntPtr.Zero}}};
-            var up=new INPUT{Type=1,Data=new INPUTUNION{Keyboard=new KEYBDINPUT{Key=0,Scan=(ushort)ch,Flags=KEYEVENTF_UNICODE|KEYEVENTF_KEYUP,Extra=UIntPtr.Zero}}};
-            var both=new INPUT[]{down,up};
-            if(SendInput(2,both,InputStructureSize)!=2)
+            characterInput.SendUnicode(ch);
+        }
+        static void SendUnicodeEvent(char ch,bool up)
+        {
+            var input=new INPUT{Type=1,Data=new INPUTUNION{Keyboard=new KEYBDINPUT{Key=0,Scan=(ushort)ch,Flags=KEYEVENTF_UNICODE|(up?KEYEVENTF_KEYUP:0),Extra=UIntPtr.Zero}}};
+            if(SendInput(1,new[]{input},InputStructureSize)!=1)
                 throw new Win32Exception(Marshal.GetLastWin32Error(),"Unicode 字符未发送。");
-            Thread.Sleep(25);
         }
         public static void SendText(string text)
         {
