@@ -26,7 +26,7 @@ namespace WoWProbe
             if(System.String.IsNullOrWhiteSpace(reportDirectory))throw new ArgumentException("请选择反馈目录。","reportDirectory");string root=Path.GetFullPath(reportDirectory);CheckDirectory(root);
             var s=new FeedbackSummary();var report=Object(ReadJson(Path.Combine(root,"campaign-report.json"),ReportLimit));
             s.Source=String(report,"source",true);if(s.Source!="offline_simulation"&&s.Source!="live_attempt")throw Bad("反馈来源不受支持。");
-            s.ToolVersion=String(report,"tool_version",true);Version version;if(!Version.TryParse(s.ToolVersion,out version)||version.Major!=0||(version.Minor!=5&&version.Minor!=6))throw Bad("只支持0.5与0.6版本的反馈格式。");
+            s.ToolVersion=String(report,"tool_version",true);Version version;if(!Version.TryParse(s.ToolVersion,out version)||version.Major!=0||(version.Minor!=5&&version.Minor!=6&&version.Minor!=7))throw Bad("只支持0.5、0.6与0.7版本的反馈格式。");
             bool legacy=!report.ContainsKey("schema_version");if(!legacy){if(Long(report,"schema_version",true)!=1)throw Bad("反馈结构版本不受支持。");s.RunId=Run(String(report,"run_id",true));}
             else{if(version.Minor!=5)throw Bad("新版反馈缺少结构版本和运行标识。");s.Warn("旧版报告没有run_id，报告与日志仅作弱关联；不会重算已清理确认标志后的配置指纹。");}
             string declared=String(report,"game_validation",false);if(declared!="pending")s.Warn("原报告的验收声明不作为证明；本摘要始终保持实机待验收。");
