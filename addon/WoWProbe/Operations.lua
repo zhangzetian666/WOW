@@ -3,7 +3,7 @@ local P=WoWProbe
 local floor=math.floor
 local U32=4294967296
 P.operationsState={revision=0,bagFull=0,merchantOpened=0,merchantClosed=0,page=0,cycle=0}
-local function finite(x) return type(x)=="number" and x==x and x>-math.huge and x<math.huge end
+local function finite(x) if type(x)~="number" then return false end;local ok,r=pcall(function() return x==x and x>-math.huge and x<math.huge end);return ok and r==true end
 local function integer(x,max) return finite(x) and x>=0 and x<=max and floor(x)==x end
 local function attempt(fn,...)
     if type(fn)~="function" then return nil end

@@ -1,4 +1,4 @@
-## Interface: 30300
+## Interface: 16001
 ## Title: WoWProbe
 ## Notes: Read-only WP1, WC3 combat and WO4 recovery/inventory panels. No protected actions.
 ## Author: WoWProbe

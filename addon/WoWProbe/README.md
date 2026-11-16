@@ -2,7 +2,7 @@
 
 This is the read-only AddOn for the WP1 phase 1 diagnostic tool. It reads public UI APIs and renders a 128-byte packet as a 32-by-12 RGB grid. It does not move, target, cast, buy, loot, resurrect, set bindings, or invoke protected action APIs.
 
-`WoWProbe.toc` uses Interface 30300 as a candidate baseline. This is not confirmation that the user's client is 3.3.5. The client must allow loading out-of-date AddOns when its interface number differs. `GetBuildInfo()` and available API functions determine the recorded client information and selected readers. Actual game compatibility remains unverified.
+The shipped `WoWProbe.toc` uses Interface 16001, matching the client that was verified live on 2026-11-11..16. Interface 30300 (3.3.5) is only a candidate baseline, not a confirmed target: when the interface number differs the client must allow loading out-of-date AddOns. `GetBuildInfo()` and the available API functions determine the recorded client information and the selected readers. `Operations.lua` guards numeric checks with `pcall`, because the verified client raises on comparisons it cannot evaluate instead of returning `false`.
 
 Commands: `/wowprobe show`, `/wowprobe hide`, `/wowprobe info`, `/wowprobe reset`. Hiding the panel preserves its internal 200ms heartbeat; the external reader cannot see its packet until it is shown. `reset` clears the current diagnostic report and retains the chosen visibility. It does not reset the sequence number.
 
