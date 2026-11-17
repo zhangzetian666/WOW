@@ -65,6 +65,7 @@ namespace WoWProbe
         public string Name = "\u9ed8\u8ba4";
         public List<BattleTarget> Targets = new List<BattleTarget>();
         public string SkillSequence = "112";
+        public string SkillOpeningSequence = "";
         public int SkillIntervalMs = 1500, ScanLimit = 10, ScanIntervalMs = 2000, ApproachTimeoutMs = 12000,
             CombatTimeoutMs = 60000, LootTimeoutMs = 4000, SkinWaitMs = 1500, SkinTimeoutMs = 6000, RestTimeoutMs = 25000,
             HealBelow = 40, ManaBelow = 35, RecoverTo = 85, CriticalHealth = 15, RangeSlot = 1;
@@ -87,7 +88,9 @@ namespace WoWProbe
             }
             if (String.IsNullOrEmpty(SkillSequence) || SkillSequence.Length > 64) throw new FormatException("Skill sequence must have 1 through 64 digits from 1 through 4.");
             foreach (char c in SkillSequence) if (c < '1' || c > '4') throw new FormatException("Skill sequence must contain only 1 through 4.");
-            Bound(SkillIntervalMs, 1000, 5000, "skill interval"); Bound(ScanLimit, 1, 20, "scan limit"); Bound(ScanIntervalMs, 500, 10000, "scan interval");
+            if (SkillOpeningSequence == null || SkillOpeningSequence.Length > 64) throw new FormatException("Opening skill sequence must have 0 through 64 digits from 1 through 4.");
+            foreach (char c in SkillOpeningSequence) if (c < '1' || c > '4') throw new FormatException("Opening skill sequence must contain only 1 through 4.");
+            Bound(SkillIntervalMs, 500, 5000, "skill interval"); Bound(ScanLimit, 1, 20, "scan limit"); Bound(ScanIntervalMs, 500, 10000, "scan interval");
             Bound(ApproachTimeoutMs, 1000, 60000, "approach timeout"); Bound(CombatTimeoutMs, 5000, 180000, "combat timeout");
             Bound(LootTimeoutMs, 1000, 15000, "loot timeout"); Bound(SkinWaitMs, 1500, 10000, "skin wait");
             Bound(SkinTimeoutMs, SkinWaitMs, 30000, "skin timeout"); Bound(RestTimeoutMs, 5000, 120000, "rest timeout");
@@ -117,7 +120,7 @@ namespace WoWProbe
     public static class BattleProfileStore
     {
         private const int MaxBytes = 1024 * 1024;
-        private const string ProfileFields = "schema_version,name,targets,skill_sequence,skill_interval_ms,scan_limit,scan_interval_ms,approach_timeout_ms,combat_timeout_ms,loot_timeout_ms,skin_wait_ms,skin_timeout_ms,rest_timeout_ms,heal_below,mana_below,recover_to,critical_health,range_slot,skinning,allow_approach,approach_position_confirmed,bindings_confirmed,calibration,movement,blind_grind";
+        private const string ProfileFields = "schema_version,name,targets,skill_sequence,skill_opening_sequence,skill_interval_ms,scan_limit,scan_interval_ms,approach_timeout_ms,combat_timeout_ms,loot_timeout_ms,skin_wait_ms,skin_timeout_ms,rest_timeout_ms,heal_below,mana_below,recover_to,critical_health,range_slot,skinning,allow_approach,approach_position_confirmed,bindings_confirmed,calibration,movement,blind_grind";
         public static void Save(string path, BattleProfile profile)
         {
             if (profile == null) throw new ArgumentNullException("profile"); BattleProfile copy = profile.Clone(); copy.Validate();
@@ -142,9 +145,13 @@ namespace WoWProbe
                 data = new RouteJson.Parser(RouteFiles.Utf8.GetString(bytes, start, bytes.Length - start)).Parse();
             }
             catch (DecoderFallbackException ex) { throw new FormatException("Battle profile must contain valid UTF8.", ex); }
-            Dictionary<string, object> root = RouteJson.Object(data); RouteJson.Keys(root, ProfileFields, "blind_grind");
+            Dictionary<string, object> root = RouteJson.Object(data);
+            // The opening is optional for existing schema-1 files; an explicit null is invalid.
+            if (!root.ContainsKey("skill_opening_sequence")) root.Add("skill_opening_sequence", "");
+            RouteJson.Keys(root, ProfileFields, "blind_grind");
             BattleProfile p = new BattleProfile {
                 SchemaVersion = Int(root, "schema_version"), Name = RouteJson.String(root, "name"), SkillSequence = RouteJson.String(root, "skill_sequence"),
+                SkillOpeningSequence = RouteJson.String(root, "skill_opening_sequence"),
                 SkillIntervalMs = Int(root, "skill_interval_ms"), ScanLimit = Int(root, "scan_limit"), ScanIntervalMs = Int(root, "scan_interval_ms"),
                 ApproachTimeoutMs = Int(root, "approach_timeout_ms"), CombatTimeoutMs = Int(root, "combat_timeout_ms"), LootTimeoutMs = Int(root, "loot_timeout_ms"),
                 SkinWaitMs = Int(root, "skin_wait_ms"), SkinTimeoutMs = Int(root, "skin_timeout_ms"), RestTimeoutMs = Int(root, "rest_timeout_ms"),
@@ -184,7 +191,7 @@ namespace WoWProbe
                 tw.String("name", t.Name); tw.Int("name_hash", t.NameHash); tw.String("kind", t.Kind); tw.String("avatar_file", t.AvatarFile); tw.String("saved_at_utc", t.SavedAtUtc);
                 targets.Append(tw.End());
             }
-            w.Raw("targets", targets.Append(']').ToString()); w.String("skill_sequence", p.SkillSequence);
+            w.Raw("targets", targets.Append(']').ToString()); w.String("skill_sequence", p.SkillSequence); w.String("skill_opening_sequence", p.SkillOpeningSequence);
             w.Int("skill_interval_ms", p.SkillIntervalMs); w.Int("scan_limit", p.ScanLimit); w.Int("scan_interval_ms", p.ScanIntervalMs);
             w.Int("approach_timeout_ms", p.ApproachTimeoutMs); w.Int("combat_timeout_ms", p.CombatTimeoutMs); w.Int("loot_timeout_ms", p.LootTimeoutMs);
             w.Int("skin_wait_ms", p.SkinWaitMs); w.Int("skin_timeout_ms", p.SkinTimeoutMs); w.Int("rest_timeout_ms", p.RestTimeoutMs);

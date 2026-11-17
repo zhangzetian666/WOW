@@ -29,6 +29,11 @@ internal static class BattleProfileTests
             Run("profile rejects empty or excessive target lists and duplicate identities", CatalogValidation);
             Run("profile validates names, schema and skill sequence", ProfileIdentity);
             Run("profile enforces timing boundaries and skin wait ordering", TimeBounds);
+            Run("profile accepts 500ms and 750ms skill intervals", ShortIntervals);
+            Run("opening sequence roundtrip preserves a one-off rotation separately from the loop", OpeningRoundtrip);
+            Run("opening sequence is optional for legacy files and may be empty", OpeningLegacy);
+            Run("opening sequence enforces digit length and explicit null boundaries", OpeningBounds);
+            Run("opening JSON rejects coercions duplicate keys and misspelled fields", OpeningJsonTypes);
             Run("profile enforces ordered health and recovery thresholds", Thresholds);
             Run("profile delegates calibration and movement validation", NestedValidation);
             Run("profile cloning isolates all nested mutable settings", DeepClone);
@@ -159,13 +164,65 @@ internal static class BattleProfileTests
             delegate(BattleProfile p, int v) { p.ScanIntervalMs = v; }, delegate(BattleProfile p, int v) { p.ApproachTimeoutMs = v; },
             delegate(BattleProfile p, int v) { p.CombatTimeoutMs = v; }, delegate(BattleProfile p, int v) { p.LootTimeoutMs = v; },
             delegate(BattleProfile p, int v) { p.SkinWaitMs = v; }, delegate(BattleProfile p, int v) { p.SkinTimeoutMs = v; }, delegate(BattleProfile p, int v) { p.RestTimeoutMs = v; } };
-        int[,] bounds = { { 1000, 5000 }, { 1, 20 }, { 500, 10000 }, { 1000, 60000 }, { 5000, 180000 }, { 1000, 15000 }, { 1500, 10000 }, { 1500, 30000 }, { 5000, 120000 } };
+        int[,] bounds = { { 500, 5000 }, { 1, 20 }, { 500, 10000 }, { 1000, 60000 }, { 5000, 180000 }, { 1000, 15000 }, { 1500, 10000 }, { 1500, 30000 }, { 5000, 120000 } };
         for (int i = 0; i < set.Length; i++)
         {
             int k = i; BadProfile(delegate(BattleProfile p) { set[k](p, bounds[k, 0] - 1); }); BadProfile(delegate(BattleProfile p) { set[k](p, bounds[k, 1] + 1); });
             BattleProfile low = Example(), high = Example(); low.SkinTimeoutMs = high.SkinTimeoutMs = 30000; set[k](low, bounds[k, 0]); set[k](high, bounds[k, 1]); low.Validate(); high.Validate();
         }
         BadProfile(delegate(BattleProfile p) { p.SkinWaitMs = 6000; p.SkinTimeoutMs = 5999; });
+    }
+    private static void ShortIntervals()
+    {
+        foreach (int milliseconds in new int[] { 500, 750 })
+        {
+            BattleProfile loaded = Read(Json.Replace("\"skill_interval_ms\":1500", "\"skill_interval_ms\":" + milliseconds));
+            string path = FileName("short-interval-" + milliseconds + ".json"); BattleProfileStore.Save(path, loaded);
+            Equal(milliseconds, BattleProfileStore.Load(path).SkillIntervalMs, "short interval persists without rounding");
+        }
+    }
+    private static string WithOpening(string raw)
+    { return Json.Replace("\"skill_sequence\":\"112\"", "\"skill_opening_sequence\":" + raw + ",\"skill_sequence\":\"2\""); }
+    private static string SavedOpening(BattleProfile profile, string name)
+    {
+        string path = FileName(name); BattleProfileStore.Save(path, profile);
+        Dictionary<string, object> root = RouteJson.Object(new RouteJson.Parser(File.ReadAllText(path)).Parse());
+        return RouteJson.String(root, "skill_opening_sequence");
+    }
+    private static void OpeningRoundtrip()
+    {
+        BattleProfile loaded = Read(WithOpening("\"242223\""));
+        Equal("2", loaded.SkillSequence, "follow-up loop remains independent from opening");
+        Equal("242223", SavedOpening(loaded.Clone(), "opening-clone.json"), "cloning and save preserve nonempty opening");
+        BattleProfile roundtrip = BattleProfileStore.Load(FileName("opening-clone.json"));
+        Equal("242223", SavedOpening(roundtrip, "opening-roundtrip.json"), "load/save preserve opening separately from loop");
+        Equal("2", roundtrip.SkillSequence, "roundtrip does not append opening to the loop");
+    }
+    private static void OpeningLegacy()
+    {
+        BattleProfile legacy = Read(Json);
+        Equal("112", legacy.SkillSequence, "legacy loop remains unchanged");
+        Equal("", SavedOpening(legacy, "opening-legacy.json"), "legacy file gets no opening attempts");
+        Equal("", SavedOpening(Read(WithOpening("\"\"")), "opening-empty.json"), "explicit empty opening is supported");
+    }
+    private static void OpeningBounds()
+    {
+        BattleProfile longest = Read(WithOpening("\"" + new string('4', 64) + "\""));
+        Equal(new string('4', 64), SavedOpening(longest, "opening-longest.json"), "maximum opening is not truncated");
+        foreach (string raw in new string[] { "null", "\"0\"", "\"5\"", "\"1 2\"", "\"\\n\"", "\"" + new string('2', 65) + "\"" }) BadJson(WithOpening(raw));
+        System.Reflection.FieldInfo field = typeof(BattleProfile).GetField("SkillOpeningSequence");
+        Check(field != null, "profile exposes an opening sequence for editor and engine");
+        foreach (string value in new string[] { null, "0", "5", "1 2", new string('2', 65) })
+        {
+            BattleProfile invalid = Example(); field.SetValue(invalid, value);
+            Throws<FormatException>(delegate { invalid.Validate(); });
+        }
+    }
+    private static void OpeningJsonTypes()
+    {
+        foreach (string raw in new string[] { "242223", "true", "[]", "{}" }) BadJson(WithOpening(raw));
+        BadJson(WithOpening("\"2\",\"skill_opening_sequence\":\"3\""));
+        BadJson(WithOpening("\"2\"").Replace("skill_opening_sequence", "skill_opening_seq"));
     }
     private static void Thresholds()
     {
