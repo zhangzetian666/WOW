@@ -41,7 +41,7 @@ foreach ($testName in @('CampaignSettingsTests','RecoveryWorkflowTests','VendorW
     & "$bin\$testName.exe"
     if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
 }
-foreach ($testName in @('QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','VisualVitalsTests','MouseLookTests')) {
+foreach ($testName in @('QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','VisualVitalsTests','MouseLookTests','QuickForwardMotionTests')) {
     & $compiler @common /target:exe "/out:$bin\$testName.exe" @domainSources "$projectRoot\tests\$testName.cs"
     if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
     & "$bin\$testName.exe"

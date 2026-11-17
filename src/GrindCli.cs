@@ -114,6 +114,7 @@ namespace WoWProbe
             Func<FarmObservation> read = () => { if(cancelled())throw new InvalidOperationException("用户停止。");return stream.Read(); };
             Func<GrindInputGuard> guard = () => new GrindInputGuard(backend,read,()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
             input=guard();
+            var searchMotion=new QuickForwardMotion(backend,()=>RequireInput().Ensure(),safety);
             string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"runtime");Directory.CreateDirectory(directory);
             string prefix=Path.Combine(directory,"quick-"+DateTime.Now.ToString("yyyyMMdd-HHmmss"));
             using(var frames=new StreamWriter(prefix+"-frames.tsv",false,new UTF8Encoding(false)))
@@ -166,6 +167,7 @@ namespace WoWProbe
                             input=guard();Thread.Sleep(80);continue;
                         }
                         var observed=read();
+                        searchMotion.Observe(observed);
                         if(observed.Sequence!=frameSequence)
                         {
                             frameSequence=observed.Sequence;
@@ -203,9 +205,11 @@ namespace WoWProbe
                         if(completedKills+engine.Kills!=reportedKills){reportedKills=completedKills+engine.Kills;CancelQuickMovement(backend);write("已确认目标死亡，累计击杀="+reportedKills);shot("kill-"+reportedKills);}
                         if(completedLoots+engine.Loots!=reportedLoots){reportedLoots=completedLoots+engine.Loots;write("已确认拾取窗口完成，累计拾取="+reportedLoots);shot("loot-"+reportedLoots);}
                         if(completedSkins+engine.Skins!=reportedSkins){reportedSkins=completedSkins+engine.Skins;write("已确认剥皮成功，累计剥皮="+reportedSkins);shot("skin-"+reportedSkins);}
-                        if(command.Action==QuickAction.Stop){write(command.Reason);break;}
+                        if(command.Action==QuickAction.Stop){searchMotion.Stop();write(command.Reason);break;}
                         if(command.Action==QuickAction.None){if(command.Report)write(command.Reason);Pause(40);continue;}
-                        if(!QuickCombat.Matches(command,read())){CancelQuickMovement(backend);Pause(40);continue;}
+                        bool keepMoving=command.Action==QuickAction.Patrol||command.Action==QuickAction.Scan&&!observed.InCombat||command.Action==QuickAction.Turn&&!command.MouseTurn;
+                        if(!keepMoving)searchMotion.Stop();
+                        if(!QuickCombat.Matches(command,read())){searchMotion.Stop();CancelQuickMovement(backend);Pause(40);continue;}
                         write(command.Reason+" 已确认击杀="+(completedKills+engine.Kills));
                         if(command.Action==QuickAction.Face&&autoAttackToken!=command.Token)
                         {
@@ -218,10 +222,14 @@ namespace WoWProbe
                             if(command.Action==QuickAction.Reacquire||command.Action==QuickAction.CorpseSelect){CancelQuickMovement(backend);Chat(backend,"/targetlasttarget");}
                             else if(command.Action==QuickAction.Scan)
                             {
-                                if(read().InCombat)Chat(backend,"/targetenemy");
+                                if(read().InCombat){searchMotion.Stop();Chat(backend,"/targetenemy");}
                                 else Pulse(backend,command.Key,80);
                             }
-                            else if(command.Action==QuickAction.DetourTurn)
+                            else if(command.Action==QuickAction.Patrol)
+                            {
+                                searchMotion.Start();Pause(40);
+                            }
+                            else if(command.Action==QuickAction.DetourTurn||command.MouseTurn)
                             {
                                 CancelQuickMovement(backend);var before=read();RightMouseLook(backend,command.Key==39?120:-120,0);Pause(200);var after=read();
                                 write("右键转向观测："+before.Facing.ToString("F4")+" → "+after.Facing.ToString("F4")+"；确认角色转向后才前进。");
@@ -238,6 +246,7 @@ namespace WoWProbe
                         catch(InvalidOperationException ex)
                         {
                             if(ex.Message!="目标状态变化，停止当前按键。"||safety.Faulted||backend.IsEmergencyPressed()||!backend.IsTargetForeground())throw;
+                            searchMotion.Stop();
                             input=guard();
                             if(command.Action==QuickAction.Reacquire||command.Action==QuickAction.CorpseSelect||command.Action==QuickAction.Scan)
                             {var edit=read();if(edit.ChatOpenKnown&&edit.ChatOpen){Pulse(backend,27,60);Pause(250);write("目标在聊天命令期间变化，已关闭本工具打开的输入框，再重新核验。");}}
@@ -249,7 +258,7 @@ namespace WoWProbe
                     shot("stop");
                 }
                 catch(Exception ex){write("停止："+ex.Message);throw;}
-                finally{CancelQuickMovement(backend);stream.Dispose();chatReader=null;input=null;}
+                finally{try{searchMotion.Stop();}finally{try{CancelQuickMovement(backend);}finally{stream.Dispose();chatReader=null;input=null;}}}
             }
         }
 
