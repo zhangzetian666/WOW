@@ -85,7 +85,7 @@ namespace WoWProbe
     public sealed class FarmObservation
     {
         public int Sequence,ReadFailures,Health=255,Power=255,PowerType=255,TargetHealth=255,MapMode,RangeSlot,
-            KnownActionsMask,ReadyActionsMask,UsableActionsMask,FoodCount=-1;
+            KnownActionsMask,ReadyActionsMask,UsableActionsMask,FoodCount=-1,TargetReaction=255;
         public uint MapId,TargetToken,TargetNameHash,LootOpened,LootClosed,CastSuccess,CastFailed,SkinSuccess,DeathToken,TargetDeaths,KillCreditNameHash,KillCredits;
         public string Zone="",TargetName="";
         public double X=Double.NaN,Y=Double.NaN,Facing=Double.NaN,TargetX=Double.NaN,TargetY=Double.NaN;
@@ -100,7 +100,7 @@ namespace WoWProbe
             var o=new FarmObservation();
             if(core==null)return o;
             o.Sequence=core.Sequence;o.ReadFailures=core.ReadFailures;o.Health=core.Health;o.Power=core.Power;o.PowerType=core.PowerType;
-            o.TargetHealth=core.TargetHealth;o.MapMode=core.MapMode;o.MapId=core.MapId;o.Zone=core.Zone;o.TargetName=core.TargetName;
+            o.TargetHealth=core.TargetHealth;o.TargetReaction=core.TargetReaction;o.MapMode=core.MapMode;o.MapId=core.MapId;o.Zone=core.Zone;o.TargetName=core.TargetName;
             o.X=core.X;o.Y=core.Y;o.Facing=core.Facing;
             o.KnownCore=(core.KnownFlags&15)==15;
             o.PlayerDead=(core.KnownFlags&core.Flags&1)!=0;o.PlayerGhost=(core.KnownFlags&core.Flags&2)!=0;

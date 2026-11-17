@@ -94,7 +94,7 @@ namespace WoWProbe
             using(var journal=new StreamWriter(prefix+".log",false,new UTF8Encoding(false)))
             {
                 Action<string> write=message=>{journal.WriteLine(DateTimeOffset.Now.ToString("HH:mm:ss.fff")+" "+message);journal.Flush();report(message);};
-                frames.WriteLine("time\tsequence\thealth\tcombat\tdead\tghost\ttargetExists\ttargetToken\ttargetName\ttargetDeadKnown\ttargetDead\tattackable\tcastSuccess\tdeathToken\tdeathCount\tx\ty\tkillCreditNameHash\tkillCredits\tlootOpened\tchatOpen\tlootClosed\tskinKnown\tskinnable\tskinSuccess\tcastFailed\tfoodCount");
+                frames.WriteLine("time\tsequence\thealth\tcombat\tdead\tghost\ttargetExists\ttargetToken\ttargetName\ttargetDeadKnown\ttargetDead\tattackable\tcastSuccess\tdeathToken\tdeathCount\tx\ty\tkillCreditNameHash\tkillCredits\tlootOpened\tchatOpen\tlootClosed\tskinKnown\tskinnable\tskinSuccess\tcastFailed\tfoodCount\ttargetReaction\tfacing");
                 Action<string> shot=label=>{if(!backend.IsTargetForeground())return;try{using(var bitmap=Native.Capture(client))bitmap.Save(prefix+"-"+label+".png",System.Drawing.Imaging.ImageFormat.Png);}catch(Exception ex){write("截图未保存："+ex.Message);}};
                 try
                 {
@@ -111,7 +111,7 @@ namespace WoWProbe
                         write(i+"秒后开始，保持游戏前台，F12急停。");Thread.Sleep(1000);
                     }
                     input.Ensure();
-                    long end=clock.ElapsedMilliseconds+seconds*1000L;int quickScans=0,reportedKills=0,reportedLoots=0,reportedSkins=0,frameSequence=-1,completedKills=0,completedLoots=0,completedSkins=0,recoveries=0;uint picturedToken=0,autoAttackToken=0;
+                    long end=clock.ElapsedMilliseconds+seconds*1000L;int reportedKills=0,reportedLoots=0,reportedSkins=0,frameSequence=-1,completedKills=0,completedLoots=0,completedSkins=0,recoveries=0;uint picturedToken=0,autoAttackToken=0;
                     QuickRecovery recovery=null;
                     long recoveryLoadingUntil=-1;
                     while(clock.ElapsedMilliseconds<end&&!cancelled())
@@ -132,8 +132,8 @@ namespace WoWProbe
                         if(observed.Sequence!=frameSequence)
                         {
                             frameSequence=observed.Sequence;
-                            frames.WriteLine(String.Join("\t",new object[]{DateTimeOffset.Now.ToString("HH:mm:ss.fff"),observed.Sequence,observed.Health,observed.InCombat,observed.PlayerDead,observed.PlayerGhost,observed.TargetExists,observed.TargetToken,observed.TargetName,observed.TargetDeadKnown,observed.TargetDead,observed.TargetCanAttack,observed.CastSuccess,observed.DeathToken,observed.TargetDeaths,observed.X,observed.Y,observed.KillCreditNameHash,observed.KillCredits,observed.LootOpened,observed.ChatOpen,observed.LootClosed,observed.SkinKnown,observed.Skinnable,observed.SkinSuccess,observed.CastFailed,observed.FoodCount}));frames.Flush();
-                            if(observed.TargetExists&&observed.TargetToken!=picturedToken){picturedToken=observed.TargetToken;shot("target-"+picturedToken);write("观察目标："+observed.TargetName+" token="+picturedToken);}
+                            frames.WriteLine(String.Join("\t",new object[]{DateTimeOffset.Now.ToString("HH:mm:ss.fff"),observed.Sequence,observed.Health,observed.InCombat,observed.PlayerDead,observed.PlayerGhost,observed.TargetExists,observed.TargetToken,observed.TargetName,observed.TargetDeadKnown,observed.TargetDead,observed.TargetCanAttack,observed.CastSuccess,observed.DeathToken,observed.TargetDeaths,observed.X,observed.Y,observed.KillCreditNameHash,observed.KillCredits,observed.LootOpened,observed.ChatOpen,observed.LootClosed,observed.SkinKnown,observed.Skinnable,observed.SkinSuccess,observed.CastFailed,observed.FoodCount,observed.TargetReaction,observed.Facing}));frames.Flush();
+                            if(observed.TargetExists&&observed.TargetToken!=picturedToken){picturedToken=observed.TargetToken;shot("target-"+picturedToken);write("观察目标："+observed.TargetName+" token="+picturedToken+" reaction="+observed.TargetReaction);}
                         }
                         if(recovery!=null||observed.PlayerDead||observed.PlayerGhost)
                         {
@@ -182,10 +182,7 @@ namespace WoWProbe
                             if(command.Action==QuickAction.Reacquire||command.Action==QuickAction.CorpseSelect){CancelQuickMovement(backend);Chat(backend,"/targetlasttarget");}
                             else if(command.Action==QuickAction.Scan)
                             {
-                                quickScans++;
                                 if(read().InCombat)Chat(backend,"/targetenemy");
-                                else if(anchor.MapId==1432&&quickScans%4==1)Chat(backend,"/targetexact 老黑熊");
-                                else if(anchor.MapId==1432&&quickScans%4==3)Chat(backend,"/targetexact 森林潜伏者");
                                 else Pulse(backend,command.Key,80);
                             }
                             else
@@ -246,7 +243,7 @@ namespace WoWProbe
             Console.WriteLine("PlayerDead=" + o.PlayerDead + " PlayerGhost=" + o.PlayerGhost + " InCombat=" + o.InCombat + " BagFull=" + o.BagFull);
             Console.WriteLine("Health=" + o.Health + " Power=" + o.Power + " PowerType=" + o.PowerType + " TargetHealth=" + o.TargetHealth);
             Console.WriteLine("Pos=(" + o.X.ToString("F5") + "," + o.Y.ToString("F5") + ") Facing=" + o.Facing.ToString("F4") + " MapId=" + o.MapId + " MapMode=" + o.MapMode + " Zone=" + o.Zone);
-            Console.WriteLine("TargetExists=" + o.TargetExists + " TargetName=" + o.TargetName + " TargetPositionKnown=" + o.TargetPositionKnown +
+            Console.WriteLine("TargetExists=" + o.TargetExists + " TargetName=" + o.TargetName + " Reaction="+o.TargetReaction+" TargetPositionKnown=" + o.TargetPositionKnown +
                 " Target=(" + o.TargetX.ToString("F5") + "," + o.TargetY.ToString("F5") + ") TargetDead=" + o.TargetDead + " TargetCanAttack=" + o.TargetCanAttack);
             Console.WriteLine("RangeKnown=" + o.RangeKnown + " TargetInRange=" + o.TargetInRange + " IncomingEvents: LootOpened=" + o.LootOpened + " CastSuccess=" + o.CastSuccess);
             Console.WriteLine("ActionsKnown=" + o.ActionsKnown + " KnownMask=" + o.KnownActionsMask + " ReadyMask=" + o.ReadyActionsMask + " UsableMask=" + o.UsableActionsMask +

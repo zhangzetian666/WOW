@@ -45,7 +45,7 @@ namespace WoWProbe
             if(o.MapId!=map||o.MapMode!=mode||o.Zone!=zone)return Stop("地图发生变化。");
             if(Double.IsNaN(o.X)||Double.IsNaN(o.Y)||Math.Abs(o.X-x)>0.04||Math.Abs(o.Y-y)>0.04)return Stop("离开启动位置四坐标点范围，停止追击。");
             if(token!=0&&!looted&&now-started>=45000)return Stop("单怪45秒未确认击杀，停止并检查朝向、距离和伤害。");
-            if(resting&&now-restStarted>=60000)return Stop("60秒内未恢复满，检查食物和饮水绑定。");
+            if(resting&&!o.InCombat&&now-restStarted>=60000)return Stop("60秒内未恢复满，检查食物和饮水绑定。");
             if(sequence==o.Sequence)return Cmd(QuickAction.None,"等待新一帧状态。",0);sequence=o.Sequence;
             if(!o.CastingKnown)return Stop("施法状态不可读。");
             if(token==0)
@@ -116,12 +116,12 @@ namespace WoWProbe
                 }
                 return Cmd(QuickAction.None,"等待下一拍技能。",0);
             }
-            if(GrindRecoveryPolicy.CanAttack(o))
-            {token=o.TargetToken;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=-1;reacquired=false;opening=deadFrames=escapes=escapePhase=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName,0);}
+            if(CanAcquire(o))
+            {token=o.TargetToken;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;opening=deadFrames=escapes=escapePhase=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName,0);}
             if(o.InCombat)
             {
                 if(missingCombatTarget<0)missingCombatTarget=now;
-                if(now-missingCombatTarget>=2500)return Stop("受到攻击后2.5秒仍未取得可验证的怪物目标。");
+                if(now-missingCombatTarget>=6000)return Stop("受到攻击后6秒仍未取得可验证的怪物目标。");
                 nextScan=Math.Min(nextScan,now+200);
             }
             else missingCombatTarget=-1;
@@ -140,6 +140,8 @@ namespace WoWProbe
         }
         public bool HasDeathEvidence(FarmObservation o,uint expected)
         {return expected!=0&&expected==token&&o!=null&&o.Fresh&&(o.DeathEventsKnown&&o.DeathToken==expected&&o.TargetDeaths!=deathBase||o.KillCreditsKnown&&lockedName!=0&&o.KillCreditNameHash==lockedName&&o.KillCredits!=creditBase);}
+        static bool CanAcquire(FarmObservation o)
+        {return GrindRecoveryPolicy.CanAttack(o)&&(o.InCombat||o.TargetReaction==4);}
         QuickCommand ConfirmDeath(FarmObservation o,long now)
         {
             if(++deadFrames<2)return Cmd(QuickAction.None,"确认第二帧死亡证据。",0);
@@ -163,7 +165,7 @@ namespace WoWProbe
             if(c.Action==QuickAction.CorpseSelect)return !o.InCombat;
             if(c.Action==QuickAction.Reacquire)return !o.TargetExists||o.TargetIdentityKnown&&o.TargetToken==c.Token&&!o.TargetIsPlayer;
             if(o.ChatOpenKnown&&o.ChatOpen)return false;
-            if(c.Action==QuickAction.Patrol)return !o.InCombat&&!GrindRecoveryPolicy.CanAttack(o);
+            if(c.Action==QuickAction.Patrol)return !o.InCombat&&!CanAcquire(o);
             if(c.Action==QuickAction.Food||c.Action==QuickAction.Drink||c.Action==QuickAction.Turn)return !o.InCombat;
             if(!o.TargetExists||!o.TargetIdentityKnown||c.Token==0||o.TargetToken!=c.Token||o.TargetIsPlayer||!o.AttackabilityKnown||!o.TargetDeadKnown)return false;
             if(c.Action==QuickAction.BackOff||c.Action==QuickAction.DetourTurn||c.Action==QuickAction.DetourForward)return !o.InCombat&&!o.TargetDead&&o.TargetCanAttack;

@@ -28,6 +28,7 @@ class CombatTelemetryTests
             var o=Observe(ProbePacket.Decode(Core()),p,true);Equal(Get(o,"Fresh"),true,"fresh pair");Equal(Get(o,"KnownCore"),true,"known core");Equal(Get(o,"AttackabilityKnown"),false,"unknown attackability");
             var b=Extra();b[6]=2;Checksum(b);o=Observe(ProbePacket.Decode(Core()),Decode(b),true);Equal(Get(o,"AttackabilityKnown"),true,"known false");Equal(Get(o,"TargetCanAttack"),false,"false value");
         });
+        Test("target reaction is preserved from matched core telemetry",delegate {var b=Core();b[123]=4;Checksum(b);var o=Observe(ProbePacket.Decode(b),Decode(Extra()),true);Equal(Get(o,"TargetReaction"),4,"neutral target");b[123]=255;Checksum(b);o=Observe(ProbePacket.Decode(b),Decode(Extra()),true);Equal(Get(o,"TargetReaction"),255,"unknown reaction");});
         Test("sequence mismatch and absent packets cannot be fresh",delegate {
             var b=Extra();U16(b,4,4);Checksum(b);var o=Observe(ProbePacket.Decode(Core()),Decode(b),true);Equal(Get(o,"Fresh"),false,"mismatched sequence");Equal(Get(o,"AttackabilityKnown"),false,"mismatched extension invalid");
             Equal(Get(Observe(ProbePacket.Decode(Core()),null,true),"Fresh"),false,"absent extension");Equal(Get(Observe(null,Decode(Extra()),true),"Fresh"),false,"absent core");
