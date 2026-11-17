@@ -11,10 +11,14 @@ namespace WoWProbe
         public NavigationCalibration Calibration=new NavigationCalibration();
         public double CorridorWidth=.005;
         public double CombatRadius=.02;
+        public string OpeningKeys="242223",LoopKeys="2";
+        public int SkillIntervalMs=750;
+        public void ValidateSkills(){QuickCombat.CleanKeys(OpeningKeys,true);QuickCombat.CleanKeys(LoopKeys,false);if(SkillIntervalMs<100||SkillIntervalMs>5000)throw new FormatException("技能间隔须为0.10至5.00秒。");}
         public void Validate(bool live)
         {
             if(SchemaVersion!=1||Route==null||Calibration==null)throw new FormatException("无效的巡航方案。");
             Route.Validate();Calibration.Validate();
+            ValidateSkills();
             if(Route.RouteType!="farm"||!Route.Loop)throw new FormatException("请选择打怪用途的闭合循环路线。");
             if(!NavigationMath.InRange(CorridorWidth,.0005,.02))throw new FormatException("路线偏离范围必须为0.05至2个坐标点。");
             if(!NavigationMath.InRange(CombatRadius,CorridorWidth,.05))throw new FormatException("追怪范围必须不小于巡航偏离范围，且最多5个坐标点。");
@@ -25,7 +29,7 @@ namespace WoWProbe
             {if(i>0&&NavigationMath.Distance(Route.Points[i].X-Route.Points[i-1].X,Route.Points[i].Y-Route.Points[i-1].Y,Calibration.AxisScale)<1e-8)throw new FormatException("相邻路点不能重复。");if(Route.Points[i].Tolerance>CorridorWidth/2)throw new FormatException("路点到达误差须小于路线偏离范围的一半。");if(Route.Points[i].WaitMilliseconds!=0||Route.Points[i].Action=="interact")throw new FormatException("打怪巡航路点不支持等待或商人交互动作。");}
             if(live&&!Calibration.Confirmed)throw new InvalidOperationException("请先核对本机地图与移动参数。");
         }
-        public QuickRoutePlan Clone(){return new QuickRoutePlan{SchemaVersion=SchemaVersion,Route=Route.Clone(),Calibration=Calibration.Clone(),CorridorWidth=CorridorWidth,CombatRadius=CombatRadius};}
+        public QuickRoutePlan Clone(){return new QuickRoutePlan{SchemaVersion=SchemaVersion,Route=Route.Clone(),Calibration=Calibration.Clone(),CorridorWidth=CorridorWidth,CombatRadius=CombatRadius,OpeningKeys=OpeningKeys,LoopKeys=LoopKeys,SkillIntervalMs=SkillIntervalMs};}
         public bool MapMatches(FarmObservation o){return o!=null&&o.MapId==Route.MapId&&o.MapMode==Route.MapMode&&o.Zone==Route.Zone;}
         public double DistanceToRoute(double x,double y)
         {double px,py;int end;Project(x,y,out px,out py,out end);return NavigationMath.Distance(x-px,y-py,Calibration.AxisScale);}
@@ -56,10 +60,21 @@ namespace WoWProbe
         public static void SaveRecording(string path,QuickRoutePlan plan)
         {ValidateRecording(plan);var copy=plan.Clone();copy.Calibration.Confirmed=false;RouteFiles.Save(path,new JavaScriptSerializer().Serialize(copy));}
         public static QuickRoutePlan LoadRecording(string path){return Load(path,true);}
+        public static QuickRoutePlan Import(string path)
+        {
+            var root=RouteJson.Object(RouteFiles.Load(path));
+            if(root.ContainsKey("Route"))return Load(path,true);
+            if(!root.ContainsKey("schema_version"))throw new FormatException("不支持的JSON：请选择打怪路线、巡航方案或录点草稿。");
+            var r=RouteStore.Load(path);if(r.RouteType!="farm")throw new FormatException("请选择打怪路线；跑尸和商人路线不能作为巡航路线导入。");
+            r.Loop=true;foreach(var w in r.Points){w.Tolerance=.001;w.WaitMilliseconds=0;w.Action="wait";}
+            var a=r.Points[0];var z=r.Points[r.Points.Count-1];if(a.X!=z.X||a.Y!=z.Y){if(r.Points.Count>=4999)throw new FormatException("路线点过多，无法补上闭合起点。");r.Points.Add(a.Clone());}
+            var p=new QuickRoutePlan{Route=r,Calibration=new NavigationCalibration{MapId=r.MapId,MapMode=r.MapMode,Zone=r.Zone,AxisScale=1.5,TurnRadiansPerSecond=5.85,ForwardUnitsPerSecond=.008}};p.Validate(false);return p;
+        }
         static void ValidateRecording(QuickRoutePlan p)
         {
             if(p==null||p.SchemaVersion!=1||p.Route==null||p.Calibration==null||p.Route.Points==null||p.Route.Points.Count>4999)throw new FormatException("录点草稿无效。");
             p.Calibration.Validate();RouteChecks.Label(p.Route.RouteId,"route_id");RouteChecks.Label(p.Route.Name,"name");RouteChecks.Binding(p.Route.MapId,p.Route.MapMode,p.Route.Zone);
+            p.ValidateSkills();
             if(!NavigationMath.InRange(p.CombatRadius,p.CorridorWidth,.05))throw new FormatException("录点草稿追怪范围无效。");
             if(p.Route.SchemaVersion!=1||p.Route.RouteType!="farm"||!p.Route.Loop||p.Route.MapId!=p.Calibration.MapId||p.Route.MapMode!=p.Calibration.MapMode||p.Route.Zone!=p.Calibration.Zone||!NavigationMath.InRange(p.CorridorWidth,.0005,.02))throw new FormatException("录点草稿地图或范围无效。");
             for(int i=0;i<p.Route.Points.Count;i++)
@@ -67,7 +82,7 @@ namespace WoWProbe
         }
         static QuickRoutePlan Load(string path,bool recording)
         {
-            var root=RouteJson.Object(RouteFiles.Load(path));RouteJson.Keys(root,"SchemaVersion,Route,Calibration,CorridorWidth,CombatRadius","CombatRadius");
+            var root=RouteJson.Object(RouteFiles.Load(path));RouteJson.Keys(root,"SchemaVersion,Route,Calibration,CorridorWidth,CombatRadius,OpeningKeys,LoopKeys,SkillIntervalMs","CombatRadius,OpeningKeys,LoopKeys,SkillIntervalMs");
             var r=RouteJson.Object(root["Route"]);RouteJson.Keys(r,"SchemaVersion,RouteId,Name,RouteType,Zone,MapId,MapMode,AllowReverse,Loop,Points",null);
             var c=RouteJson.Object(root["Calibration"]);RouteJson.Keys(c,"AxisScale,FacingSign,FacingOffset,TurnRadiansPerSecond,ForwardUnitsPerSecond,Confirmed,MapId,MapMode,Zone",null);
             var points=r["Points"] as System.Collections.Generic.List<object>;if(points==null)throw new FormatException("缺少路点列表。");foreach(var point in points)RouteJson.Keys(RouteJson.Object(point),"X,Y,Tolerance,WaitMilliseconds,Action",null);
@@ -82,11 +97,14 @@ namespace WoWProbe
         public int TargetIndex {get;private set;}public int Laps {get;private set;}
         public bool Returning {get;private set;}
         public bool Joining {get;private set;}
+        public bool SearchingNearby {get;private set;}
+        double nearbyX,nearbyY;long nearbyUntil=-1;
         double returnX,returnY,progressX,progressY,defenseRadius;long last=-1,progressAt=-1,targetAt=-1;int sequence=-1;bool suspended;
         public QuickRouteFollower(QuickRoutePlan plan,FarmObservation start)
         {
             plan.Validate(true);Plan=plan.Clone();
             if(start==null||!start.Fresh||!start.KnownCore||start.ReadFailures!=0||!Plan.MapMatches(start))throw new InvalidOperationException("角色地图状态与路线不匹配。");
+            nearbyX=start.X;nearbyY=start.Y;SearchingNearby=true;
             if(start.PlayerDead||start.PlayerGhost){returnX=Plan.Route.Points[0].X;returnY=Plan.Route.Points[0].Y;TargetIndex=1;Returning=true;return;}
             if(!NavigationMath.InRange(start.X,0,1)||!NavigationMath.InRange(start.Y,0,1))throw new InvalidOperationException("当前角色位置不可读。");
             if(!Plan.Contains(start.X,start.Y))
@@ -100,15 +118,28 @@ namespace WoWProbe
         }
         double Tolerance {get{return Math.Min(.001,Plan.CorridorWidth/3);}}
         public bool OnRoute(FarmObservation o){return o!=null&&Plan.MapMatches(o)&&Plan.Contains(o.X,o.Y);}
+        bool InNearbyArea(FarmObservation o){return o!=null&&Plan.MapMatches(o)&&NavigationMath.InRange(o.X,0,1)&&NavigationMath.InRange(o.Y,0,1)&&NavigationMath.Distance(o.X-nearbyX,o.Y-nearbyY,Plan.Calibration.AxisScale)<=Plan.CombatRadius;}
+        public double PursuitDistance(FarmObservation o){double d=Plan.DistanceToRoute(o.X,o.Y);return SearchingNearby||suspended?Math.Min(d,NavigationMath.Distance(o.X-nearbyX,o.Y-nearbyY,Plan.Calibration.AxisScale)):d;}
+        public void BeginNearbySearch(FarmObservation o,long now){nearbyX=o.X;nearbyY=o.Y;SearchingNearby=true;nearbyUntil=now+2500;}
+        public void TickNearbySearch(FarmObservation o,long now,bool idle)
+        {
+            if(!SearchingNearby||!idle||o.InCombat)return;
+            if(nearbyUntil<0)nearbyUntil=now+2500;
+            if(now<nearbyUntil)return;
+            SearchingNearby=false;
+            int nearest=0;double distance=Double.PositiveInfinity;
+            for(int i=0;i<Plan.Route.Points.Count-1;i++){var w=Plan.Route.Points[i];double d=NavigationMath.Distance(o.X-w.X,o.Y-w.Y,Plan.Calibration.AxisScale);if(d<distance){distance=d;nearest=i;}}
+            returnX=Plan.Route.Points[nearest].X;returnY=Plan.Route.Points[nearest].Y;TargetIndex=nearest+1;Returning=Joining=true;suspended=false;progressAt=targetAt=-1;
+        }
         public bool InCombatArea(FarmObservation o){return o!=null&&Plan.MapMatches(o)&&Plan.WithinCombatArea(o.X,o.Y);}
         public void ObserveCombat(FarmObservation o)
         {if(o!=null&&o.InCombat&&Plan.MapMatches(o)&&NavigationMath.InRange(o.X,0,1)&&NavigationMath.InRange(o.Y,0,1)){double d=Plan.DistanceToRoute(o.X,o.Y);if(d<=.1)defenseRadius=Math.Max(defenseRadius,d+.002);}}
         public bool CanOperate(FarmObservation o)
-        {return o!=null&&Plan.MapMatches(o)&&NavigationMath.InRange(o.X,0,1)&&NavigationMath.InRange(o.Y,0,1)&&(Joining||o.InCombat&&Plan.DistanceToRoute(o.X,o.Y)<=.1||InCombatArea(o)&&(OnRoute(o)||Returning||suspended)|| (Returning||suspended)&&Plan.DistanceToRoute(o.X,o.Y)<=defenseRadius);}
+        {return o!=null&&Plan.MapMatches(o)&&NavigationMath.InRange(o.X,0,1)&&NavigationMath.InRange(o.Y,0,1)&&(Joining||InNearbyArea(o)&&(SearchingNearby||suspended)||o.InCombat&&Plan.DistanceToRoute(o.X,o.Y)<=.1||InCombatArea(o)&&(OnRoute(o)||Returning||suspended)|| (Returning||suspended)&&Plan.DistanceToRoute(o.X,o.Y)<=defenseRadius);}
         public bool TargetAllowed(FarmObservation o)
-        {return o!=null&&Plan.MapMatches(o)&&(o.InCombat&&CanOperate(o)||InCombatArea(o)&&(!o.TargetPositionKnown||Plan.WithinCombatArea(o.TargetX,o.TargetY)));}
+        {return o!=null&&Plan.MapMatches(o)&&(o.InCombat&&CanOperate(o)||(InCombatArea(o)||InNearbyArea(o)&&(SearchingNearby||suspended))&&(!o.TargetPositionKnown||Plan.WithinCombatArea(o.TargetX,o.TargetY)||NavigationMath.Distance(o.TargetX-nearbyX,o.TargetY-nearbyY,Plan.Calibration.AxisScale)<=Plan.CombatRadius));}
         public bool MayAcquire(FarmObservation o)
-        {return TargetAllowed(o)&&(o.InCombat||OnRoute(o)&&!Returning&&!suspended);}
+        {return TargetAllowed(o)&&(o.InCombat||SearchingNearby||OnRoute(o)&&!Returning&&!suspended);}
         public void Interrupt(FarmObservation o)
         {
             if(!suspended){if(!Returning)Plan.ProjectSegment(o.X,o.Y,TargetIndex,out returnX,out returnY);suspended=true;}

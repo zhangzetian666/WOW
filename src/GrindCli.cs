@@ -109,7 +109,7 @@ namespace WoWProbe
             var backend = new WindowsInputBackend(window, report);
             FarmObservation anchor = Snapshot();
             var routeFollower=new QuickRouteFollower(plan,anchor);
-            var engine = new QuickCombat(anchor, interval,skinning,routeFollower);
+            var engine = new QuickCombat(anchor, interval,skinning,routeFollower,plan.OpeningKeys,plan.LoopKeys);
             var safety = new InputFailureLatch();
             var stream=new QuickTelemetryStream(Snapshot,()=>clock.ElapsedMilliseconds,anchor);
             chatReader=stream.Read;
@@ -144,7 +144,7 @@ namespace WoWProbe
                     if(recoveryRoute!=null)write("已载入当前地图跑尸路线："+recoveryRoute.Name+"；仅支持已标定的墓地和末端接入区域。");
                     if((anchor.PlayerDead||anchor.PlayerGhost)&&recoveryRoute==null)throw new InvalidOperationException("当前没有匹配的跑尸路线，不能启动死亡恢复。");
                     write("本入口不自动修理或售卖；包满、补给不足等情况会停止。技能键和移动标定须与本角色一致。");
-                    write("附近自动打怪：242223开场，之后2，间隔"+interval+"ms。生命="+anchor.Health+"%（"+(anchor.VisualHealth?"原生血条画面":"API")+"）；启动先恢复满血，脱战低于80%吃喝。");
+                    write("技能设置：开场="+plan.OpeningKeys+"，循环="+plan.LoopKeys+"，间隔="+interval+"ms。生命="+anchor.Health+"%（"+(anchor.VisualHealth?"原生血条画面":"API")+"）；启动先恢复满血，脱战低于80%吃喝。");
                     Activate(window.Handle);
                     for(int i=5;i>0;i--)
                     {
@@ -192,7 +192,7 @@ namespace WoWProbe
                             read();var op=ReadOperations();var rc=recovery.Step(op,clock.ElapsedMilliseconds);
                             if(rc.Action==QuickRecoveryAction.Stop)throw new InvalidOperationException(rc.Reason);
                             if(rc.Action==QuickRecoveryAction.Complete)
-                            {completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;routeFollower.Resume();engine=new QuickCombat(observed,interval,skinning,routeFollower);autoAttackToken=0;recovery=null;write(rc.Reason);shot("revived-"+recoveries);input=guard();continue;}
+                            {completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;routeFollower.Resume();engine=new QuickCombat(observed,interval,skinning,routeFollower,plan.OpeningKeys,plan.LoopKeys);autoAttackToken=0;recovery=null;write(rc.Reason);shot("revived-"+recoveries);input=guard();continue;}
                             if(rc.Action==QuickRecoveryAction.None){Thread.Sleep(60);continue;}
                             write(rc.Reason);
                             input=new GrindInputGuard(backend,()=>{var f=read();if(!QuickRecovery.Matches(rc,ReadOperations()))throw new InvalidOperationException("复活动作状态变化。");return f;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
@@ -224,7 +224,8 @@ namespace WoWProbe
                         try
                         {
                             if(command.Action==QuickAction.ReturnToRoute){CancelQuickMovement(backend);ChatChecked(backend,"/stopattack",()=>!read().InCombat);}
-                            else if(command.Action==QuickAction.Reacquire||command.Action==QuickAction.CorpseSelect){CancelQuickMovement(backend);Chat(backend,"/targetlasttarget");}
+                            else if(command.Action==QuickAction.Reacquire||command.Action==QuickAction.CorpseSelect)
+                            {CancelQuickMovement(backend);if(command.Action==QuickAction.CorpseSelect&&!String.IsNullOrWhiteSpace(command.SelectName))ChatChecked(backend,"/targetexact "+command.SelectName,()=>!read().InCombat);else Chat(backend,"/targetlasttarget");}
                             else if(command.Action==QuickAction.Scan)
                             {
                                 if(read().InCombat){searchMotion.Stop();Chat(backend,"/targetenemy");}

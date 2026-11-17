@@ -4,16 +4,23 @@ namespace WoWProbe
     // One confirmed corpse only. Selection, loot and skinning have separate proof.
     public sealed class QuickCorpse
     {
-        readonly uint token;readonly bool skinning;readonly long started;
+        readonly uint token;readonly bool skinning;long started;readonly string targetName;
         uint opened,closed,skinBase,failedBase;long lootAt,skinAt,skinSelectAt;bool selected,lootIssued,skinIssued,skinSelected;
         readonly bool approach;bool approached;
+        long combatSince=-1;int lastHealth;
+        public bool Interrupted {get;private set;}
         public bool Done {get;private set;}
         public int Loots {get;private set;}public int Skins {get;private set;}
         public QuickCorpse(uint token,bool skinning,FarmObservation initial,long now)
             :this(token,skinning,initial,now,false){}
         public QuickCorpse(uint token,bool skinning,FarmObservation initial,long now,bool approach)
-        {if(token==0||initial==null)throw new ArgumentException("A verified corpse identity is required.");this.token=token;this.skinning=skinning;this.approach=approach;started=now;opened=initial.LootOpened;closed=initial.LootClosed;}
-        QuickCommand C(QuickAction action,string reason,ushort key){return new QuickCommand{Action=action,Token=token,Reason=reason,Key=key};}
+            :this(token,skinning,initial,now,approach,initial==null?"":initial.TargetName){}
+        public QuickCorpse(uint token,bool skinning,FarmObservation initial,long now,bool approach,string targetName)
+        {if(token==0||initial==null)throw new ArgumentException("A verified corpse identity is required.");this.token=token;this.skinning=skinning;this.approach=approach;this.targetName=targetName;started=now;lastHealth=initial.Health;opened=initial.LootOpened;closed=initial.LootClosed;}
+        QuickCommand C(QuickAction action,string reason,ushort key){return new QuickCommand{Action=action,Token=token,Reason=reason,Key=key,SelectName=action==QuickAction.CorpseSelect&&resumed?targetName:null};}
+        bool resumed;
+        public void Resume(FarmObservation o,long now)
+        {Interrupted=false;resumed=true;started=now;combatSince=-1;lastHealth=o.Health;opened=o.LootOpened;closed=o.LootClosed;selected=lootIssued=skinIssued=skinSelected=approached=false;}
         QuickCommand Finish(string reason){Done=true;var c=C(QuickAction.None,reason,0);c.Report=true;return c;}
         public QuickCommand Step(FarmObservation o,long now)
         {
@@ -21,8 +28,13 @@ namespace WoWProbe
             if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||o.PlayerDead||o.PlayerGhost)return Finish("尸体状态失效，取消拾取/剥皮。");
             if(o.InCombat)
             {
-                return Finish("仍在战斗，先处理附近攻击者；本具尸体不计拾取或剥皮成功。");
+                if(combatSince<0)combatSince=now;
+                bool attacker=o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken!=token&&!o.TargetIsPlayer&&o.TargetDeadKnown&&!o.TargetDead&&o.AttackabilityKnown&&o.TargetCanAttack;
+                bool damage=lastHealth>=0&&lastHealth<=100&&o.Health>=0&&o.Health<lastHealth;lastHealth=o.Health;
+                if(!attacker&&!damage&&now-combatSince<2500)return C(QuickAction.None,"击杀后等待战斗标记清除，保留尸体，不继续巡航。",0);
+                Interrupted=true;return C(QuickAction.None,"确认新攻击或持续战斗，暂存尸体，先处理攻击者。",0);
             }
+            combatSince=-1;lastHealth=o.Health;
             if(now<started||now-started>20000)return Finish("尸体处理超时，继续巡航；不计未确认的拾取/剥皮。");
             bool same=o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken==token&&!o.TargetIsPlayer&&o.TargetDeadKnown&&o.TargetDead;
             if(approach&&same&&!approached){approached=true;return C(QuickAction.CorpseApproach,"发现路边可剥皮尸体，先按F接近，不计为本轮击杀。",70);}

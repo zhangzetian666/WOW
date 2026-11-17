@@ -295,8 +295,9 @@ namespace WoWProbe
         internal static void Keys(Dictionary<string, object> obj, string fields, string optional)
         {
             string[] names = fields.Split(','); HashSet<string> allowed = new HashSet<string>(names, StringComparer.Ordinal);
+            var optionalNames=new HashSet<string>((optional??"").Split(new[]{','},StringSplitOptions.RemoveEmptyEntries),StringComparer.Ordinal);
             foreach (string key in obj.Keys) if (!allowed.Contains(key)) throw new FormatException("Unknown JSON field: " + key);
-            foreach (string key in names) if (key != optional && !obj.ContainsKey(key)) throw new FormatException("Missing JSON field: " + key);
+            foreach (string key in names) if (!optionalNames.Contains(key) && !obj.ContainsKey(key)) throw new FormatException("Missing JSON field: " + key);
         }
         internal static string String(Dictionary<string, object> obj, string key)
         { string value = obj[key] as string; if (value == null) throw new FormatException("Expected a string: " + key); return value; }

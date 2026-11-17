@@ -15,7 +15,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Application compilation failed.' }
 if ($QuickCheck) {
     if ($Package) { throw 'QuickCheck does not produce a release package.' }
     $quickSources = @($sources | Where-Object { [System.IO.Path]::GetFileName($_) -notmatch '(^Program\.cs$|^Native\.cs$|^CampaignNative\.cs$|^GrindCli\.cs$|^FishingAudioNative\.cs$|^AssemblyInfo\.cs$|Form\.cs$)' })
-    foreach ($testName in @('QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','QuickForwardMotionTests','QuickRouteTests','GrindSafetyTests')) {
+    foreach ($testName in @('RoutesTests','QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','QuickForwardMotionTests','QuickRouteTests','GrindSafetyTests')) {
         & $compiler @common /target:exe "/out:$bin\$testName.exe" @quickSources "$projectRoot\tests\$testName.cs"
         if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
         & "$bin\$testName.exe"

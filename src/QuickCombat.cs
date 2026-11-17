@@ -6,7 +6,7 @@ namespace WoWProbe
     public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach }
     public sealed class QuickCommand
     {
-        public QuickAction Action; public ushort Key; public uint Token,IgnoredTarget; public string Reason;public int Hold;public bool Report,MouseTurn,RouteMovement;public QuickRouteFollower RouteContext;
+        public QuickAction Action; public ushort Key; public uint Token,IgnoredTarget; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement;public QuickRouteFollower RouteContext;
     }
 
     // Nearby combat only. The game's confirmed F/click-to-move binding supplies
@@ -19,6 +19,12 @@ namespace WoWProbe
         uint token,deathBase,lastKilled,creditBase,lockedName; int opening, sequence=-1, deadFrames, scans,corpseReselections,unconfirmedLosses;
         uint skippedToken;long skipUntil;
         readonly HashSet<uint> inspectedCorpses=new HashSet<uint>();
+        string lockedTargetName;
+        readonly string openingKeys,loopKeys;int loopIndex;
+        public static string CleanKeys(string keys,bool allowEmpty)
+        {if(keys==null)throw new FormatException("技能序列不能为空值。");var b=new System.Text.StringBuilder();foreach(char c in keys){if(Char.IsWhiteSpace(c))continue;if(!(c>='0'&&c<='9')&&c!='-'&&c!='=')throw new FormatException("技能序列只支持0–9、-、=键，可用空格分隔。");b.Append(c);}if(b.Length>64||!allowEmpty&&b.Length==0)throw new FormatException("循环技能须为1至64个按键，开场可以留空。");return b.ToString();}
+        sealed class DeferredCorpse {public uint Token;public QuickCorpse Corpse;public int Loots,Skins;}
+        readonly Stack<DeferredCorpse> deferredCorpses=new Stack<DeferredCorpse>();
         long last=-1, nextSkill, nextFace, nextScan, started, lootUntil;
         bool stopped, looted,initialRest=true,resting,food,drink,reacquired;
         long restStarted,missingCombatTarget=-1,missingTarget=-1,nextDefensive;
@@ -32,9 +38,12 @@ namespace WoWProbe
         public QuickCombat(FarmObservation initial,int interval):this(initial,interval,false){}
         public QuickCombat(FarmObservation initial,int interval,bool skinning):this(initial,interval,skinning,null){}
         public QuickCombat(FarmObservation initial,int interval,bool skinning,QuickRouteFollower route)
+            :this(initial,interval,skinning,route,"242223","2"){}
+        public QuickCombat(FarmObservation initial,int interval,bool skinning,QuickRouteFollower route,string openingKeys,string loopKeys)
         {
             if(initial==null||!initial.Fresh||!initial.KnownCore)throw new InvalidOperationException("需要连续有效的插件数据。");
-            if(interval!=500&&interval!=750)throw new ArgumentOutOfRangeException("interval");
+            if(interval<100||interval>5000)throw new ArgumentOutOfRangeException("interval");
+            this.openingKeys=CleanKeys(openingKeys,true);this.loopKeys=CleanKeys(loopKeys,false);
             map=initial.MapId;mode=initial.MapMode;zone=initial.Zone;x=initial.X;y=initial.Y;this.interval=interval;this.skinning=skinning;this.route=route;
         }
         QuickCommand Cmd(QuickAction a,string r,ushort k)
@@ -50,7 +59,7 @@ namespace WoWProbe
             if(o.BagFull&&!o.InCombat)return Stop("背包已满。");
             if(o.Health<0||o.Health>100)return Stop("生命值不可读，不能确认恢复完成。");
             if(o.MapId!=map||o.MapMode!=mode||o.Zone!=zone)return Stop("地图发生变化。");
-            if(route!=null){route.ObserveCombat(o);if(!route.CanOperate(o))return Stop("角色超出巡航及追怪范围，停止追击。");}
+            if(route!=null){route.TickNearbySearch(o,now,token==0&&!resting);route.ObserveCombat(o);if(!route.CanOperate(o))return Stop("角色超出巡航及追怪范围，停止追击。");}
             else if(Double.IsNaN(o.X)||Double.IsNaN(o.Y)||Math.Abs(o.X-x)>0.04||Math.Abs(o.Y-y)>0.04)return Stop("离开启动位置四坐标点范围，停止追击。");
             if(token!=0&&!looted&&now-started>=45000)return Stop("单怪45秒未确认击杀，停止并检查朝向、距离和伤害。");
             if(resting&&!o.InCombat&&now-restStarted>=60000)return Stop("60秒内未恢复满，检查食物和饮水绑定。");
@@ -66,7 +75,7 @@ namespace WoWProbe
                 if(resting&&o.InCombat){resting=false;initialRest=true;food=drink=false;}
                 if(resting)
                 {
-                    if(o.Health>=99&&(!mana||o.Power>=99)){resting=false;initialRest=false;return Cmd(QuickAction.None,"已观察到血量和适用法力恢复至满。",0);}
+                    if(o.Health>=99&&(!mana||o.Power>=99)){resting=false;initialRest=false;if(route!=null)route.BeginNearbySearch(o,now);return Cmd(QuickAction.None,"已观察到血量和适用法力恢复至满。",0);}
                     if(now-restStarted>=60000)return Stop("60秒内未恢复满，检查食物和饮水绑定。");
                     if(!food&&o.Health<99){food=true;return Cmd(QuickAction.Food,"血量低于恢复要求，按=吃食物。",0xBB);}
                     if(mana&&!drink&&o.Power<99)return Stop("附近打怪入口仅配置了盗贼；法力职业请先配置饮水按键。");
@@ -75,6 +84,8 @@ namespace WoWProbe
                 initialRest=false;
             }
             if(o.Casting||o.Channeling)return Cmd(QuickAction.None,"等待当前施法。",0);
+            if(token==0&&!o.InCombat&&deferredCorpses.Count>0)
+            {var pending=deferredCorpses.Pop();token=pending.Token;corpse=pending.Corpse;creditedLoots=pending.Loots;creditedSkins=pending.Skins;looted=true;corpse.Resume(o,now);return AdvanceCorpse(o,now);}
             if(token==0&&CanInspectCorpse(o)&&o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken!=0&&!o.TargetIsPlayer&&o.TargetDeadKnown&&o.TargetDead&&o.SkinKnown&&o.Skinnable&&!inspectedCorpses.Contains(o.TargetToken)&&(route==null||route.TargetAllowed(o)))
             {if(route!=null)route.Interrupt(o);token=o.TargetToken;inspectedCorpses.Add(token);looted=true;started=now;corpse=new QuickCorpse(token,true,o,now,true);creditedLoots=creditedSkins=0;return AdvanceCorpse(o,now);}
             if(token!=0)
@@ -82,7 +93,7 @@ namespace WoWProbe
                 if(looted&&corpse!=null)return AdvanceCorpse(o,now);
                 if(HasDeathEvidence(o,token))return ConfirmDeath(o,now);
                 if(o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken==token&&o.TargetDeadKnown&&o.TargetDead)return ConfirmDeath(o,now);
-                if(route!=null&&!o.InCombat&&(!route.TargetAllowed(o)||now-started>=12000||route.Plan.DistanceToRoute(o.X,o.Y)>route.Plan.CombatRadius-.001))return AbandonChase(now,"接近目标超时或到达追怪边界，放弃该目标并返回巡航路线。");
+                if(route!=null&&!o.InCombat&&(!route.TargetAllowed(o)||now-started>=12000||route.PursuitDistance(o)>route.Plan.CombatRadius-.001))return AbandonChase(now,"接近目标超时或到达追怪边界，放弃该目标并返回巡航路线。");
                 if(route!=null&&o.InCombat&&!route.TargetAllowed(o))return Stop("战斗目标已离开配置的追怪范围，停止继续追击。");
                 if(!o.TargetExists||!o.TargetIdentityKnown||o.TargetToken!=token)
                 {
@@ -129,17 +140,17 @@ namespace WoWProbe
                 {nextFace=now+1500;return Cmd(QuickAction.Face,"F：让游戏面向并接近锁定怪物。",0x46);}
                 if(now>=nextSkill)
                 {
-                    nextSkill=now+interval;string keys="242223";
-                    ushort key=(ushort)(opening<keys.Length?keys[opening++]: '2');
+                    nextSkill=now+interval;
+                    char digit=opening<openingKeys.Length?openingKeys[opening++]:loopKeys[(loopIndex++)%loopKeys.Length];ushort key=(ushort)(digit=='='?187:digit=='-'?189:digit);
                     return Cmd(QuickAction.Skill,"尝试技能键 "+(char)key+"，不冒充施法成功。",key);
                 }
                 return Cmd(QuickAction.None,"等待下一拍技能。",0);
             }
             if(ShouldAcquire(o,now))
-            {if(route!=null)route.Interrupt(o);token=o.TargetToken;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;opening=deadFrames=escapes=escapePhase=0;patrolPending=searchTurning=false;blockedWalks=searchEscapes=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName,0);}
+            {if(route!=null)route.Interrupt(o);token=o.TargetToken;lockedTargetName=o.TargetName;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;opening=loopIndex=deadFrames=escapes=escapePhase=0;patrolPending=searchTurning=false;blockedWalks=searchEscapes=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName,0);}
             if(route!=null&&!o.InCombat)
             {
-                if(!route.Returning&&now>=nextScan){nextScan=now+1200;return Cmd(QuickAction.Scan,"沿指定路线扫描附近怪物，发现目标后可在追怪范围内接近。",9);}
+                if((route.SearchingNearby||!route.Returning)&&now>=nextScan){nextScan=now+1200;return Cmd(QuickAction.Scan,"移动中扫描附近怪物；附近无目标再前往巡航点。",9);}
                 var movement=route.Step(o,now);movement.IgnoredTarget=now<skipUntil?skippedToken:0;return movement;
             }
             if(!o.InCombat&&searchTurning)
@@ -193,14 +204,19 @@ namespace WoWProbe
             if(!looted)
             {
                 Kills++;lastKilled=token;corpseReselections=unconfirmedLosses=0;looted=true;lootUntil=now+1600;
-                corpse=new QuickCorpse(token,skinning,o,now);creditedLoots=creditedSkins=0;
+                corpse=new QuickCorpse(token,skinning,o,now,false,lockedTargetName);creditedLoots=creditedSkins=0;
             }
             return AdvanceCorpse(o,now);
         }
         QuickCommand AdvanceCorpse(FarmObservation o,long now)
         {
             var c=corpse.Step(o,now);Loots+=corpse.Loots-creditedLoots;Skins+=corpse.Skins-creditedSkins;creditedLoots=corpse.Loots;creditedSkins=corpse.Skins;
-            if(corpse.Done){token=0;corpse=null;nextScan=now+400;}
+            if(corpse.Interrupted)
+            {
+                if(deferredCorpses.Count>=8)return Stop("待处理尸体超过8具，停止检查持续攻击来源。");
+                deferredCorpses.Push(new DeferredCorpse{Token=token,Corpse=corpse,Loots=creditedLoots,Skins=creditedSkins});token=0;corpse=null;looted=false;c.Report=true;
+            }
+            else if(corpse.Done){token=0;corpse=null;nextScan=now;if(route!=null)route.BeginNearbySearch(o,now);}
             c.RouteContext=route;return c;
         }
         public static bool Matches(QuickCommand c,FarmObservation o)

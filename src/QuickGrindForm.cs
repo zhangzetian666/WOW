@@ -10,7 +10,7 @@ namespace WoWProbe
         readonly Button start=new Button{Text="开始自动打怪",AutoSize=true};
         readonly Button stop=new Button{Text="停止",AutoSize=true,Enabled=false};
         readonly TextBox log=new TextBox{Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,Dock=DockStyle.Fill};
-        readonly ComboBox cadence=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,Width=100};
+        readonly Label cadence=new Label{Text="技能与间隔见上方“技能设置”",AutoSize=true};
         readonly CheckBox skinning=new CheckBox{Text="击杀及路边尸体剥皮（7键）",AutoSize=true,Checked=true};
         readonly QuickRouteEditor routeEditor=new QuickRouteEditor();
         volatile bool cancelled;bool closeWhenStopped;Thread worker;
@@ -21,7 +21,7 @@ namespace WoWProbe
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute,70));layout.RowStyles.Add(new RowStyle(SizeType.Percent,70));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,44));layout.RowStyles.Add(new RowStyle(SizeType.Percent,30));Controls.Add(layout);
             layout.Controls.Add(new Label{Text="配置闭合路线后点击开始，自动前往最近巡航点接入；发现附近怪物可离线接近打怪。\n无怪继续下一点；受到攻击优先还击。242223后持续2；低于80%吃食物后返回路线。\n保持游戏前台，F12急停。每轮最多10分钟；跑尸另配路线，不自动修理或售卖。",Dock=DockStyle.Fill},0,0);
             layout.Controls.Add(routeEditor,0,1);
-            var row=new FlowLayoutPanel{Dock=DockStyle.Fill};cadence.Items.AddRange(new object[]{"750ms","500ms"});cadence.SelectedIndex=0;row.Controls.Add(start);row.Controls.Add(stop);row.Controls.Add(cadence);row.Controls.Add(skinning);layout.Controls.Add(row,0,2);layout.Controls.Add(log,0,3);
+            var row=new FlowLayoutPanel{Dock=DockStyle.Fill};row.Controls.Add(start);row.Controls.Add(stop);row.Controls.Add(cadence);row.Controls.Add(skinning);layout.Controls.Add(row,0,2);layout.Controls.Add(log,0,3);
             start.Click+=delegate{BeginRun();};stop.Click+=delegate{cancelled=true;};
             FormClosing+=delegate(object sender,FormClosingEventArgs e){if(worker!=null&&worker.IsAlive){closeWhenStopped=true;cancelled=true;e.Cancel=true;Append("正在停止，释放按键后关闭窗口。");}};
             Shown+=delegate{string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-patrol.json"),draft=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-patrol-recording.json");try{if(File.Exists(draft)&&( !File.Exists(path)||File.GetLastWriteTimeUtc(draft)>=File.GetLastWriteTimeUtc(path))){routeEditor.Bind(QuickRoutePlan.LoadRecording(draft));Append("已恢复上次录点草稿；可以继续保存当前巡航点，闭合后再开始。");}else if(File.Exists(path)){routeEditor.Bind(QuickRoutePlan.Load(path));Append("已载入本机上次巡航方案；核对移动参数后点击开始。");}else Append("走到A点点击“保存当前巡航点”，再走到B、C、D依次保存，最后闭合到起点。");}catch(Exception e){Append("方案未载入："+e.Message);}};
@@ -31,7 +31,7 @@ namespace WoWProbe
         {
             if(worker!=null&&worker.IsAlive)return;
             QuickRoutePlan plan;try{plan=routeEditor.ReadPlan(false);plan.Calibration.Confirmed=true;QuickRoutePlan.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-patrol.json"),plan);}catch(Exception e){Append("未开始："+e.Message);return;}
-            cancelled=false;start.Enabled=cadence.Enabled=skinning.Enabled=routeEditor.Enabled=false;stop.Enabled=true;int interval=cadence.SelectedIndex==1?500:750;bool useSkin=skinning.Checked;GrindCli.FocusGameWindow();
+            cancelled=false;start.Enabled=cadence.Enabled=skinning.Enabled=routeEditor.Enabled=false;stop.Enabled=true;int interval=plan.SkillIntervalMs;bool useSkin=skinning.Checked;GrindCli.FocusGameWindow();
             worker=new Thread(()=>{try{GrindCli.RunQuick(600,interval,()=>cancelled,Append,useSkin,plan);}catch(Exception ex){Append("停止："+ex.Message);}finally{if(!IsDisposed)BeginInvoke((Action)(()=>{worker=null;start.Enabled=cadence.Enabled=skinning.Enabled=routeEditor.Enabled=true;stop.Enabled=false;if(closeWhenStopped)Close();}));}});worker.IsBackground=true;worker.Start();
         }
     }

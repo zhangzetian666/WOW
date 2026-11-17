@@ -10,6 +10,8 @@ namespace WoWProbe
         readonly TextBox routeName=new TextBox{Text="我的打怪路线",Width=150},mapId=new TextBox{Width=75},zone=new TextBox{Width=120};
         readonly NumericUpDown mode=N(1,3,1,0),corridor=N(.05m,2,.5m,2),tolerance=N(.01m,.5m,.1m,2),axis=N(.1m,10,1.5m,3),offset=N(-6.2832m,6.2832m,0,4),turn=N(.1m,10,5.85m,3),speed=N(.0001m,.2m,.008m,4);
         readonly NumericUpDown chase=N(.05m,5,2,2);
+        readonly TextBox openingKeys=new TextBox{Text="242223",Width=160},loopKeys=new TextBox{Text="2",Width=160};
+        readonly NumericUpDown skillSeconds=N(.1m,5,.75m,2);
         readonly ComboBox sign=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,Width=85};
         readonly CheckBox confirmed=new CheckBox{Text="本机地图与移动参数已核对",AutoSize=true};
         readonly DataGridView grid=new DataGridView();readonly RouteCanvas canvas=new RouteCanvas{Dock=DockStyle.Fill};
@@ -24,6 +26,8 @@ namespace WoWProbe
             Dock=DockStyle.Fill;
             var tabs=new TabControl{Dock=DockStyle.Fill};Controls.Add(tabs);
             var routeTab=new TabPage("固定巡航点");var settingsTab=new TabPage("本机地图与移动参数");tabs.TabPages.Add(routeTab);tabs.TabPages.Add(settingsTab);
+            var skillTab=new TabPage("技能设置");tabs.TabPages.Add(skillTab);var skillPanel=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(10)};skillTab.Controls.Add(skillPanel);
+            var sk1=Row();sk1.AutoSize=true;L(sk1,"每只怪开场一次（可留空）");sk1.Controls.Add(openingKeys);skillPanel.Controls.Add(sk1);var sk2=Row();sk2.AutoSize=true;L(sk2,"之后重复循环");sk2.Controls.Add(loopKeys);L(sk2,"技能间隔（秒）");sk2.Controls.Add(skillSeconds);skillPanel.Controls.Add(sk2);skillPanel.Controls.Add(new Label{AutoSize=true,Text="例如循环填242223，间隔填0.75，就每0.75秒尝试下一键并循环。\n开场填242223、循环填2，则每只怪先打242223，之后持续2。\n支持0–9、-、=键；新怪重新从开场开始。发送尝试不等于技能施放成功。"});
             var root=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=4,ColumnCount=1};root.RowStyles.Add(new RowStyle(SizeType.Absolute,34));root.RowStyles.Add(new RowStyle(SizeType.Absolute,35));root.RowStyles.Add(new RowStyle(SizeType.Percent,100));root.RowStyles.Add(new RowStyle(SizeType.Absolute,32));routeTab.Controls.Add(root);
             var names=Row();root.Controls.Add(names,0,0);L(names,"名称");names.Controls.Add(routeName);L(names,"允许偏离（坐标点）");names.Controls.Add(corridor);L(names,"到点误差");names.Controls.Add(tolerance);
             var buttons=Row();root.Controls.Add(buttons,0,1);buttons.Controls.Add(B("保存当前巡航点",CapturePoint));buttons.Controls.Add(B("闭合到起点",CloseLoop));buttons.Controls.Add(B("删除所选点",Delete));buttons.Controls.Add(B("载入方案",LoadPlanFile));buttons.Controls.Add(B("保存方案",Save));buttons.Controls.Add(B("导入路线",ImportRoute));
@@ -56,7 +60,7 @@ namespace WoWProbe
                 if(!Double.TryParse(Convert.ToString(row.Cells[1].Value),NumberStyles.Float,CultureInfo.InvariantCulture,out x)||!Double.TryParse(Convert.ToString(row.Cells[2].Value),NumberStyles.Float,CultureInfo.InvariantCulture,out y)||!NavigationMath.InRange(x,0,100)||!NavigationMath.InRange(y,0,100))throw new FormatException("第"+(row.Index+1)+"点必须输入0–100的X、Y坐标。");
                 r.Points.Add(new Waypoint{X=x/100,Y=y/100,Tolerance=(double)tolerance.Value/100});
             }
-            var p=new QuickRoutePlan{Route=r,CorridorWidth=(double)corridor.Value/100,CombatRadius=(double)chase.Value/100,Calibration=new NavigationCalibration{MapId=id,MapMode=r.MapMode,Zone=r.Zone,AxisScale=(double)axis.Value,FacingSign=sign.SelectedIndex==0?-1:1,FacingOffset=(double)offset.Value,TurnRadiansPerSecond=(double)turn.Value,ForwardUnitsPerSecond=(double)speed.Value,Confirmed=confirmed.Checked}};
+            var p=new QuickRoutePlan{Route=r,CorridorWidth=(double)corridor.Value/100,CombatRadius=(double)chase.Value/100,OpeningKeys=QuickCombat.CleanKeys(openingKeys.Text,true),LoopKeys=QuickCombat.CleanKeys(loopKeys.Text,false),SkillIntervalMs=(int)(skillSeconds.Value*1000),Calibration=new NavigationCalibration{MapId=id,MapMode=r.MapMode,Zone=r.Zone,AxisScale=(double)axis.Value,FacingSign=sign.SelectedIndex==0?-1:1,FacingOffset=(double)offset.Value,TurnRadiansPerSecond=(double)turn.Value,ForwardUnitsPerSecond=(double)speed.Value,Confirmed=confirmed.Checked}};
             return p;
         }
         public void Bind(QuickRoutePlan p)
@@ -64,6 +68,7 @@ namespace WoWProbe
             routeName.Text=p.Route.Name;mapId.Text=p.Route.MapId.ToString();mode.Value=p.Route.MapMode;zone.Text=p.Route.Zone;
             corridor.Value=(decimal)p.CorridorWidth*100;if(p.Route.Points.Count>0)tolerance.Value=(decimal)p.Route.Points[0].Tolerance*100;
             chase.Value=(decimal)p.CombatRadius*100;
+            openingKeys.Text=p.OpeningKeys;loopKeys.Text=p.LoopKeys;skillSeconds.Value=(decimal)p.SkillIntervalMs/1000;
             axis.Value=(decimal)p.Calibration.AxisScale;offset.Value=(decimal)p.Calibration.FacingOffset;turn.Value=(decimal)p.Calibration.TurnRadiansPerSecond;speed.Value=(decimal)p.Calibration.ForwardUnitsPerSecond;sign.SelectedIndex=p.Calibration.FacingSign==-1?0:1;
             grid.Rows.Clear();foreach(var point in p.Route.Points)grid.Rows.Add("",(point.X*100).ToString("F3",CultureInfo.InvariantCulture),(point.Y*100).ToString("F3",CultureInfo.InvariantCulture));confirmed.Checked=false;Preview();
         }
@@ -94,9 +99,9 @@ namespace WoWProbe
         }
         void CloseLoop(){grid.EndEdit();if(grid.Rows.Count<3)throw new InvalidOperationException("请先输入至少两个不同点。");var a=grid.Rows[0];var b=grid.Rows[grid.Rows.Count-2];if(Convert.ToString(a.Cells[1].Value)!=Convert.ToString(b.Cells[1].Value)||Convert.ToString(a.Cells[2].Value)!=Convert.ToString(b.Cells[2].Value))grid.Rows.Add("A",a.Cells[1].Value,a.Cells[2].Value);var p=ReadPlan(false);QuickRoutePlan.SaveRecording(recordingPath,p);Preview();}
         void Delete(){foreach(DataGridViewRow r in grid.SelectedRows)if(!r.IsNewRow)grid.Rows.Remove(r);QuickRoutePlan.SaveRecording(recordingPath,ReadEditor());Preview();}
-        void LoadPlanFile(){using(var d=new OpenFileDialog{Filter="巡航方案|*.json"})if(d.ShowDialog()==DialogResult.OK)Bind(QuickRoutePlan.Load(d.FileName));}
+        void LoadPlanFile(){using(var d=new OpenFileDialog{Filter="巡航方案、旧路线或录点草稿|*.json"})if(d.ShowDialog()==DialogResult.OK){var p=QuickRoutePlan.Import(d.FileName);Bind(p);QuickRoutePlan.SaveRecording(recordingPath,p);}}
         void Save(){var p=ReadPlan(false);using(var d=new SaveFileDialog{Filter="巡航方案|*.json",FileName="我的巡航路线.json"})if(d.ShowDialog()==DialogResult.OK)QuickRoutePlan.Save(d.FileName,p);}
-        void ImportRoute(){using(var d=new OpenFileDialog{Filter="已有路线|*.json"})if(d.ShowDialog()==DialogResult.OK){var r=RouteStore.Load(d.FileName);var p=new QuickRoutePlan{Route=r,Calibration=new NavigationCalibration{MapId=r.MapId,MapMode=r.MapMode,Zone=r.Zone,AxisScale=1.5,TurnRadiansPerSecond=5.85}};Bind(p);}}
+        void ImportRoute(){LoadPlanFile();}
         void ImportCalibration(){using(var d=new OpenFileDialog{Filter="地图标定|*.json"})if(d.ShowDialog()==DialogResult.OK){if(new FileInfo(d.FileName).Length>65536)throw new FormatException("标定文件过大。");var c=new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<NavigationCalibration>(File.ReadAllText(d.FileName));c.Validate();var p=ReadPlan(false);if(c.MapId!=p.Route.MapId||c.MapMode!=p.Route.MapMode||c.Zone!=p.Route.Zone)throw new FormatException("标定与路线地图不同。");p.Calibration=c;Bind(p);}}
     }
 }
