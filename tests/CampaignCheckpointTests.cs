@@ -1,13 +1,40 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Text;
+using System.Web.Script.Serialization;
 using WoWProbe;
 class CampaignCheckpointTests
 {
     static int passed,failed;static void Assert(bool b){if(!b)throw new Exception("assertion failed");}static void Test(string n,Action a){try{a();passed++;Console.WriteLine("PASS "+n);}catch(Exception e){failed++;Console.WriteLine("FAIL "+n+": "+e.Message);}}
     static void Reject(Action a){try{a();}catch(FormatException){return;}throw new Exception("contradictory checkpoint accepted");}
     static CampaignCheckpoint C(CampaignPlan p,string phase,bool complete,bool interrupted,int index){return new CampaignCheckpoint{PlanFingerprint=p.Fingerprint(),Phase=phase,Completed=complete,Interrupted=interrupted,FarmIndex=index};}
+    const string LegacyFingerprint="cde28fba49de36b5f353c9c0264aa34eb2aee297382b84e07bb40cb405248b54";
+    static CampaignPlan LegacyPlan(string checkpointPath)
+    {
+        string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"..","tests","fixtures","legacy-campaign-070.json");
+        var fixture=(Dictionary<string,object>)new JavaScriptSerializer().DeserializeObject(File.ReadAllText(path));
+        Assert((string)fixture["legacy_plan_fingerprint"]==LegacyFingerprint);
+        string scratch=Path.Combine(Path.GetTempPath(),"wow-legacy-checkpoint-"+Guid.NewGuid().ToString("N"));Directory.CreateDirectory(scratch);
+        try
+        {
+            foreach(var pair in (Dictionary<string,object>)fixture["payloads"])File.WriteAllText(Path.Combine(scratch,pair.Key),(string)pair.Value,new UTF8Encoding(false));
+            File.WriteAllText(checkpointPath,(string)fixture["checkpoint_json"],new UTF8Encoding(false));
+            return new CampaignPlan{FarmRoute=RouteStore.Load(Path.Combine(scratch,"farm.json")),CorpseRoute=RouteStore.Load(Path.Combine(scratch,"corpse.json")),VendorRoute=RouteStore.Load(Path.Combine(scratch,"vendor.json")),Battle=BattleProfileStore.Load(Path.Combine(scratch,"battle.json")),Settings=CampaignSettingsStore.Load(Path.Combine(scratch,"settings.json"))};
+        }
+        finally{Directory.Delete(scratch,true);}
+    }
     static int Main(){string file=Path.Combine(Path.GetTempPath(),"wow-checkpoint-"+Guid.NewGuid().ToString("N")+".json");var p=CampaignDemo.Create();
+        Test("independent 0.7.0 checkpoint remains valid with an empty opening",delegate{
+            var legacy=LegacyPlan(file);var loaded=CampaignCheckpointStore.Load(file,legacy);
+            Assert(loaded.PlanFingerprint==LegacyFingerprint&&loaded.FarmIndex==1&&loaded.Phase=="Farm"&&!loaded.Completed&&!loaded.Interrupted);
+        });
+        Test("adding or changing an opening invalidates an older checkpoint",delegate{
+            var legacy=LegacyPlan(file);legacy.Battle.SkillOpeningSequence="242223";Reject(delegate{CampaignCheckpointStore.Load(file,legacy);});
+            CampaignCheckpointStore.Save(file,C(legacy,"Farm",false,false,1));Assert(CampaignCheckpointStore.Load(file,legacy).FarmIndex==1);
+            legacy.Battle.SkillOpeningSequence="242224";Reject(delegate{CampaignCheckpointStore.Load(file,legacy);});
+            legacy.Battle.SkillOpeningSequence="";Reject(delegate{CampaignCheckpointStore.Load(file,legacy);});
+        });
         Test("legal farm recovery vendor stopped and completed states roundtrip",delegate{foreach(var c in new[]{C(p,"Farm",false,false,1),C(p,"Recovery",false,true,1),C(p,"Vendor",false,true,1),C(p,"Stopped",false,false,1),C(p,"Stopped",false,true,1),C(p,"Completed",true,false,p.FarmRoute.Points.Count)}){CampaignCheckpointStore.Save(file,c);var loaded=CampaignCheckpointStore.Load(file,p);Assert(loaded.Phase==c.Phase&&loaded.FarmIndex==c.FarmIndex&&loaded.Interrupted==c.Interrupted);}});
         Test("completed flag and phase must agree in both directions",delegate{Reject(delegate{CampaignCheckpointStore.Save(file,C(p,"Completed",false,false,1));});Reject(delegate{CampaignCheckpointStore.Save(file,C(p,"Farm",true,false,p.FarmRoute.Points.Count));});Reject(delegate{CampaignCheckpointStore.Save(file,C(p,"Stopped",true,false,p.FarmRoute.Points.Count));});});
         Test("farm cannot retain pending interruption and interruptions cannot lose it",delegate{Reject(delegate{CampaignCheckpointStore.Save(file,C(p,"Farm",false,true,1));});Reject(delegate{CampaignCheckpointStore.Save(file,C(p,"Recovery",false,false,1));});Reject(delegate{CampaignCheckpointStore.Save(file,C(p,"Vendor",false,false,1));});});

@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Collections.Specialized;
 using System.Globalization;
 using System.Reflection;
 using System.Security.Cryptography;
@@ -72,8 +73,18 @@ namespace WoWProbe
         void Join(Waypoint a,Waypoint b){if(NavigationMath.Distance(a.X-b.X,a.Y-b.Y,Battle.Calibration.AxisScale)>Settings.JoinTolerance)throw new FormatException("Recorded routes do not share a verified connection at the farm start.");}
         public string Fingerprint()
         {
-            Validate();var json=new JavaScriptSerializer{MaxJsonLength=8*1024*1024}.Serialize(new{farm=FarmRoute.Fingerprint(),corpse=Settings.EnableRecovery?CorpseRoute.Fingerprint():"",vendor=Settings.EnableVendor?VendorRoute.Fingerprint():"",battle=Battle,settings=CampaignSettingsStore.Write(Settings,false),reverse=FarmReverse,loop=FarmLoop});
+            Validate();var json=new JavaScriptSerializer{MaxJsonLength=8*1024*1024}.Serialize(new{farm=FarmRoute.Fingerprint(),corpse=Settings.EnableRecovery?CorpseRoute.Fingerprint():"",vendor=Settings.EnableVendor?VendorRoute.Fingerprint():"",battle=FingerprintBattle(),settings=CampaignSettingsStore.Write(Settings,false),reverse=FarmReverse,loop=FarmLoop});
             using(var sha=SHA256.Create()){var hash=sha.ComputeHash(Encoding.UTF8.GetBytes(json));var text=new StringBuilder();foreach(byte b in hash)text.Append(b.ToString("x2",CultureInfo.InvariantCulture));return text.ToString();}
+        }
+        object FingerprintBattle()
+        {
+            if(Battle.SkillOpeningSequence.Length!=0)return Battle;
+            // Schema-1 plans created before openings must retain their original identity.
+            // Preserve the serializer's public-field order and every other battle setting.
+            var legacy=new OrderedDictionary();
+            foreach(var field in typeof(BattleProfile).GetFields(BindingFlags.Public|BindingFlags.Instance))
+                if(field.Name!="SkillOpeningSequence")legacy.Add(field.Name,field.GetValue(Battle));
+            return legacy;
         }
     }
     public static class CampaignSettingsStore

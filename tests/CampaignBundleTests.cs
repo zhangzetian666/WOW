@@ -20,6 +20,16 @@ class CampaignBundleTests
     static Dictionary<string,byte[]> Entries(string path){var d=new Dictionary<string,byte[]>(StringComparer.Ordinal);using(var zip=ZipFile.OpenRead(path))foreach(var e in zip.Entries)using(var s=e.Open())using(var m=new MemoryStream()){s.CopyTo(m);d.Add(e.FullName,m.ToArray());}return d;}
     static void WriteZip(string path,IEnumerable<KeyValuePair<string,byte[]>> files){using(var stream=new FileStream(path,FileMode.Create,FileAccess.Write))using(var zip=new ZipArchive(stream,ZipArchiveMode.Create))foreach(var kv in files){var e=zip.CreateEntry(kv.Key,CompressionLevel.Optimal);using(var s=e.Open())s.Write(kv.Value,0,kv.Value.Length);}}
     static string Good(){string p=FilePath("good-"+Guid.NewGuid().ToString("N")+".wowplan");CampaignBundleStore.Save(p,Plan(),root);return p;}
+    const string LegacyFingerprint="cde28fba49de36b5f353c9c0264aa34eb2aee297382b84e07bb40cb405248b54";
+    static Dictionary<string,byte[]> LegacyEntries()
+    {
+        string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"..","tests","fixtures","legacy-campaign-070.json");
+        var fixture=(Dictionary<string,object>)new JavaScriptSerializer().DeserializeObject(File.ReadAllText(path));
+        Assert((string)fixture["legacy_plan_fingerprint"]==LegacyFingerprint,"independent legacy fixture fingerprint changed");
+        var files=new Dictionary<string,byte[]>(StringComparer.Ordinal);
+        foreach(var pair in (Dictionary<string,object>)fixture["payloads"])files.Add(pair.Key,Encoding.UTF8.GetBytes((string)pair.Value));
+        return files;
+    }
     static void Rehash(Dictionary<string,byte[]> files){var j=new JavaScriptSerializer();var m=(Dictionary<string,object>)j.DeserializeObject(Encoding.UTF8.GetString(files["manifest.json"]));var list=new List<object>();foreach(var pair in files)if(pair.Key!="manifest.json")list.Add(new{path=pair.Key,length=pair.Value.Length,sha256=Hash(pair.Value)});m["files"]=list;files["manifest.json"]=Encoding.UTF8.GetBytes(j.Serialize(m));}
     static string Mutate(string entry,Func<byte[],byte[]> transform,bool fixManifest)
     {
@@ -27,6 +37,26 @@ class CampaignBundleTests
     }
     static void MainTest()
     {
+        Test("legacy 0.7.0 bundle imports with its original manifest fingerprint",delegate{
+            var files=LegacyEntries();string path=FilePath("legacy-070.wowplan");WriteZip(path,files);
+            var loaded=CampaignBundleStore.Load(path,FilePath("legacy-cache"));
+            Assert(loaded.Plan.Fingerprint()==LegacyFingerprint&&loaded.Plan.Battle.SkillOpeningSequence=="","legacy empty opening changed plan identity");
+        });
+        Test("explicit empty opening retains the independent legacy fingerprint",delegate{
+            var files=LegacyEntries();string battle=Encoding.UTF8.GetString(files["battle.json"]);
+            files["battle.json"]=Encoding.UTF8.GetBytes(battle.Replace("\"skill_sequence\":", "\"skill_opening_sequence\":\"\",\"skill_sequence\":"));
+            Rehash(files);string path=FilePath("legacy-explicit-empty.wowplan");WriteZip(path,files);
+            Assert(CampaignBundleStore.Load(path,FilePath("legacy-empty-cache")).Plan.Fingerprint()==LegacyFingerprint);
+        });
+        Test("nonempty opening survives a bundle and is bound into its fingerprint",delegate{
+            var p=Plan();p.Battle.SkillOpeningSequence="242223";string path=FilePath("opening.wowplan");CampaignBundleStore.Save(path,p,root);
+            var loaded=CampaignBundleStore.Load(path,FilePath("opening-cache")).Plan;
+            Assert(loaded.Battle.SkillOpeningSequence=="242223","bundle dropped its opening");
+            string first=loaded.Fingerprint();loaded.Battle.SkillOpeningSequence="242224";
+            Assert(loaded.Fingerprint()!=first,"different openings share a fingerprint");
+            string bad=Mutate("battle.json",delegate(byte[] bytes){return Encoding.UTF8.GetBytes(Encoding.UTF8.GetString(bytes).Replace("\"skill_opening_sequence\":\"\"","\"skill_opening_sequence\":\"242223\""));},true);
+            Reject(delegate{CampaignBundleStore.Load(bad,FilePath("changed-opening-cache"));});
+        });
         Test("Unicode bundle preserves reverse loop while clearing every live flag and start index",delegate{var p=Plan();p.Settings.Name="测试方案・回程";p.FarmReverse=p.FarmLoop=true;p.StartIndex=2;p.Settings.BindingsConfirmed=p.Settings.UiConfirmed=p.Settings.AutoResumeConfirmed=p.Battle.BindingsConfirmed=p.Battle.ApproachPositionConfirmed=p.Battle.Calibration.Confirmed=true;string path=FilePath("中文方案.wowplan");CampaignBundleStore.Save(path,p,root);var loaded=CampaignBundleStore.Load(path,FilePath("cache"));var q=loaded.Plan;Assert(q.Settings.Name==p.Settings.Name&&q.FarmReverse&&q.FarmLoop&&q.StartIndex==0);Assert(!q.Settings.BindingsConfirmed&&!q.Settings.UiConfirmed&&!q.Settings.AutoResumeConfirmed&&!q.Battle.BindingsConfirmed&&!q.Battle.ApproachPositionConfirmed&&!q.Battle.Calibration.Confirmed);Assert(p.StartIndex==2&&p.Settings.BindingsConfirmed&&p.Battle.Calibration.Confirmed,"save modified source plan");q.Validate();Assert(Directory.Exists(loaded.AvatarDirectory));});
         Test("all supported route roles survive a complete bundle",delegate{var l=CampaignBundleStore.Load(Good(),FilePath("cache"));Assert(l.Plan.FarmRoute.RouteType=="farm"&&l.Plan.CorpseRoute.RouteType=="corpse_run"&&l.Plan.VendorRoute.RouteType=="vendor_return");});
         Test("disabled interruption routes are omitted rather than silently revived",delegate{var p=Plan();p.Settings.EnableRecovery=p.Settings.EnableVendor=false;string path=FilePath("disabled.wowplan");CampaignBundleStore.Save(path,p,root);var files=Entries(path);Assert(!files.ContainsKey("corpse.json")&&!files.ContainsKey("vendor.json"));var l=CampaignBundleStore.Load(path,FilePath("cache"));Assert(l.Plan.CorpseRoute==null&&l.Plan.VendorRoute==null&&!l.Plan.Settings.EnableRecovery&&!l.Plan.Settings.EnableVendor);});

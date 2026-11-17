@@ -80,7 +80,7 @@ namespace WoWProbe
             }
             var saved=TargetCatalog.Match(b,f);if(saved!=null)
             {
-                int required=0;foreach(char skill in b.SkillSequence)required|=1<<(skill-'1');
+                int required=0;foreach(char skill in b.SkillOpeningSequence+b.SkillSequence)required|=1<<(skill-'1');
                 bool known=f.ActionsKnown&&(f.KnownActionsMask&required)==required;
                 if(!known)Add(r,"target_actions","当前配置技能",false,"","已选中保存的怪物，但配置技能槽位的数据未知；请核对技能栏和采样。");
                 else if((f.ReadyActionsMask&required)!=required||(f.UsableActionsMask&required)!=required)Pending(r,"target_actions","当前配置技能","技能槽位已知；冷却或暂不可用的技能将在运行时逐次等待并复核。");
