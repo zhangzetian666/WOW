@@ -68,7 +68,7 @@ class CombatTelemetryTests
             Reject(delegate(byte[] b){U32(b,44,123);});Reject(delegate(byte[] b){b[56]=4;});Reject(delegate(byte[] b){U32(b,20,1000);});
             Reject(delegate(byte[] b){b[6]=64;b[7]=96;U32(b,20,1000);});Reject(delegate(byte[] b){b[6]=64;b[7]=32;});
             foreach(int offset in new[]{24,28,32,36,40})Reject(delegate(byte[] b){U32(b,offset,1);});
-            Reject(delegate(byte[] b){b[56]=32;});Reject(delegate(byte[] b){b[57]=1;});Reject(delegate(byte[] b){b[125]=1;});
+            Reject(delegate(byte[] b){b[56]=64;});Reject(delegate(byte[] b){b[57]=1;});Reject(delegate(byte[] b){b[125]=1;});
             Reject(delegate(byte[] b){b[56]=1;U16(b,52,1);});Reject(delegate(byte[] b){U16(b,52,1);U16(b,54,1);});
             var corrupt=Extra();corrupt[1]++;try{Decode(corrupt);throw new Exception("bad checksum accepted");}catch(TargetInvocationException e){Assert(e.InnerException is FormatException,"wrong exception");}
         });
@@ -80,6 +80,18 @@ class CombatTelemetryTests
         Test("target absence prevents extension target claims",delegate {
             var b=Extra();b[6]=7;b[7]=5;U32(b,8,1);b[56]=4;U32(b,44,5);Checksum(b);
             var c=Core();c[6]=0;Checksum(c);var o=Observe(ProbePacket.Decode(c),Decode(b),true);Equal(Get(o,"TargetExists"),false,"absent target");Equal(Get(o,"TargetIdentityKnown"),false,"absent identity");Equal(Get(o,"RangeKnown"),false,"absent range");
+        });
+        Test("optional target-death evidence survives current target absence",delegate {
+            var b=Extra();b[56]=32;U32(b,57,123);U32(b,61,7);Checksum(b);
+            var c=Core();c[6]=0;Checksum(c);var o=Observe(ProbePacket.Decode(c),Decode(b),true);
+            Equal(Get(o,"DeathEventsKnown"),true,"death source");Equal(Get(o,"DeathToken"),123u,"latched token");Equal(Get(o,"TargetDeaths"),7u,"death revision");
+            Reject(delegate(byte[] x){x[56]=32;U32(x,57,123);});Reject(delegate(byte[] x){x[56]=32;U32(x,61,7);});
+        });
+        Test("optional chat XP skin binding and empty food remain explicit and canonical",delegate {
+            var b=Extra();b[65]=3;b[74]=1;U32(b,66,123);U32(b,70,4);b[75]=3;b[76]=1;Checksum(b);
+            var c=Core();c[6]=0;Checksum(c);var o=Observe(ProbePacket.Decode(c),Decode(b),true);
+            Equal(Get(o,"ChatOpen"),true,"focused chat");Equal(Get(o,"KillCredits"),4u,"XP credit");Equal(Get(o,"SkinBindingCorrect"),true,"current skin action");Equal(Get(o,"FoodCount"),0,"known empty food");
+            Reject(delegate(byte[] x){x[65]=2;});Reject(delegate(byte[] x){x[75]=2;});Reject(delegate(byte[] x){x[76]=1;U16(x,77,65535);});Reject(delegate(byte[] x){x[74]=1;U32(x,70,1);});
         });
         if(args.Length==2)Test("actual Lua WC3 and WP1 fixture cross decode",delegate {
             var core=ProbePacket.Decode(File.ReadAllBytes(args[0]));var extra=Decode(File.ReadAllBytes(args[1]));Equal(core.Sequence,Get(extra,"Sequence"),"same sequence");

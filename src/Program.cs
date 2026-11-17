@@ -16,6 +16,13 @@ namespace WoWProbe
         static int Main(string[] args)
         {
             Native.SetProcessDPIAware();
+            if(args.Length>0&&args[0]=="move"){try{return GrindCli.Move(args);}catch(Exception ex){Console.WriteLine(ex.Message);return 1;}}
+            if(args.Length>0&&(args[0]=="quick"||args[0]=="quick-start"))
+            {
+                Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
+                bool owner;using(var mutex=new Mutex(true,"WoWProbe-QuickCombat",out owner))
+                {if(!owner)return 1;try{Application.Run(new QuickGrindForm(args[0]=="quick-start"));}finally{mutex.ReleaseMutex();}}return 0;
+            }
             if (args.Length > 0 && args[0] == "grind") { try { return GrindCli.Run(args); } catch (Exception ex) { Console.WriteLine("grind failure: " + ex); return 1; } }
             if (args.Length > 0 && args[0] == "probe") { try { return GrindCli.Probe(args); } catch (Exception ex) { Console.WriteLine("probe failure: " + ex); return 1; } }
             Application.EnableVisualStyles();
@@ -72,7 +79,7 @@ namespace WoWProbe
 
         public ProbeForm()
         {
-            Text="状态检测 · 路线、打怪与完整流程  v0.7.1";
+            Text="状态检测 · 路线、打怪与完整流程  v0.7.2";
             Font=new Font("Microsoft YaHei UI",9F);
             BackColor=Color.FromArgb(247,249,252);
             ForeColor=Color.FromArgb(24,35,52);
@@ -378,7 +385,7 @@ namespace WoWProbe
                 var checks=new List<object>();
                 foreach(DataGridViewRow row in checklist.Rows)checks.Add(new {item=row.Cells[0].Value,result=row.Cells[1].Value});
                 var report=new Dictionary<string,object>();
-                report["tool_version"]="0.7.1";report["report_kind"]="game_observation_pending_manual_acceptance";
+                report["tool_version"]="0.7.2";report["report_kind"]="game_observation_pending_manual_acceptance";
                 report["created_local"]=DateTimeOffset.Now.ToString("o");report["windows"]=Environment.OSVersion.VersionString;
                 report["process_bitness"]=IntPtr.Size*8;report["virtual_screen"]=SystemInformation.VirtualScreen.ToString();
                 report["selected_window"]=target==null?null:target.ToString();report["fresh_at_export"]=Fresh();report["status"]=lastError;

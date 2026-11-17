@@ -32,6 +32,195 @@ namespace WoWProbe
         static long lastShot;
         static GrindInputGuard input;
         static FarmSession activeSession;
+        static int visualHealth=255,visualPower=255;
+        static OperationsPacket operationsPacket;
+        static OperationObservation lastOperations;
+        static Func<FarmObservation> chatReader;
+        static FarmObservation ChatObservation(){return chatReader==null?Snapshot():chatReader();}
+        internal static OperationObservation ReadOperations(){lock(gate){return lastOperations;}}
+
+        internal static WindowInfo OpenTelemetry()
+        {
+            heartbeat = new Heartbeat(); located = false; input = null;
+            target = FindWowWindow();
+            if (target == null) throw new InvalidOperationException("未找到魔兽世界窗口。");
+            client = Native.ClientBounds(target);
+            if (!LocatePanels(null)) throw new InvalidOperationException("未找到配对的插件色块，请露出游戏左上角色块。");
+            for (int i = 0; i < 6; i++) { Snapshot(); Thread.Sleep(120); }
+            if (!Snapshot().Fresh) throw new InvalidOperationException("插件数据没有持续更新。");
+            return target;
+        }
+
+        internal static FarmObservation ReadTelemetry() { return Snapshot(); }
+        internal static void FocusGameWindow(){var window=FindWowWindow();if(window!=null)Activate(window.Handle);}
+
+        public static int Move(string[] args)
+        {
+            int duration;ushort key;
+            if(args.Length!=3||!Int32.TryParse(args[2],out duration)||duration<40||duration>1500)return 2;
+            switch(args[1]){case "forward":case "jump":key=87;break;case "back":key=83;break;case "left":key=37;break;case "right":key=39;break;default:return 2;}
+            var window=OpenTelemetry();var backend=new WindowsInputBackend(window,null);var o=Snapshot();
+            Activate(window.Handle);
+            input=new GrindInputGuard(backend,Snapshot,()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),new InputFailureLatch(),o.MapId,o.MapMode,o.Zone);
+            try
+            {
+                input.Ensure();
+                if(args[1]=="jump")
+                {
+                    if(backend.IsKeyAlreadyDown(87))throw new InvalidOperationException("用户正在按W。");
+                    try{backend.KeyDown(87);Pulse(backend,32,80);Pause(duration);}finally{backend.KeyUp(87);}
+                }
+                else Pulse(backend,key,duration);
+                return 0;
+            }
+            finally{input=null;}
+        }
+
+        internal static void RunQuick(int seconds, int interval, Func<bool> cancelled, Action<string> report,bool skinning=false)
+        {
+            WindowInfo window = OpenTelemetry();
+            var backend = new WindowsInputBackend(window, report);
+            FarmObservation anchor = Snapshot();
+            var engine = new QuickCombat(anchor, interval,skinning);
+            var safety = new InputFailureLatch();
+            var stream=new QuickTelemetryStream(Snapshot,()=>clock.ElapsedMilliseconds,anchor);
+            chatReader=stream.Read;
+            Func<FarmObservation> read = () => { if(cancelled())throw new InvalidOperationException("用户停止。");return stream.Read(); };
+            Func<GrindInputGuard> guard = () => new GrindInputGuard(backend,read,()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
+            input=guard();
+            string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"runtime");Directory.CreateDirectory(directory);
+            string prefix=Path.Combine(directory,"quick-"+DateTime.Now.ToString("yyyyMMdd-HHmmss"));
+            using(var frames=new StreamWriter(prefix+"-frames.tsv",false,new UTF8Encoding(false)))
+            using(var journal=new StreamWriter(prefix+".log",false,new UTF8Encoding(false)))
+            {
+                Action<string> write=message=>{journal.WriteLine(DateTimeOffset.Now.ToString("HH:mm:ss.fff")+" "+message);journal.Flush();report(message);};
+                frames.WriteLine("time\tsequence\thealth\tcombat\tdead\tghost\ttargetExists\ttargetToken\ttargetName\ttargetDeadKnown\ttargetDead\tattackable\tcastSuccess\tdeathToken\tdeathCount\tx\ty\tkillCreditNameHash\tkillCredits\tlootOpened\tchatOpen\tlootClosed\tskinKnown\tskinnable\tskinSuccess\tcastFailed\tfoodCount");
+                Action<string> shot=label=>{if(!backend.IsTargetForeground())return;try{using(var bitmap=Native.Capture(client))bitmap.Save(prefix+"-"+label+".png",System.Drawing.Imaging.ImageFormat.Png);}catch(Exception ex){write("截图未保存："+ex.Message);}};
+                try
+                {
+                    if(anchor.BagFull)throw new InvalidOperationException("背包已满。");
+                    if(!anchor.ChatOpenKnown||anchor.ChatOpen)throw new InvalidOperationException("请先关闭聊天输入框，并确认新版插件已加载。");
+                    if(skinning&&(!anchor.SkinBindingKnown||!anchor.SkinBindingCorrect))throw new InvalidOperationException("请把当前剥皮技能放在7号技能栏，并确认按键为7；或取消勾选剥皮。");
+                    if(!anchor.PlayerDead&&!anchor.PlayerGhost&&anchor.FoodCount==0)throw new InvalidOperationException("食物键=对应物品数量为0，请补充后再开始。");
+                    write("附近自动打怪：242223开场，之后2，间隔"+interval+"ms。生命="+anchor.Health+"%（"+(anchor.VisualHealth?"原生血条画面":"API")+"）；启动先恢复满血，脱战低于80%吃喝。");
+                    Activate(window.Handle);
+                    for(int i=5;i>0;i--)
+                    {
+                        var ready=read();
+                        if(backend.IsEmergencyPressed()||!ready.Fresh||!ready.KnownCore||ready.ReadFailures!=0||ready.MapId!=anchor.MapId||ready.MapMode!=anchor.MapMode||ready.Zone!=anchor.Zone)throw new InvalidOperationException("倒计时期间急停或状态失效。");
+                        write(i+"秒后开始，保持游戏前台，F12急停。");Thread.Sleep(1000);
+                    }
+                    input.Ensure();
+                    long end=clock.ElapsedMilliseconds+seconds*1000L;int quickScans=0,reportedKills=0,reportedLoots=0,reportedSkins=0,frameSequence=-1,completedKills=0,completedLoots=0,completedSkins=0,recoveries=0;uint picturedToken=0,autoAttackToken=0;
+                    QuickRecovery recovery=null;
+                    long recoveryLoadingUntil=-1;
+                    while(clock.ElapsedMilliseconds<end&&!cancelled())
+                    {
+                        if(recovery!=null&&clock.ElapsedMilliseconds<recoveryLoadingUntil)
+                        {
+                            if(backend.IsEmergencyPressed()||!backend.IsTargetForeground())throw new InvalidOperationException("复活过渡期间急停或失焦。");
+                            bool healthy=false;try{var transition=stream.Read();healthy=transition!=null&&transition.Fresh&&transition.KnownCore&&transition.ReadFailures==0;}catch(InvalidOperationException){}
+                            if(!healthy){Thread.Sleep(80);continue;}input=guard();
+                        }
+                        try{input.Ensure();}
+                        catch(InvalidOperationException ex)
+                        {
+                            if(recovery==null||clock.ElapsedMilliseconds>=recoveryLoadingUntil||backend.IsEmergencyPressed()||!backend.IsTargetForeground()||safety.Faulted||(ex.Message!="CLI observations are unavailable, unknown or stale."&&ex.Message!="屏幕状态已超时。"))throw;
+                            input=guard();Thread.Sleep(80);continue;
+                        }
+                        var observed=read();
+                        if(observed.Sequence!=frameSequence)
+                        {
+                            frameSequence=observed.Sequence;
+                            frames.WriteLine(String.Join("\t",new object[]{DateTimeOffset.Now.ToString("HH:mm:ss.fff"),observed.Sequence,observed.Health,observed.InCombat,observed.PlayerDead,observed.PlayerGhost,observed.TargetExists,observed.TargetToken,observed.TargetName,observed.TargetDeadKnown,observed.TargetDead,observed.TargetCanAttack,observed.CastSuccess,observed.DeathToken,observed.TargetDeaths,observed.X,observed.Y,observed.KillCreditNameHash,observed.KillCredits,observed.LootOpened,observed.ChatOpen,observed.LootClosed,observed.SkinKnown,observed.Skinnable,observed.SkinSuccess,observed.CastFailed,observed.FoodCount}));frames.Flush();
+                            if(observed.TargetExists&&observed.TargetToken!=picturedToken){picturedToken=observed.TargetToken;shot("target-"+picturedToken);write("观察目标："+observed.TargetName+" token="+picturedToken);}
+                        }
+                        if(recovery!=null||observed.PlayerDead||observed.PlayerGhost)
+                        {
+                            if(recovery==null)
+                            {
+                                CancelQuickMovement(backend);shot("death-"+(recoveries+1));
+                                if(++recoveries>3)throw new InvalidOperationException("本轮已复活三次，停止检查装备、补给及怪物强度。");
+                                string recoveryPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-corpse-route.json");
+                                if(!File.Exists(recoveryPath))throw new InvalidOperationException("缺少当前地图的 quick-corpse-route.json 跑尸路线。");
+                                var route=RouteStore.Load(recoveryPath);
+                                recovery=new QuickRecovery(route,new NavigationCalibration{MapId=route.MapId,MapMode=route.MapMode,Zone=route.Zone,Confirmed=true,AxisScale=1.5,FacingSign=-1,TurnRadiansPerSecond=5.85,ForwardUnitsPerSecond=.008},observed);
+                                write("确认死亡/幽魂，开始第"+recoveries+"次跑尸复活。");
+                            }
+                            read();var op=ReadOperations();var rc=recovery.Step(op,clock.ElapsedMilliseconds);
+                            if(rc.Action==QuickRecoveryAction.Stop)throw new InvalidOperationException(rc.Reason);
+                            if(rc.Action==QuickRecoveryAction.Complete)
+                            {completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;engine=new QuickCombat(observed,interval,skinning);autoAttackToken=0;recovery=null;write(rc.Reason);shot("revived-"+recoveries);input=guard();continue;}
+                            if(rc.Action==QuickRecoveryAction.None){Thread.Sleep(60);continue;}
+                            write(rc.Reason);
+                            input=new GrindInputGuard(backend,()=>{var f=read();if(!QuickRecovery.Matches(rc,ReadOperations()))throw new InvalidOperationException("复活动作状态变化。");return f;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
+                            try
+                            {
+                                if(rc.Action==QuickRecoveryAction.Key)Pulse(backend,rc.Key,rc.Hold);
+                                else {var point=new Point(client.X+rc.Region.X+rc.Region.Width/2,client.Y+rc.Region.Y+rc.Region.Height/2);input.Click(point,false,p=>Native.ClientBounds(target)==client&&client.Contains(p),Native.MoveMouse,Native.SendMouseButton);}
+                            }
+                            catch(InvalidOperationException ex)
+                            {if((ex.Message!="复活动作状态变化。"&&ex.Message!="CLI observations are unavailable, unknown or stale."&&ex.Message!="屏幕状态已超时。")||rc.Action!=QuickRecoveryAction.Click||safety.Faulted||backend.IsEmergencyPressed()||!backend.IsTargetForeground())throw;}
+                            input=guard();if(rc.Action==QuickRecoveryAction.Click){recoveryLoadingUntil=clock.ElapsedMilliseconds+8000;Thread.Sleep(80);}else Pause(80);continue;
+                        }
+                        QuickCommand command=engine.Step(observed,clock.ElapsedMilliseconds);
+                        if(completedKills+engine.Kills!=reportedKills){reportedKills=completedKills+engine.Kills;CancelQuickMovement(backend);write("已确认目标死亡，累计击杀="+reportedKills);shot("kill-"+reportedKills);}
+                        if(completedLoots+engine.Loots!=reportedLoots){reportedLoots=completedLoots+engine.Loots;write("已确认拾取窗口完成，累计拾取="+reportedLoots);shot("loot-"+reportedLoots);}
+                        if(completedSkins+engine.Skins!=reportedSkins){reportedSkins=completedSkins+engine.Skins;write("已确认剥皮成功，累计剥皮="+reportedSkins);shot("skin-"+reportedSkins);}
+                        if(command.Action==QuickAction.Stop){write(command.Reason);break;}
+                        if(command.Action==QuickAction.None){if(command.Report)write(command.Reason);Pause(40);continue;}
+                        if(!QuickCombat.Matches(command,read())){CancelQuickMovement(backend);Pause(40);continue;}
+                        write(command.Reason+" 已确认击杀="+(completedKills+engine.Kills));
+                        if(command.Action==QuickAction.Face&&autoAttackToken!=command.Token)
+                        {
+                            input=guard();ChatChecked(backend,"/startattack",()=>{var unit=read();return GrindRecoveryPolicy.CanAttack(unit)&&unit.TargetToken==command.Token;});
+                            autoAttackToken=command.Token;write("已对核验目标开启普通攻击。");
+                        }
+                        input=new GrindInputGuard(backend,()=>{var o=read();if(!QuickCombat.Matches(command,o))throw new InvalidOperationException("目标状态变化，停止当前按键。");return o;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
+                        try
+                        {
+                            if(command.Action==QuickAction.Reacquire||command.Action==QuickAction.CorpseSelect){CancelQuickMovement(backend);Chat(backend,"/targetlasttarget");}
+                            else if(command.Action==QuickAction.Scan)
+                            {
+                                quickScans++;
+                                if(read().InCombat)Chat(backend,"/targetenemy");
+                                else if(anchor.MapId==1432&&quickScans%4==1)Chat(backend,"/targetexact 老黑熊");
+                                else if(anchor.MapId==1432&&quickScans%4==3)Chat(backend,"/targetexact 森林潜伏者");
+                                else Pulse(backend,command.Key,80);
+                            }
+                            else
+                            {
+                                bool detour=command.Action==QuickAction.BackOff||command.Action==QuickAction.DetourTurn||command.Action==QuickAction.DetourForward;
+                                if(detour||command.Action==QuickAction.Food||command.Action==QuickAction.Drink)CancelQuickMovement(backend);
+                                int hold=command.Hold>0?command.Hold:command.Action==QuickAction.Turn?260:command.Action==QuickAction.BackOff?300:command.Action==QuickAction.DetourTurn?220:command.Action==QuickAction.DetourForward?600:80;
+                                Pulse(backend,command.Key,hold);
+                                if(command.Action==QuickAction.Face&&!read().InCombat){write("脱战接近：沿校正朝向短走450ms，再核验目标与位置。");Pulse(backend,87,450);}
+                            }
+                        }
+                        catch(InvalidOperationException ex)
+                        {
+                            if(ex.Message!="目标状态变化，停止当前按键。"||safety.Faulted||backend.IsEmergencyPressed()||!backend.IsTargetForeground())throw;
+                            input=guard();
+                            if(command.Action==QuickAction.Reacquire||command.Action==QuickAction.CorpseSelect||command.Action==QuickAction.Scan)
+                            {var edit=read();if(edit.ChatOpenKnown&&edit.ChatOpen){Pulse(backend,27,60);Pause(250);write("目标在聊天命令期间变化，已关闭本工具打开的输入框，再重新核验。");}}
+                            CancelQuickMovement(backend);
+                        }
+                        input=guard();Pause(40);
+                    }
+                    write("已停止。本轮确认击杀："+(completedKills+engine.Kills)+"；拾取完成："+(completedLoots+engine.Loots)+"；剥皮成功："+(completedSkins+engine.Skins)+"。按键尝试不代表成功。");
+                    shot("stop");
+                }
+                catch(Exception ex){write("停止："+ex.Message);throw;}
+                finally{CancelQuickMovement(backend);stream.Dispose();chatReader=null;input=null;}
+            }
+        }
+
+        static void CancelQuickMovement(IInputBackend backend)
+        {
+            if(!backend.IsTargetForeground()||backend.IsKeyAlreadyDown(87))return;
+            try{var focus=ChatObservation();if(focus.ChatOpenKnown&&focus.ChatOpen)return;}catch{return;}
+            try{backend.KeyDown(87);}finally{backend.KeyUp(87);}
+        }
 
         /// <summary>
         /// Read-only status probe. Locates the addon panels, warms up the heartbeat and
@@ -41,13 +230,13 @@ namespace WoWProbe
         public static int Probe(string[] args)
         {
             try { Console.OutputEncoding = Encoding.UTF8; } catch { }
-            if (args.Length < 2) { Console.WriteLine("usage: WoWProbe.exe probe <route.json>"); return 2; }
+            if (args.Length > 2) { Console.WriteLine("usage: WoWProbe.exe probe [route.json]"); return 2; }
             target = FindWowWindow();
             if (target == null) { Console.WriteLine("未找到魔兽世界窗口。"); return 1; }
             client = Native.ClientBounds(target);
             Console.WriteLine("窗口客户区: " + client + " / " + target);
-            RouteDocument route;
-            try { route = RouteStore.Load(args[1]); }
+            RouteDocument route = null;
+            try { if (args.Length == 2) route = RouteStore.Load(args[1]); }
             catch (Exception ex) { Console.WriteLine("路线加载失败: " + ex.Message); return 1; }
             if (!LocatePanels(route)) { Console.WriteLine("未能定位插件色块（请确认插件已加载且地图与路线一致）。"); return 1; }
             for (int i = 0; i < 12; i++) { Snapshot(); Thread.Sleep(150); }
@@ -64,6 +253,11 @@ namespace WoWProbe
                 " CastingKnown=" + o.CastingKnown + " LootKnown=" + o.LootKnown + " SkinKnown=" + o.SkinKnown);
             Console.WriteLine("TargetIdentityKnown=" + o.TargetIdentityKnown + " NameHashKnown=" + o.NameHashKnown + " AttackabilityKnown=" + o.AttackabilityKnown +
                 " TargetDeadKnown=" + o.TargetDeadKnown + " PortraitKnown=" + o.PortraitKnown + " LootEventsKnown=" + o.LootEventsKnown + " CastEventsKnown=" + o.CastEventsKnown);
+            Console.WriteLine("DeathEventsKnown="+o.DeathEventsKnown+" DeathToken="+o.DeathToken+" TargetDeaths="+o.TargetDeaths+" TargetToken="+o.TargetToken);
+            Console.WriteLine("ChatOpenKnown="+o.ChatOpenKnown+" ChatOpen="+o.ChatOpen);
+            Console.WriteLine("KillCreditsKnown="+o.KillCreditsKnown+" KillCreditNameHash="+o.KillCreditNameHash+" KillCredits="+o.KillCredits);
+            Console.WriteLine("SkinBindingKnown="+o.SkinBindingKnown+" SkinBindingCorrect="+o.SkinBindingCorrect+" FoodCount="+o.FoodCount+" SkinSuccess="+o.SkinSuccess);
+            var operation=ReadOperations();if(operation!=null)Console.WriteLine("OperationsFresh="+operation.Fresh+" CorpseKnown="+operation.CorpseKnown+" Corpse=("+operation.CorpseX+","+operation.CorpseY+") ReleaseKnown="+operation.ReleaseKnown+" ReleaseVisible="+operation.ReleaseVisible+" ResurrectKnown="+operation.ResurrectKnown+" ResurrectVisible="+operation.ResurrectVisible+" Delay="+operation.RecoveryDelayMs);
             return 0;
         }
 
@@ -420,13 +614,16 @@ namespace WoWProbe
             try
             {
                 CheckChatContext(context);
-                Pulse(backend, 0x0D, 50); Pause(180); // open the chat edit box
+                var before=ChatObservation();if(before.ChatOpenKnown&&before.ChatOpen)throw new InvalidOperationException("聊天输入框已经打开，拒绝重复打开。");
+                Pulse(backend, 0x0D, 150); Pause(300); // open the chat edit box
+                var editing=ChatObservation();if(editing.ChatOpenKnown&&!editing.ChatOpen)throw new InvalidOperationException("聊天框未取得焦点，未发送命令文字。");
                 RequireInput().TypeText(text, ch => { CheckChatContext(context); Native.SendChar(ch); });
                 Pause(80);
                 CheckChatContext(context);
-                Pulse(backend, 0x0D, 50); Pause(300); // submit
+                Pulse(backend, 0x0D, 150); Pause(300); // submit
+                var after=ChatObservation();if(after.ChatOpenKnown&&after.ChatOpen)throw new InvalidOperationException("聊天命令未关闭输入框，停止。");
             }
-            catch (Exception ex) { Log("聊天输入失败: " + ex.Message); throw; }
+            catch (Exception ex) { try{var edit=ChatObservation();if(edit.ChatOpenKnown&&edit.ChatOpen&&!backend.IsEmergencyPressed()&&backend.IsTargetForeground())Pulse(backend,27,80);}catch{}Log("聊天输入失败: " + ex.Message); throw; }
         }
 
         // Turn the character toward a world point using the live calibration mapping.
@@ -510,6 +707,8 @@ namespace WoWProbe
             // WP1 panel anchors near UIParent TOPLEFT (8,-8) with 1 UI unit = 1 physical pixel.
             // The physical cell size depends on the operator's pick, so sweep plausible sizes
             // and offsets, requiring a fully decodable packet that matches the route's map/zone.
+            Rectangle search = new Rectangle(client.X, client.Y, Math.Min(client.Width, 48 + 68 * 14), Math.Min(client.Height, 48 + 12 * 14));
+            using (var image = Native.Capture(search))
             for (int cs = 14; cs >= 5; cs--)
                 for (int dy = 0; dy <= 48; dy += 2)
                     for (int dx = 0; dx <= 48; dx += 2)
@@ -520,17 +719,20 @@ namespace WoWProbe
                             Rectangle region = Native.CaptureGeometry(c, cs, client);
                             Rectangle wide = new Rectangle(region.X, region.Y, 68 * cs, region.Height);
                             if (!client.Contains(wide)) continue;
-                            using (var image = Native.Capture(wide))
                             {
-                                var bytes = PixelCodec.Decode(image, cs / 2, cs / 2, cs);
+                                int cx = dx + cs / 2, cy = dy + cs / 2;
+                                var bytes = PixelCodec.Decode(image, cx, cy, cs);
                                 ProbePacket p;
                                 try { p = ProbePacket.Decode(bytes); } catch { continue; }
-                                if (p.InterfaceVersion == 0 || p.MapId != route.MapId || p.MapMode != route.MapMode ||
-                                    !String.Equals(p.Zone, route.Zone, StringComparison.Ordinal)) continue;
+                                int margin=Math.Max(1,cs/2-1);
+                                if(!bytes.SequenceEqual(PixelCodec.Decode(image,cx-margin,cy-margin,cs))||
+                                   !bytes.SequenceEqual(PixelCodec.Decode(image,cx+margin,cy+margin,cs)))continue;
+                                if (p.InterfaceVersion == 0 || route != null && (p.MapId != route.MapId || p.MapMode != route.MapMode ||
+                                    !String.Equals(p.Zone, route.Zone, StringComparison.Ordinal))) continue;
                                 CombatPacket extra = null;
                                 try
                                 {
-                                    var raw = PixelCodec.Decode(image, 34 * cs + cs / 2, cs / 2, cs);
+                                    var raw = PixelCodec.Decode(image, dx + 34 * cs + cs / 2, cy, cs);
                                     var cand = CombatPacket.Decode(raw);
                                     if (cand.Sequence == p.Sequence) extra = cand;
                                 }
@@ -553,7 +755,7 @@ namespace WoWProbe
             try
             {
                 Rectangle region = Native.CaptureGeometry(firstCenter, cell, client);
-                Rectangle wide = new Rectangle(region.X, region.Y, 68 * cell, region.Height);
+                Rectangle wide = new Rectangle(region.X, region.Y, 100 * cell, Math.Max(region.Height,20*cell));
                 if (!client.Contains(wide)) wide = region;
                 long moment = clock.ElapsedMilliseconds;
                 using (var image = Native.Capture(wide))
@@ -561,6 +763,7 @@ namespace WoWProbe
                     var bytes = PixelCodec.Decode(image, cell / 2, cell / 2, cell);
                     var parsed = ProbePacket.Decode(bytes);
                     CombatPacket extra = null;
+                    OperationsPacket ops=null;
                     if (image.Width >= 68 * cell)
                     {
                         try
@@ -571,19 +774,26 @@ namespace WoWProbe
                         }
                         catch (FormatException) { } catch (ArgumentException) { }
                     }
+                    if(image.Width>=100*cell)
+                    {try{var candidate=OperationsPacket.Decode(PixelCodec.Decode(image,68*cell+cell/2,cell/2,cell));if(candidate.Sequence==parsed.Sequence)ops=candidate;}catch(FormatException){}catch(ArgumentException){}}
                     heartbeat.Observe(parsed, moment);
-                    packet = parsed; combatPacket = extra; capturedAt = moment;
+                    packet = parsed; combatPacket = extra;operationsPacket=ops; capturedAt = moment;
+                    visualHealth=VisualVitals.Read(image,cell,0);visualPower=VisualVitals.Read(image,cell,1);
                 }
             }
             catch (Exception)
             {
-                heartbeat.Invalidate(); packet = null; combatPacket = null; capturedAt = -1;
+                heartbeat.Invalidate(); packet = null; combatPacket = null;operationsPacket=null; capturedAt = -1;visualHealth=visualPower=255;
             }
             lock (gate)
             {
                 bool fresh = located && capturedAt >= 0 && clock.ElapsedMilliseconds >= capturedAt &&
                     unchecked((ulong)(clock.ElapsedMilliseconds - capturedAt)) < 900UL && heartbeat.IsFresh(clock.ElapsedMilliseconds);
-                return FarmObservation.FromPackets(packet, combatPacket, fresh);
+                var o=FarmObservation.FromPackets(packet, combatPacket, fresh);
+                if(o.Health==255&&visualHealth!=255){o.Health=visualHealth;o.VisualHealth=true;}
+                if(o.Power==255&&visualPower!=255){o.Power=visualPower;o.VisualPower=true;}
+                lastOperations=OperationObservation.FromPackets(packet,combatPacket,operationsPacket,fresh);lastOperations.Farm=o;
+                return o;
             }
         }
 

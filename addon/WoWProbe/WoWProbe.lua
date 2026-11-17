@@ -319,7 +319,11 @@ function P.BuildPacket()
         if not exists then knownFlags = knownFlags + 16; return result end
         flags = flags + 8
         local targetDead, knownDead = boolean("UnitIsDead", UnitIsDead, "target")
-        if targetDead then flags = flags + 16 end
+        if targetDead then
+            flags = flags + 16
+            local good,guid=pcall(UnitGUID,"target")
+            if good and P.RecordTargetDeath then P.RecordTargetDeath(P.HashUTF8(guid)) end
+        end
         if knownDead then knownFlags = knownFlags + 16 else failed(2) end
         local h, restricted = readPercent("UnitHealth", UnitHealth, UnitHealthMax, "target")
         if h ~= nil then result.health = h elseif not restricted then failed(2) end
@@ -453,7 +457,21 @@ local function skinName()
     if ok and completeString(name) then return name end
 end
 local function skinState()
-    if not completeString(UNIT_SKINNABLE) then return nil end
+    local label=completeString(UNIT_SKINNABLE_LEATHER) and UNIT_SKINNABLE_LEATHER or UNIT_SKINNABLE
+    if not completeString(label) then return nil end
+    if type(C_TooltipInfo)=="table" and type(C_TooltipInfo.GetUnit)=="function" then
+        local ok,data=pcall(C_TooltipInfo.GetUnit,"target")
+        if not ok or type(data)~="table" or type(data.lines)~="table" or #data.lines==0 then return nil end
+        for _,line in ipairs(data.lines) do
+            local text=line.leftText
+            if text~=nil and type(text)~="string" then return nil end
+            if text then
+                text=string.gsub(string.gsub(text,"|c%x%x%x%x%x%x%x%x",""),"|r","")
+                if text==label or string.find(text,label,1,true)==1 then return true end
+            end
+        end
+        return false
+    end
     local tip=P.skinTooltip
     if not tip then
         local ok,frame=call("Create skin tooltip",CreateFrame,"GameTooltip","WoWProbeSkinTooltip",UIParent,"GameTooltipTemplate")
@@ -474,7 +492,7 @@ local function skinState()
         if not line or type(line.GetText)~="function" then tip:Hide();return nil end
         local text=line:GetText()
         if text~=nil and type(text)~="string" then tip:Hide();return nil end
-        if text==UNIT_SKINNABLE then found=true end
+        if text==label then found=true end
     end
     tip:Hide();return found
 end
@@ -518,6 +536,7 @@ function P.BuildCombatPacket(core)
             local ok,value=call("UnitGUID",UnitGUID,"target")
             if ok then return value,P.HashUTF8(value) end
         end)
+        P.trackedTargetToken=token
         if token then caps=caps+1;u32(8,token) end
         local nameHash=section("fullName",function()
             local ok,name=call("UnitName (full)",UnitName,"target")
@@ -580,12 +599,44 @@ function P.BuildCombatPacket(core)
     if known~=0 then caps=caps+128 end
     put(17,known);put(18,ready);put(19,usable)
     local events=P.eventRegistration or {};local counters=P.counters
+    if events.UNIT_FLAGS and events.UNIT_HEALTH then
+        extra=extra+32;u32(57,P.lastDeathToken or 0);u32(61,P.targetDeaths or 0)
+    end
     if events.LOOT_OPENED and events.LOOT_CLOSED then extra=extra+8;u32(24,counters.lootOpened);u32(28,counters.lootClosed) end
     if events.UNIT_SPELLCAST_SUCCEEDED and events.UNIT_SPELLCAST_FAILED and events.UNIT_SPELLCAST_INTERRUPTED then
         extra=extra+16;u32(32,counters.castSuccess);u32(36,counters.castFailed)
     end
     local localized=section("skinName",skinName)
     if events.UNIT_SPELLCAST_SUCCEEDED and localized then extra=extra+2;u32(40,counters.skinSuccess) end
+    if type(ChatEdit_GetActiveWindow)=="function" or ChatFrame1EditBox then
+        local ok,open=pcall(function()
+            local edit=type(ChatEdit_GetActiveWindow)=="function" and ChatEdit_GetActiveWindow() or nil
+            if edit and edit:IsShown() and edit:HasFocus() then return true end
+            for i=1,NUM_CHAT_WINDOWS or 10 do
+                local candidate=_G["ChatFrame"..i.."EditBox"]
+                if candidate and candidate:IsShown() and candidate:HasFocus() then return true end
+            end
+            return false
+        end)
+        if ok and type(open)=="boolean" then put(65,open and 3 or 1) end
+    end
+    if events.CHAT_MSG_COMBAT_XP_GAIN and type(COMBATLOG_XPGAIN_FIRSTPERSON)=="string" then
+        u32(66,P.killCreditNameHash or 0);u32(70,P.killCredits or 0);put(74,1)
+    end
+    section("quickBindings",function()
+        local ok,kind,id=call("GetActionInfo(7)",GetActionInfo,7)
+        local keyOK,key=call("GetBindingKey(ACTIONBUTTON7)",GetBindingKey,"ACTIONBUTTON7")
+        if ok and keyOK then
+            local spellOK,name=call("Skin action spell name",type(C_Spell)=="table" and C_Spell.GetSpellName or GetSpellInfo,id)
+            local correct=kind=="spell" and spellOK and name==localized and key=="7"
+            put(75,correct and 3 or 1)
+        end
+        local itemOK,itemKind,item=call("GetActionInfo(12)",GetActionInfo,12)
+        if itemOK and itemKind=="item" then
+            local countOK,count=call("Food item count",type(C_Item)=="table" and C_Item.GetItemCount or GetItemCount,item)
+            if countOK and integer(count,U16-1) then put(76,1);u16(77,count) end
+        elseif itemOK then put(76,1);u16(77,0) end
+    end)
     put(6,caps);put(7,flags);put(56,extra)
     local a,b=0,0;for i=1,126 do a=(a+p[i])%255;b=(b+a)%255 end;put(126,a);put(127,b)
     WoWProbeDB.lastCombatPacket={sequence=p[5]+p[6]*256,capabilities=caps,flags=flags,extraKnown=extra,
@@ -672,6 +723,26 @@ local function createPanel()
     local texture=reference:CreateTexture(nil,"ARTWORK");texture:SetWidth(64);texture:SetHeight(64)
     texture:SetPoint("TOPLEFT",reference,"TOPLEFT",0,0);P.portraitTexture=texture;reference:Hide()
     if P.CreateOperationsPanel then P.CreateOperationsPanel() end
+    -- Native StatusBars can render restricted values without Lua inspecting or
+    -- doing arithmetic on them. These optional gauges are visual observations;
+    -- WP1 keeps its original unknown value and capability bits.
+    P.vitalBars={}
+    for i=1,2 do
+        local bar=CreateFrame("StatusBar",nil,panel)
+        if type(bar.SetMinMaxValues)=="function" and type(bar.SetValue)=="function" then
+            bar:SetPoint("TOPLEFT",panel,"TOPLEFT",2,-(120+(i-1)*18))
+            bar:SetWidth(200);bar:SetHeight(10);bar:SetFrameStrata("TOOLTIP");bar:EnableMouse(false)
+            bar:SetStatusBarTexture("Interface\\Buttons\\WHITE8X8")
+            bar:SetStatusBarColor(i==1 and 0 or 0,i==1 and 1 or 0,i==1 and 0 or 1,1)
+            local bg=bar:CreateTexture(nil,"BACKGROUND");bg:SetAllPoints(bar);bg:SetColorTexture(.125,.125,.125,1)
+            for side=0,1 do
+                local marker=bar:CreateTexture(nil,"OVERLAY");marker:SetWidth(2);marker:SetHeight(10)
+                marker:SetPoint("TOPLEFT",bar,"TOPLEFT",side==0 and -2 or 200,0)
+                marker:SetColorTexture(side==0 and 1 or 0,side==0 and 0 or 1,1,1)
+            end
+            P.vitalBars[i]=bar
+        end
+    end
     local ready = P.ScalePanel()
     if WoWProbeDB.visible == false or not ready then panel:Hide() else panel:Show() end
     if WoWProbeDB.visible == false or not ready then combat:Hide() else combat:Show() end
@@ -693,6 +764,15 @@ function P.RenderPacket(packet, cells)
 end
 local function update()
     if not P.rendererReady and not P.ScalePanel() then return false end
+    if P.vitalBars then
+        for i,bar in pairs(P.vitalBars) do
+            local good=pcall(function()
+                if i==1 then bar:SetMinMaxValues(0,UnitHealthMax("player"));bar:SetValue(UnitHealth("player"))
+                else bar:SetMinMaxValues(0,UnitPowerMax("player"));bar:SetValue(UnitPower("player")) end
+            end)
+            if good and WoWProbeDB.visible~=false then bar:Show() else bar:Hide() end
+        end
+    end
     local ok, packet = pcall(P.BuildPacket)
     if ok then
         local rendered, reason = pcall(P.RenderPacket, packet)
@@ -744,7 +824,7 @@ local function printLine(text)
 end
 function P.ResetDiagnostics()
     local visible = type(WoWProbeDB) == "table" and WoWProbeDB.visible ~= false
-    WoWProbeDB = { schema = 1, addonVersion = "0.5.1", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
+    WoWProbeDB = { schema = 1, addonVersion = "0.5.2", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
     readClient(); captureBindings(); captureAPIs(); if P.panel then P.ScalePanel() end
 end
 function P.Command(command)
@@ -882,7 +962,7 @@ function P.Initialize()
     WoWProbeDB = old; WoWProbeDB.visible = visible
     if integer(old.rangeSlot,4) and old.rangeSlot>=1 then P.rangeSlot=old.rangeSlot end
     WoWProbeDB.previousSession = previous
-    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.1"
+    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.2"
     WoWProbeDB.errors, WoWProbeDB.bindings, WoWProbeDB.capabilities = {}, {}, {}
     readClient(); captureBindings(); captureAPIs()
     local ok, reason = pcall(createPanel)
@@ -890,12 +970,44 @@ function P.Initialize()
     P.initialized = true
     update()
 end
+function P.RecordTargetDeath(token)
+    if token and token~=0 and token~=P.lastDeathToken then
+        P.lastDeathToken=token;P.targetDeaths=((P.targetDeaths or 0)+1)%U32
+        if P.targetDeaths==0 then P.targetDeaths=1 end
+    end
+end
+function P.RecordKillCredit(message)
+    if type(message)~="string" then return end
+    WoWProbeDB.lastCombatXPMessage=message
+    local format=COMBATLOG_XPGAIN_FIRSTPERSON
+    if type(format)~="string" then return end
+    local a,b=string.find(format,"%%s")
+    if not a then return end
+    local separator=string.match(string.sub(format,b+1),"^(.-)%%d")
+    if not separator or separator=="" then return end
+    local function escape(value)return (string.gsub(value,"([%(%)%.%%%+%-%*%?%[%]%^%$])","%%%1")) end
+    local name=string.match(message,"^"..escape(string.sub(format,1,a-1)).."(.-)"..escape(separator).."%d")
+    if not name or name=="" then return end
+    P.killCreditNameHash=P.HashUTF8(name);P.killCredits=((P.killCredits or 0)+1)%U32
+    if P.killCredits==0 then P.killCredits=1 end
+end
 function P.OnEvent(_, event, ...)
     if event == "ADDON_LOADED" then
         if (...) == "WoWProbe" then P.Initialize() end
         return
     end
     if not P.initialized then return end
+    if event=="CHAT_MSG_COMBAT_XP_GAIN" then P.RecordKillCredit((...)) end
+    if event=="UNIT_FLAGS" or event=="UNIT_HEALTH" then
+        local unit=(...)
+        local ok,dead=pcall(UnitIsDead,unit)
+        local safe,value=pcall(function()return ok and dead==true end)
+        if safe and value then
+            local good,guid=pcall(UnitGUID,unit)
+            local hashed=good and P.HashUTF8(guid)
+            if hashed and (unit=="target" or hashed==P.trackedTargetToken) then P.RecordTargetDeath(hashed) end
+        end
+    end
     if P.OperationsEvent then P.OperationsEvent(event,...) end
     if event == "MERCHANT_SHOW" then P.merchantOpen, P.merchantKnown = true, true
     elseif event == "MERCHANT_CLOSED" then P.merchantOpen, P.merchantKnown = false, true
@@ -937,7 +1049,7 @@ local driver = CreateFrame("Frame")
 P.driver = driver
 driver:SetScript("OnEvent", function(...) local ok, reason = pcall(P.OnEvent, ...); if not ok then errorRecord("event", reason) end end)
 driver:SetScript("OnUpdate", P.Tick)
-for _, event in ipairs({"ADDON_LOADED", "PLAYER_ENTERING_WORLD", "PLAYER_LOGOUT", "UPDATE_BINDINGS", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "MERCHANT_SHOW", "MERCHANT_CLOSED", "LOOT_OPENED", "LOOT_CLOSED", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED", "BAG_UPDATE", "ITEM_LOCK_CHANGED"}) do
+for _, event in ipairs({"ADDON_LOADED", "PLAYER_ENTERING_WORLD", "PLAYER_LOGOUT", "UPDATE_BINDINGS", "UI_SCALE_CHANGED", "DISPLAY_SIZE_CHANGED", "MERCHANT_SHOW", "MERCHANT_CLOSED", "LOOT_OPENED", "LOOT_CLOSED", "UI_ERROR_MESSAGE", "UNIT_SPELLCAST_SUCCEEDED", "UNIT_SPELLCAST_FAILED", "UNIT_SPELLCAST_INTERRUPTED", "BAG_UPDATE", "ITEM_LOCK_CHANGED", "UNIT_FLAGS", "UNIT_HEALTH", "CHAT_MSG_COMBAT_XP_GAIN"}) do
     local ok, reason = pcall(driver.RegisterEvent, driver, event)
     P.eventRegistration = P.eventRegistration or {}; P.eventRegistration[event] = ok
     if not ok then P.registrationErrors = P.registrationErrors or {}; P.registrationErrors[event] = tostring(reason) end

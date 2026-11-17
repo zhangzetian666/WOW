@@ -34,19 +34,27 @@ local function rectangle(frame,r)
 end
 local function popupState(r)
     local result={known=false}
-    if type(StaticPopupDialogs)~="table" or not integer(STATICPOPUP_NUMDIALOGS,10) or STATICPOPUP_NUMDIALOGS<1 then return result end
+    if type(StaticPopupDialogs)~="table" then return result end
+    local frames={}
+    if integer(STATICPOPUP_NUMDIALOGS,10) and STATICPOPUP_NUMDIALOGS>=1 then
+        for i=1,STATICPOPUP_NUMDIALOGS do local frame=_G["StaticPopup"..i];if not frame then return result end;frames[#frames+1]=frame end
+    elseif type(StaticPopup_ForEachShownDialog)=="function" then
+        local ok=pcall(StaticPopup_ForEachShownDialog,function(frame) frames[#frames+1]=frame end)
+        if not ok or #frames>10 then return result end
+    else return result end
     result.releaseKnown=type(StaticPopupDialogs.DEATH)=="table"
     result.resurrectKnown=type(StaticPopupDialogs.RECOVER_CORPSE)=="table"
     result.releaseVisible,result.releaseEnabled,result.resurrectVisible,result.resurrectEnabled=false,false,false,false
     result.confirmation,result.incoming=false,false
-    for i=1,STATICPOPUP_NUMDIALOGS do
-        local frame=_G["StaticPopup"..i];local visible=shown(frame)
+    for i,frame in ipairs(frames) do
+        local visible=shown(frame)
         if visible==nil then return {known=false} end
         if visible then
             local which=frame.which
             if type(which)~="string" then return {known=false} end
             if which=="DEATH" or which=="RECOVER_CORPSE" then
-                local button=frame.button1 or _G["StaticPopup"..i.."Button1"]
+                local getter=attempt(frame.GetButton1,frame)
+                local button=getter and getter[1] or frame.button1 or _G["StaticPopup"..i.."Button1"]
                 local on=shown(button);local e=button and attempt(button.IsEnabled,button);local enabled,enabledKnown=false,false
                 if e then enabled,enabledKnown=truth(e[1]) end
                 local rect=on and rectangle(button,r)

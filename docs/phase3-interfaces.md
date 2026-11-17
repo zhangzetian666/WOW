@@ -26,11 +26,22 @@ C#5、命名空间WoWProbe。已有WP1保持不变。新代码只消费明确能
 |40..43|skin_success计数u32，按本地化剥皮名称识别，不能用任意施法代替|
 |44..47|target_name_hash，完整UnitName UTF8 djb2 u32，与显示名称是否截断无关|
 |48..55|目标头像client相对物理像素x,y,width,height u16，仅参考图保存|
-|56|extra_known：头像1、skin事件2、完整名称哈希4、loot事件8、cast事件16|
-|57..125|保留0|
+|56|extra_known：头像1、skin事件2、完整名称哈希4、loot事件8、cast事件16、死亡事件32|
+|57..60|最后确认死亡NPC的token u32；没有事件为0|
+|61..64|去重目标死亡事件计数u32；未声明死亡事件能力时两项均为0|
+|65|聊天输入框：known位1、focused位2；0未知、1已知关闭、3已知打开|
+|66..69|最后第一人称战斗经验消息怪物完整名称哈希u32|
+|70..73|第一人称战斗经验击杀消息计数u32；只接受客户端原生格式|
+|74|经验击杀消息能力known：0/1；未知时哈希及计数为0|
+|75|7号剥皮绑定：known位1、correct位2；核对技能本地化名称及7按键|
+|76|12号食物槽物品数量known：0/1|
+|77..78|食物数量u16，known时0表示耗尽；未知时字段0，上层FoodCount=-1|
+|79..125|保留0|
 |126..127|Fletcher16，同WP1|
 
 Codec拒绝未知true位、非法范围、未声明却非零的字段、动作mask不一致、保留字节和校验错误。坐标不能通过旧GetPlayerMapPosition("target")的猜测取得；可检测C_Map同map目标坐标，API不支持就unknown。射程使用所选动作条IsActionInRange。动作条冷却与可用性采用当前页面的真实槽位，缺API不假称ready。剥皮可检测目标tooltip的本地化可剥皮标记；无法读取时unknown，不以野兽类型猜测。事件参数按客户端差异保守处理。
+
+0.7.2附近入口需配套0.5.2插件。Forever血量API不可直接算百分比时，WP1原值仍为255；仅附近入口在同次截图读取插件原生StatusBar的绿色/蓝色填充，明确标注VisualHealth/VisualPower，不改写原始协议能力。参考200px宽血条位于WP1相对物理坐标y120及138，定位标记和连续填充不合法时上层仍未知。剥皮优先读取C_TooltipInfo目标提示，使用UNIT_SKINNABLE_LEATHER，旧客户端回退UNIT_SKINNABLE及隐藏GameTooltip。
 
 CombatPacket.Decode(byte[])->CombatPacket，属性：Sequence,Capabilities,Flags,RangeSlot,KnownActionsMask,ReadyActionsMask,UsableActionsMask,ExtraKnownFlags(int)；TargetToken,TargetNameHash,CastEndMilliseconds,LootOpened,LootClosed,CastSuccess,CastFailed,SkinSuccess(uint)；TargetX/TargetY(double NaN未知)；Portrait(Rectangle)。
 

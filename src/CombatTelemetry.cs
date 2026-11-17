@@ -22,6 +22,15 @@ namespace WoWProbe
         public uint CastSuccess { get; private set; }
         public uint CastFailed { get; private set; }
         public uint SkinSuccess { get; private set; }
+        public uint DeathToken { get; private set; }
+        public uint TargetDeaths { get; private set; }
+        public bool ChatOpenKnown { get; private set; }
+        public bool ChatOpen { get; private set; }
+        public bool KillCreditsKnown { get; private set; }
+        public uint KillCreditNameHash { get; private set; }
+        public uint KillCredits { get; private set; }
+        public bool SkinBindingKnown {get;private set;}public bool SkinBindingCorrect {get;private set;}
+        public int FoodCount {get;private set;}
         public double TargetX { get; private set; }
         public double TargetY { get; private set; }
         public Rectangle Portrait { get; private set; }
@@ -34,9 +43,15 @@ namespace WoWProbe
             if(b[0]!=87 || b[1]!=67 || b[2]!=51 || b[3]!=1) throw Invalid("Unsupported WC3 signature or version.");
             int a=0,s=0;for(int i=0;i<126;i++){a=(a+b[i])%255;s=(s+a)%255;}
             if(b[126]!=a || b[127]!=s)throw Invalid("WC3 Fletcher16 checksum mismatch.");
-            for(int i=57;i<126;i++)if(b[i]!=0)throw Invalid("WC3 reserved bytes must be zero.");
+            for(int i=79;i<126;i++)if(b[i]!=0)throw Invalid("WC3 reserved bytes must be zero.");
+            if(b[75]>3||b[75]==2||b[76]>1||b[76]==0&&U16(b,77)!=0||b[76]==1&&U16(b,77)==65535)throw Invalid("WC3 optional action setup is inconsistent.");
+            uint creditName=U32(b,66),credits=U32(b,70);
+            if(b[74]>1||b[74]==0&&(creditName!=0||credits!=0)||(creditName==0)!=(credits==0))throw Invalid("WC3 kill credit evidence is inconsistent.");
+            if((b[65]&~3)!=0||b[65]==2)throw Invalid("WC3 chat focus flags are inconsistent.");
             int c=b[6], f=b[7], k=b[56];
-            if((f&128)!=0 || (k&~31)!=0 || b[16]<1 || b[16]>4)throw Invalid("Invalid WC3 flags or range slot.");
+            if((f&128)!=0 || (k&~63)!=0 || b[16]<1 || b[16]>4)throw Invalid("Invalid WC3 flags or range slot.");
+            uint deathToken=U32(b,57),deaths=U32(b,61);
+            if((k&32)==0&&(deathToken!=0||deaths!=0)||(deathToken==0)!=(deaths==0))throw Invalid("WC3 death evidence is inconsistent.");
             Flag(c,2,f,3);Flag(c,4,f,4);Flag(c,16,f,8);Flag(c,32,f,16);Flag(c,64,f,96);
             uint token=U32(b,8), name=U32(b,44), end=U32(b,20);
             Match(c,1,token!=0,"target identity");Match(k,4,name!=0,"full target name hash");
@@ -55,7 +70,7 @@ namespace WoWProbe
                 throw Invalid("WC3 portrait capability disagrees with client pixel rectangle.");
             return new CombatPacket { Sequence=U16(b,4),Capabilities=c,Flags=f,RangeSlot=b[16],KnownActionsMask=known,
                 ReadyActionsMask=ready,UsableActionsMask=usable,ExtraKnownFlags=k,TargetToken=token,TargetNameHash=name,
-                CastEndMilliseconds=end,LootOpened=opened,LootClosed=closed,CastSuccess=success,CastFailed=failed,SkinSuccess=skin,
+                CastEndMilliseconds=end,LootOpened=opened,LootClosed=closed,CastSuccess=success,CastFailed=failed,SkinSuccess=skin,DeathToken=deathToken,TargetDeaths=deaths,ChatOpenKnown=(b[65]&1)!=0,ChatOpen=(b[65]&2)!=0,KillCreditsKnown=b[74]==1,KillCreditNameHash=creditName,KillCredits=credits,SkinBindingKnown=(b[75]&1)!=0,SkinBindingCorrect=(b[75]&2)!=0,FoodCount=b[76]==1?U16(b,77):-1,
                 TargetX=x==65535?Double.NaN:x/65534.0,TargetY=y==65535?Double.NaN:y/65534.0,
                 Portrait=(k&1)!=0?new Rectangle(px,py,pw,ph):Rectangle.Empty };
         }
@@ -70,15 +85,15 @@ namespace WoWProbe
     public sealed class FarmObservation
     {
         public int Sequence,ReadFailures,Health=255,Power=255,PowerType=255,TargetHealth=255,MapMode,RangeSlot,
-            KnownActionsMask,ReadyActionsMask,UsableActionsMask;
-        public uint MapId,TargetToken,TargetNameHash,LootOpened,LootClosed,CastSuccess,CastFailed,SkinSuccess;
+            KnownActionsMask,ReadyActionsMask,UsableActionsMask,FoodCount=-1;
+        public uint MapId,TargetToken,TargetNameHash,LootOpened,LootClosed,CastSuccess,CastFailed,SkinSuccess,DeathToken,TargetDeaths,KillCreditNameHash,KillCredits;
         public string Zone="",TargetName="";
         public double X=Double.NaN,Y=Double.NaN,Facing=Double.NaN,TargetX=Double.NaN,TargetY=Double.NaN;
         public Rectangle Portrait;
         public bool Fresh,KnownCore,PlayerDead,PlayerGhost,InCombat,BagFull,TargetExists,TargetDeadKnown,TargetDead,
             TargetIdentityKnown,NameHashKnown,AttackabilityKnown,TargetCanAttack,TargetIsPlayer,RangeKnown,TargetInRange,
             TargetPositionKnown,LootKnown,Lootable,SkinKnown,Skinnable,CastingKnown,Casting,Channeling,ActionsKnown,
-            LootEventsKnown,CastEventsKnown,SkinSuccessKnown,PortraitKnown;
+            LootEventsKnown,CastEventsKnown,SkinSuccessKnown,PortraitKnown,VisualHealth,VisualPower,DeathEventsKnown,ChatOpenKnown,ChatOpen,KillCreditsKnown,SkinBindingKnown,SkinBindingCorrect;
 
         public static FarmObservation FromPackets(ProbePacket core,CombatPacket extra,bool fresh)
         {
@@ -102,6 +117,10 @@ namespace WoWProbe
             o.ActionsKnown=(c&128)!=0;o.KnownActionsMask=extra.KnownActionsMask;o.ReadyActionsMask=extra.ReadyActionsMask;o.UsableActionsMask=extra.UsableActionsMask;
             o.LootEventsKnown=(k&8)!=0;o.CastEventsKnown=(k&16)!=0;o.SkinSuccessKnown=(k&2)!=0;
             o.LootOpened=extra.LootOpened;o.LootClosed=extra.LootClosed;o.CastSuccess=extra.CastSuccess;o.CastFailed=extra.CastFailed;o.SkinSuccess=extra.SkinSuccess;
+            o.DeathEventsKnown=(k&32)!=0;o.DeathToken=extra.DeathToken;o.TargetDeaths=extra.TargetDeaths;
+            o.ChatOpenKnown=extra.ChatOpenKnown;o.ChatOpen=extra.ChatOpen;
+            o.KillCreditsKnown=extra.KillCreditsKnown;o.KillCreditNameHash=extra.KillCreditNameHash;o.KillCredits=extra.KillCredits;
+            o.SkinBindingKnown=extra.SkinBindingKnown;o.SkinBindingCorrect=extra.SkinBindingCorrect;o.FoodCount=extra.FoodCount;
             if(!o.TargetExists)return o;
             o.TargetIdentityKnown=(c&1)!=0;o.TargetToken=extra.TargetToken;o.NameHashKnown=(k&4)!=0;o.TargetNameHash=extra.TargetNameHash;
             o.AttackabilityKnown=(c&2)!=0;o.TargetCanAttack=o.AttackabilityKnown && (f&1)!=0;o.TargetIsPlayer=o.AttackabilityKnown && (f&2)!=0;

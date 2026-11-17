@@ -718,6 +718,65 @@ test("WO4 physical rendering shares sequence and never overlaps portrait",functi
     WoWProbeOperationsCoreFixture=a;WoWProbeOperationsCombatFixture=b;WoWProbeOperationsTestFixture=c
 end)
 
+test("latched target death survives clearing without duplicate death counts",function()
+    local env=combatEnvironment();local wp=load(env)
+    env.UnitIsDead=function()return true end
+    wp.OnEvent(nil,"UNIT_FLAGS","target")
+    local token=wp.HashUTF8(env.UnitGUID())
+    local p=wp.BuildCombatPacket(wp.BuildPacket());eq(dword(p,57),token);eq(dword(p,61),1)
+    wp.OnEvent(nil,"UNIT_HEALTH","target");eq(wp.targetDeaths,1)
+    env.UnitExists=function()return false end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(dword(p,57),token);eq(dword(p,61),1)
+end)
+
+test("modern popup enumeration and GetButton1 expose only actual shown buttons",function()
+    local env=operationsEnvironment();env.STATICPOPUP_NUMDIALOGS=nil
+    local button=env.StaticPopup1Button1;button:Show()
+    env.StaticPopup1:Show();env.StaticPopup1.which="DEATH"
+    env.StaticPopup1.GetButton1=function() return button end
+    env.StaticPopup1Button1=nil
+    env.StaticPopup_ForEachShownDialog=function(callback) callback(env.StaticPopup1) end
+    local wp=load(env);local p=wp.BuildOperationsPacket(wp.BuildPacket())
+    eq(has(word(p,6),1),true);eq(has(word(p,8),1),true);eq(word(p,10),200)
+    env.StaticPopup_ForEachShownDialog=function() end
+    p=wp.BuildOperationsPacket(wp.BuildPacket());eq(has(word(p,8),1),false)
+end)
+test("nameplate death evidence matches only the tracked target identity",function()
+    local env=combatEnvironment();local wp=load(env);wp.BuildCombatPacket(wp.BuildPacket())
+    local guid=env.UnitGUID("target");env.UnitIsDead=function()return true end
+    env.UnitGUID=function(unit) return unit=="nameplate1" and guid or "Other-unit" end
+    wp.OnEvent(nil,"UNIT_HEALTH","nameplate2");eq(wp.targetDeaths,nil)
+    wp.OnEvent(nil,"UNIT_HEALTH","nameplate1");eq(wp.targetDeaths,1)
+end)
+test("chat focus distinguishes the persistent visible edit box from actual typing",function()
+    local env=combatEnvironment();local edit={IsShown=function()return true end,HasFocus=function()return true end}
+    env.ChatEdit_GetActiveWindow=function()return nil end;env.ChatFrame1EditBox=edit
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[66],3)
+    edit.HasFocus=function()return false end;p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[66],1)
+end)
+test("localized first person XP messages preserve actual kill credit name and count",function()
+    local env=combatEnvironment();env.COMBATLOG_XPGAIN_FIRSTPERSON="%s dies, you gain %d experience."
+    local wp=load(env);wp.OnEvent(nil,"CHAT_MSG_COMBAT_XP_GAIN","Forest Lurker dies, you gain 100 experience.")
+    local p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[75],1);eq(dword(p,66),wp.HashUTF8("Forest Lurker"));eq(dword(p,70),1)
+    wp.OnEvent(nil,"CHAT_MSG_COMBAT_XP_GAIN","You gain 200 experience.");eq(wp.killCredits,1)
+    env.COMBATLOG_XPGAIN_FIRSTPERSON="%s死亡，你获得%d点经验值。"
+    wp.OnEvent(nil,"CHAT_MSG_COMBAT_XP_GAIN","森林潜伏者死亡，你获得80点经验值。")
+    eq(wp.killCreditNameHash,wp.HashUTF8("森林潜伏者"));eq(wp.killCredits,2)
+end)
+test("modern corpse tooltip current rank skin binding and food count are independent evidence",function()
+    local env=combatEnvironment();env.UNIT_SKINNABLE=nil;env.UNIT_SKINNABLE_LEATHER="Skinnable"
+    env.GetActionInfo=function(slot) if slot==7 then return "spell",8617 elseif slot==12 then return "item",2287 end end
+    env.GetBindingKey=function()return "7" end
+    env.C_Spell={GetSpellName=function()return "Skinning" end}
+    env.C_Item={GetItemCount=function()return 4 end}
+    env.C_TooltipInfo={GetUnit=function()return {lines={{leftText="Target"},{leftText="Skinnable"}}} end}
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket())
+    eq(p[76],3);eq(p[77],1);eq(word(p,77),4);eq(has(p[7],32),true);eq(has(p[8],16),true)
+    env.GetBindingKey=function()return "8" end;env.C_Item.GetItemCount=function()return 0 end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[76],1);eq(word(p,77),0)
+    env.C_TooltipInfo.GetUnit=function()return {lines={{leftText={}}}} end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],32),false)
+end)
 for _, t in ipairs(tests) do
     local ok, message = pcall(t[2])
     if ok then passed = passed + 1; print("PASS " .. t[1])

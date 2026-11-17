@@ -41,6 +41,12 @@ foreach ($testName in @('CampaignSettingsTests','RecoveryWorkflowTests','VendorW
     & "$bin\$testName.exe"
     if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
 }
+foreach ($testName in @('QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','VisualVitalsTests')) {
+    & $compiler @common /target:exe "/out:$bin\$testName.exe" @domainSources "$projectRoot\tests\$testName.cs"
+    if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
+    & "$bin\$testName.exe"
+    if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
+}
 & $compiler @common /target:winexe /main:WoWProbe.Smoke "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\IntegrationTests.exe" @sources "$projectRoot\tests\Smoke.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Integration test compilation failed.' }
 & $compiler @common /target:winexe /main:RouteUiTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\RouteUiTests.exe" @sources "$projectRoot\tests\RouteUiTests.cs"
@@ -62,15 +68,18 @@ if ($LASTEXITCODE -ne 0) { throw 'Fishing parent freshness test compilation fail
 & "$bin\FishingFreshnessTests.exe"
 if ($LASTEXITCODE -ne 0) { throw 'Fishing source freshness tests failed.' }
 Copy-Item -LiteralPath "$projectRoot\assets" -Destination $bin -Recurse -Force
+Copy-Item -LiteralPath "$projectRoot\quick-corpse-route.json" -Destination $bin -Force
 & $compiler @common /target:winexe /main:FishingUiTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\FishingUiTests.exe" @sources "$projectRoot\tests\FishingFixtures.cs" "$projectRoot\tests\FishingUiTests.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Fishing UI test compilation failed.' }
 Write-Output "BUILD_OK $bin\WoWProbe.exe"
 if ($Package) {
     $dist = Join-Path $projectRoot 'dist'
-    $releaseName = 'WoWProbe-Complete-0.7.1'
+    $releaseName = 'WoWProbe-Complete-0.7.2'
     $release = Join-Path $dist $releaseName
     New-Item -ItemType Directory -Path $release -Force | Out-Null
     Copy-Item -LiteralPath "$bin\WoWProbe.exe" -Destination $release -Force
+    Copy-Item -LiteralPath "$projectRoot\启动自动打怪.cmd" -Destination $release -Force
+    Copy-Item -LiteralPath "$projectRoot\quick-corpse-route.json" -Destination $release -Force
     Copy-Item -LiteralPath "$projectRoot\README.md" -Destination $release -Force
     Copy-Item -LiteralPath "$projectRoot\AGENTS.md" -Destination $release -Force
     Copy-Item -LiteralPath "$projectRoot\README.md" -Destination "$release\使用说明.txt" -Force
