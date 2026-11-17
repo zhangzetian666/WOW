@@ -5,8 +5,9 @@ namespace WoWProbe
     public sealed class QuickCorpse
     {
         readonly uint token;readonly bool skinning;long started;readonly string targetName;
-        uint opened,closed,skinBase,failedBase;long lootAt,skinAt,skinSelectAt;bool selected,lootIssued,skinIssued,skinSelected;
+        uint opened,closed,skinBase,failedBase;long lootAt,skinAt;bool selected,lootIssued,skinIssued,skinSelected;
         readonly bool approach;bool approached;
+        long selectionAt;int selectionAttempts;
         long combatSince=-1;int lastHealth;
         public bool Interrupted {get;private set;}
         public bool Done {get;private set;}
@@ -20,7 +21,14 @@ namespace WoWProbe
         QuickCommand C(QuickAction action,string reason,ushort key){return new QuickCommand{Action=action,Token=token,Reason=reason,Key=key,SelectName=action==QuickAction.CorpseSelect&&resumed?targetName:null};}
         bool resumed;
         public void Resume(FarmObservation o,long now)
-        {Interrupted=false;resumed=true;started=now;combatSince=-1;lastHealth=o.Health;opened=o.LootOpened;closed=o.LootClosed;selected=lootIssued=skinIssued=skinSelected=approached=false;}
+        {Interrupted=false;resumed=true;started=now;combatSince=-1;lastHealth=o.Health;opened=o.LootOpened;closed=o.LootClosed;selected=lootIssued=skinIssued=skinSelected=approached=false;selectionAttempts=0;}
+        QuickCommand Select(long now,bool skin)
+        {
+            if(selectionAttempts==0){selectionAt=now;selectionAttempts=resumed?2:1;return C(QuickAction.CorpseSelect,skin?"拾取完成后重选同一尸体，核对剥皮条件。":"重选上一目标，核对已击杀尸体后再拾取。",0);}
+            if(selectionAttempts==1&&now-selectionAt>=1000&&!String.IsNullOrWhiteSpace(targetName)){selectionAttempts=2;selectionAt=now;var c=C(QuickAction.CorpseSelect,"上一目标重选未成功，按完整名字重选并核对原尸体身份。",0);c.SelectName=targetName;return c;}
+            if(now-selectionAt>=3000)return Finish(skin?"拾取已确认，但无法重选原尸体；不计剥皮成功。":"无法重新取得原尸体，跳过拾取/剥皮，不冒充成功。");
+            return C(QuickAction.None,"等待原尸体重新选中，不继续寻怪。",0);
+        }
         QuickCommand Finish(string reason){Done=true;var c=C(QuickAction.None,reason,0);c.Report=true;return c;}
         public QuickCommand Step(FarmObservation o,long now)
         {
@@ -58,13 +66,9 @@ namespace WoWProbe
                 if(lootConfirmed&&!skinning)return Finish("拾取窗口开关事件已确认；尸体目标已清除，继续下一只。");
                 if(lootConfirmed&&skinning)
                 {
-                    if(!skinSelected){skinSelected=true;skinSelectAt=now;return C(QuickAction.CorpseSelect,"拾取完成后重选同一尸体，核对剥皮条件。",0);}
-                    if(now-skinSelectAt>=2500)return Finish("拾取已确认，但无法重选同一尸体；不计剥皮成功。");
-                    return C(QuickAction.None,"等待拾取后的尸体身份。",0);
+                    if(!skinSelected){skinSelected=true;selectionAttempts=0;}return Select(now,true);
                 }
-                if(!selected){selected=true;return C(QuickAction.CorpseSelect,"重选上一目标，核对已击杀尸体后再拾取。",0);}
-                if(now-started>=3000)return Finish("无法重新取得同一尸体，跳过拾取/剥皮，不冒充成功。");
-                return C(QuickAction.None,"等待同一尸体重新出现。",0);
+                if(!selected){selected=true;selectionAttempts=0;}return Select(now,false);
             }
             if(o.Casting||o.Channeling)return C(QuickAction.None,"等待当前施法结束。",0);
             bool empty=o.LootKnown&&!o.Lootable;

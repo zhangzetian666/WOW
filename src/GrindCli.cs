@@ -220,7 +220,8 @@ namespace WoWProbe
                             input=guard();ChatChecked(backend,"/startattack",()=>{var unit=read();return GrindRecoveryPolicy.CanAttack(unit)&&unit.TargetToken==command.Token;});
                             autoAttackToken=command.Token;write("已对核验目标开启普通攻击。");
                         }
-                        input=new GrindInputGuard(backend,()=>{var o=read();if(!QuickCombat.Matches(command,o))throw new InvalidOperationException("目标状态变化，停止当前按键。");return o;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
+                        bool commandUsesChat=command.Action==QuickAction.CorpseSelect||command.Action==QuickAction.Reacquire||command.Action==QuickAction.ReturnToRoute||command.Action==QuickAction.Scan&&observed.InCombat;
+                        input=new GrindInputGuard(backend,()=>{var o=read();if(!(commandUsesChat?QuickCombat.MatchesChatCommand(command,o):QuickCombat.Matches(command,o)))throw new InvalidOperationException("目标状态变化，停止当前按键。");return o;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
                         try
                         {
                             if(command.Action==QuickAction.ReturnToRoute){CancelQuickMovement(backend);ChatChecked(backend,"/stopattack",()=>!read().InCombat);}
@@ -664,7 +665,7 @@ namespace WoWProbe
         { ChatChecked(backend, text, null); }
         static void CheckChatContext(Func<bool> context)
         { RequireInput().Ensure(); if(context!=null&&!context())throw new InvalidOperationException("CLI chat target context changed."); }
-        static void ChatChecked(WindowsInputBackend backend, string text, Func<bool> context)
+        static void ChatChecked(WindowsInputBackend backend, string text, Func<bool> context,Action<char> sender=null)
         {
             try
             {
@@ -672,7 +673,7 @@ namespace WoWProbe
                 var before=ChatObservation();if(before.ChatOpenKnown&&before.ChatOpen)throw new InvalidOperationException("聊天输入框已经打开，拒绝重复打开。");
                 Pulse(backend, 0x0D, 150); Pause(300); // open the chat edit box
                 var editing=ChatObservation();if(editing.ChatOpenKnown&&!editing.ChatOpen)throw new InvalidOperationException("聊天框未取得焦点，未发送命令文字。");
-                RequireInput().TypeText(text, ch => { CheckChatContext(context); Native.SendChar(ch); });
+                foreach(char ch in text){CheckChatContext(context);RequireInput().TypeText(ch.ToString(),c=>{if(sender!=null)sender(c);else Native.SendChar(c);});}
                 Pause(80);
                 CheckChatContext(context);
                 Pulse(backend, 0x0D, 150); Pause(300); // submit

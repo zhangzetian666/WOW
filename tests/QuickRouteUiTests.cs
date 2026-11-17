@@ -11,7 +11,7 @@ class QuickRouteUiTests
         try
         {
             Native.SetProcessDPIAware();Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
-            string recording=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output","recording-test.json");
+            string recording=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output","recording-"+Guid.NewGuid()+".json");
             var observation=new FarmObservation{Fresh=true,KnownCore=true,MapId=42,MapMode=2,Zone="SIMULATION",X=.5,Y=.5};
             using(var recorder=new QuickRouteEditor(()=>observation,recording))
             {

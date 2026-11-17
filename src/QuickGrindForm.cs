@@ -16,7 +16,7 @@ namespace WoWProbe
         volatile bool cancelled;bool closeWhenStopped;Thread worker;
         public QuickGrindForm(bool autoStart)
         {
-            Text="固定路线自动打怪 · 盗贼";Size=new Size(1080,820);MinimumSize=new Size(960,700);Font=new Font("Microsoft YaHei UI",10);StartPosition=FormStartPosition.CenterScreen;
+            Text="固定路线自动打怪 · 拾取修复版 0.7.4";Size=new Size(1080,820);MinimumSize=new Size(960,700);Font=new Font("Microsoft YaHei UI",10);StartPosition=FormStartPosition.CenterScreen;
             var layout=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=4,ColumnCount=1,Padding=new Padding(12)};
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute,70));layout.RowStyles.Add(new RowStyle(SizeType.Percent,70));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,44));layout.RowStyles.Add(new RowStyle(SizeType.Percent,30));Controls.Add(layout);
             layout.Controls.Add(new Label{Text="配置闭合路线后点击开始，自动前往最近巡航点接入；发现附近怪物可离线接近打怪。\n无怪继续下一点；受到攻击优先还击。242223后持续2；低于80%吃食物后返回路线。\n保持游戏前台，F12急停。每轮最多10分钟；跑尸另配路线，不自动修理或售卖。",Dock=DockStyle.Fill},0,0);

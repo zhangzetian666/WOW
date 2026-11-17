@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace WoWProbe
 {
-    public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach }
+    public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin }
     public sealed class QuickCommand
     {
         public QuickAction Action; public ushort Key; public uint Token,IgnoredTarget; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement;public QuickRouteFollower RouteContext;
@@ -83,7 +83,7 @@ namespace WoWProbe
                 }
                 initialRest=false;
             }
-            if(o.Casting||o.Channeling)return Cmd(QuickAction.None,"等待当前施法。",0);
+            if((o.Casting||o.Channeling)&&!(o.InCombat&&looted&&corpse!=null))return Cmd(QuickAction.None,"等待当前施法。",0);
             if(token==0&&!o.InCombat&&deferredCorpses.Count>0)
             {var pending=deferredCorpses.Pop();token=pending.Token;corpse=pending.Corpse;creditedLoots=pending.Loots;creditedSkins=pending.Skins;looted=true;corpse.Resume(o,now);return AdvanceCorpse(o,now);}
             if(token==0&&CanInspectCorpse(o)&&o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken!=0&&!o.TargetIsPlayer&&o.TargetDeadKnown&&o.TargetDead&&o.SkinKnown&&o.Skinnable&&!inspectedCorpses.Contains(o.TargetToken)&&(route==null||route.TargetAllowed(o)))
@@ -215,15 +215,21 @@ namespace WoWProbe
             {
                 if(deferredCorpses.Count>=8)return Stop("待处理尸体超过8具，停止检查持续攻击来源。");
                 deferredCorpses.Push(new DeferredCorpse{Token=token,Corpse=corpse,Loots=creditedLoots,Skins=creditedSkins});token=0;corpse=null;looted=false;c.Report=true;
+                if(o.Casting||o.Channeling){c.Action=QuickAction.InterruptSkin;c.Key=27;c.Reason="剥皮期间受到攻击：取消本次施法，先处理攻击者。";}
             }
             else if(corpse.Done){token=0;corpse=null;nextScan=now;if(route!=null)route.BeginNearbySearch(o,now);}
             c.RouteContext=route;return c;
         }
         public static bool Matches(QuickCommand c,FarmObservation o)
+        {return Matches(c,o,false);}
+        public static bool MatchesChatCommand(QuickCommand c,FarmObservation o)
+        {return c!=null&&(c.Action==QuickAction.CorpseSelect||c.Action==QuickAction.Reacquire||c.Action==QuickAction.Scan||c.Action==QuickAction.ReturnToRoute)&&o!=null&&o.ChatOpenKnown&&Matches(c,o,true);}
+        static bool Matches(QuickCommand c,FarmObservation o,bool ownedChat)
         {
             if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||o.PlayerDead||o.PlayerGhost)return false;
             if(c.RouteContext!=null&&!c.RouteContext.CanOperate(o))return false;
-            if(o.ChatOpenKnown&&o.ChatOpen)return false;
+            if(!ownedChat&&o.ChatOpenKnown&&o.ChatOpen)return false;
+            if(c.Action==QuickAction.InterruptSkin)return o.InCombat&&(o.Casting||o.Channeling);
             if(c.RouteMovement)return !o.InCombat&&!(CanAcquire(o)&&c.RouteContext.MayAcquire(o)&&o.TargetToken!=c.IgnoredTarget);
             if(c.Action==QuickAction.ReturnToRoute)return c.RouteContext!=null&&c.RouteContext.Returning&&!o.InCombat;
             if(c.Action==QuickAction.RouteProbe)return c.RouteContext!=null&&!c.RouteContext.Returning&&!o.InCombat&&CanAcquire(o)&&o.TargetToken==c.Token&&!o.TargetPositionKnown;
@@ -231,7 +237,7 @@ namespace WoWProbe
             if(c.Action==QuickAction.Scan)return true;
             if(c.Action==QuickAction.CorpseSelect)return !o.InCombat;
             if(c.Action==QuickAction.Reacquire)return !o.TargetExists||o.TargetIdentityKnown&&o.TargetToken==c.Token&&!o.TargetIsPlayer;
-            if(o.ChatOpenKnown&&o.ChatOpen)return false;
+            if(!ownedChat&&o.ChatOpenKnown&&o.ChatOpen)return false;
             if(c.Action==QuickAction.Patrol)return !o.InCombat&&!CanAcquire(o);
             if(c.Action==QuickAction.Turn)return !o.InCombat&&!CanAcquire(o);
             if(c.Action==QuickAction.Food||c.Action==QuickAction.Drink)return !o.InCombat;
