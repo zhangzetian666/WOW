@@ -17,7 +17,13 @@ class MouseLookTests
         }
         events.Clear();try{MouseLookInput.Run(20,0,()=>{},()=>true,()=>events.Add("down"),()=>events.Add("up"),(a,b)=>{},ms=>{});throw new Exception("Expected held-button rejection.");}catch(InvalidOperationException){}
         if(events.Count!=0)throw new Exception("User's button changed.");
+        double facing=1;int keys=0;
+        if(!MouseLookInput.TurnWithFallback(()=>facing,()=>facing+=.4,()=>keys++)||keys!=0)throw new Exception("Working mouse turn unexpectedly used the keyboard.");
+        if(!MouseLookInput.TurnWithFallback(()=>facing,()=>{},()=>{keys++;facing+=.4;})||keys!=1)throw new Exception("Ignored mouse turn did not use verified keyboard fallback.");
+        if(MouseLookInput.TurnWithFallback(()=>facing,()=>{},()=>keys++)||keys!=2)throw new Exception("Two ignored controls were accepted as a turn.");
+        try{MouseLookInput.TurnWithFallback(()=>facing,()=>{throw new InvalidOperationException();},()=>keys++);throw new Exception("Expected aborted mouse input.");}catch(InvalidOperationException){}
+        if(keys!=2)throw new Exception("Failed mouse safety check triggered another input.");
         try{MouseLookInput.Run(161,0,()=>{throw new Exception("Input started before validation.");},()=>false,()=>{},()=>{},(a,b)=>{},ms=>{});throw new Exception("Expected bounds rejection.");}catch(ArgumentOutOfRangeException){}
-        Console.WriteLine("Mouse look tests: relative displacement, owned-button cleanup on 3 failures, held-user-button rejection and bounds passed. No native input.");return 0;
+        Console.WriteLine("Mouse look tests: relative displacement, owned-button cleanup, held-user-button rejection, bounds and observed keyboard fallback passed. No native input.");return 0;
     }
 }

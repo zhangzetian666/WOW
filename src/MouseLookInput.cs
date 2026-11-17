@@ -5,6 +5,11 @@ namespace WoWProbe
     // a user's held button, and always releases our button after any failure.
     public static class MouseLookInput
     {
+        public static bool TurnWithFallback(Func<double> facing,Action mouse,Action keyboard)
+        {
+            double before=facing();mouse();if(TurnObserved(before,facing()))return true;
+            keyboard();return TurnObserved(before,facing());
+        }
         public static bool TurnObserved(double before,double after)
         {
             if(Double.IsNaN(before)||Double.IsNaN(after)||Double.IsInfinity(before)||Double.IsInfinity(after))return false;

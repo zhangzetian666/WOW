@@ -143,7 +143,7 @@ namespace WoWProbe
                     }
                     else write("跑尸按实际死亡点导航，不要求另行录制墓地路线。");
                     if(recoveryRoute!=null)write("旧跑尸路线作为可选已知路段；最终前往本轮实际死亡点，不与灵魂医者交互。");
-                    write(plan.Vendor.Enabled?"包满自动前往售卖NPC，确认空位恢复后返回；不自动修理。":"未启用售卖NPC；包满将停止，请在自动售卖页填写商人坐标。");
+                    write(plan.Vendor.Enabled?"包满自动前往售卖NPC，确认空位恢复后返回；修理按独立设置执行。":"未启用售卖NPC；包满将停止，请在自动售卖页填写商人坐标。");
                     write("技能设置：开场="+plan.OpeningKeys+"，循环="+plan.LoopKeys+"，间隔="+interval+"ms。生命="+anchor.Health+"%（"+(anchor.VisualHealth?"原生血条画面":"API")+"）；启动先恢复满血，脱战低于"+plan.RestBelowPercent+"%吃喝。");
                     Activate(window.Handle);
                     for(int i=5;i>0;i--)
@@ -265,8 +265,11 @@ namespace WoWProbe
                             }
                             else if(command.Action==QuickAction.DetourTurn||command.MouseTurn)
                             {
-                                CancelQuickMovement(backend);var before=read();RightMouseLook(backend,command.Key==39?120:-120,0);Pause(200);var after=read();
-                                write("右键转向观测："+before.Facing.ToString("F4")+" → "+after.Facing.ToString("F4")+"；确认角色转向后才前进。");
+                                CancelQuickMovement(backend);var before=read();
+                                bool turned=MouseLookInput.TurnWithFallback(()=>read().Facing,
+                                    ()=>{RightMouseLook(backend,command.Key==39?120:-120,0);Pause(200);},
+                                    ()=>{write("右键拖动未改变实际朝向，改用方向键转向并重新验证。");Pulse(backend,command.Key,350);Pause(200);});
+                                var after=read();write("脱困转向观测："+before.Facing.ToString("F4")+" → "+after.Facing.ToString("F4")+"；实际转向="+turned+"，确认后才前进。");
                             }
                             else
                             {
