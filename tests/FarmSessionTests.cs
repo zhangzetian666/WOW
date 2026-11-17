@@ -138,6 +138,33 @@ class FarmSessionTests
         Run("strict pending skills reject unreadable target health",delegate{
             var f=new Fake();var s=New(f);observation.TargetHealth=255;s.Start(Route(),Profile(),false,false,0);Until(s,delegate{return !s.IsActive;});Check(!f.Downs.Exists(Attack));
         });
+        Run("forty millisecond blind sessions cannot starve skills behind closing pulses",delegate{
+            var f=new Fake();var s=New(f);var p=Profile();p.BlindGrind=true;p.SkillSequence="2";
+            observation.Health=observation.Power=observation.TargetHealth=255;observation.PowerType=255;
+            observation.TargetPositionKnown=false;observation.RangeKnown=true;observation.TargetInRange=false;
+            s.Start(Route(),p,false,false,0);
+            for(now=5000;now<=9600&&s.IsActive;now+=40){observation.Sequence++;s.Tick();}
+            int skills=f.Downs.FindAll(k=>k==0x32).Count;
+            if(skills<3)throw new Exception("Expected at least three skill attempts during closing, got "+skills);
+            Check(s.IsActive&&f.Downs.Contains(p.Movement.Forward)&&!f.Downs.Contains(0x31));
+            s.Stop("done");Check(f.Ups==f.Downs.Count);
+        });
+        Run("rogue opening and builder reach the keyboard at both requested cadences",delegate{
+            foreach(int interval in new[]{500,750}){
+                var f=new Fake();var s=New(f);var p=Profile();p.BlindGrind=true;p.SkillOpeningSequence="242223";p.SkillSequence="2";p.SkillIntervalMs=interval;
+                observation.Health=observation.Power=observation.TargetHealth=255;observation.PowerType=255;
+                observation.TargetPositionKnown=false;observation.RangeKnown=true;observation.TargetInRange=false;
+                var keys=new List<ushort>();var times=new List<long>();
+                f.Callback=delegate(string point){if(point=="down"&&Attack(f.Downs[f.Downs.Count-1])){keys.Add(f.Downs[f.Downs.Count-1]);times.Add(now);}};
+                s.Start(Route(),p,false,false,0);
+                for(now=5000;now<=15000&&s.IsActive;now+=40){observation.Sequence++;s.Tick();}
+                ushort[] expected={0x32,0x34,0x32,0x32,0x32,0x33,0x32,0x32,0x32};
+                if(keys.Count<expected.Length)throw new Exception("Rotation starved at "+interval+"ms: "+keys.Count+" attempts");
+                for(int i=0;i<expected.Length;i++)Check(keys[i]==expected[i]);
+                for(int i=1;i<times.Count;i++){long gap=times[i]-times[i-1];if(gap<interval||gap>interval+80)throw new Exception("Movement delayed "+interval+"ms rotation to "+gap+"ms");}
+                Check(!keys.Contains(0x31)&&s.IsActive);s.Stop("done");Check(f.Ups==f.Downs.Count);
+            }
+        });
         Console.WriteLine("Farm session tests: "+passed+" passed, "+failed+" failed. Fake backend only.");return failed==0?0:1;
     }
 }

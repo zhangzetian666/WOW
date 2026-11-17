@@ -27,7 +27,7 @@ namespace WoWProbe
         private readonly RouteDocument route;
         private Phase phase;
         private bool hasTime, hasSequence, scanScheduled, skillIssued, combatClock, healIssued, manaIssued, skinIssued, approachingAnchor;
-        private int sequence, scans, skillIndex, unavailable, deathFrames, lootAttempts, targetHealth;
+        private int sequence, scans, skillIndex, openingIndex, unavailable, deathFrames, lootAttempts, targetHealth;
         private long lastNow, navNow, stateStarted, nextScan, nextSkill, encounterStarted, lastEvidence, skinIssuedAt, pendingForwardAt, approachForwardMs, nextBlindAdvance;
         // Blind combat progress. Live 01:55 found the real reason for zero kills: all 104 skill
         // pulses were slot 1, which is the plain "Attack" toggle (spell 6603) on this rogue.
@@ -154,7 +154,7 @@ namespace WoWProbe
         {
             LockedTargetToken = o.TargetToken; lockedHash = target.NameHash; encounterStarted = now;
             lootOpenBase = o.LootOpened; lootCloseBase = o.LootClosed; deathFrames = 0; lootAttempts = 0;
-            skillIndex = unavailable = 0; skillIssued = false; combatClock = false;
+            skillIndex = openingIndex = unavailable = 0; skillIssued = false; combatClock = false;
             targetHealth = o.TargetHealth; castSuccess = o.CastSuccess; lastEvidence = now; nextSkill = now;
             lastDamagedHealth = o.TargetHealth; lastDamageAt = now; blindRetries = 0; nextBlindAdvance = now + 600;
             meleeReached = false; meleeReachedAt = now; nextBlindTurn = now + 1800;
@@ -286,8 +286,17 @@ namespace WoWProbe
             // Distance-driven chase. While out of range sweep and advance at a high duty cycle;
             // FarmSession rejects any pulse outside 60..250ms, so raise the duty cycle by
             // shortening the gap, never by lengthening an individual keypress.
-            if (Blind && !o.TargetPositionKnown && now >= nextBlindAdvance)
+            // A due skill gets a turn before another closing pulse. A 250ms movement
+            // scheduled every 250ms otherwise wins on every real session replan after
+            // its held key is released, starving skills for the whole closing phase.
+            bool skillDue = !skillIssued || now >= nextSkill;
+            if (Blind && !o.TargetPositionKnown && now >= nextBlindAdvance && !skillDue)
             {
+                // Leave time for release and a fresh-frame replan before the next skill.
+                // Otherwise a 250ms pulse begun just before a 500ms skill deadline
+                // turns the requested cadence into roughly 800ms on the 40ms CLI loop.
+                long movementBudget = nextSkill - now - 80;
+                if (movementBudget < 60) return None("Reserving the next skill deadline before another movement pulse.");
                 // Live 02:23: 52 consecutive forward pulses walked the rogue away from a mob
                 // that was already hitting it. Auto-attack and Sinister Strike both need a
                 // facing target, so a permanently moving back never landed a blow. Close hard
@@ -296,43 +305,48 @@ namespace WoWProbe
                 if (now >= nextBlindTurn)
                 {
                     nextBlindTurn = now + (closing ? 4500 : 2500);
-                    return Command(FarmAction.TurnRight, closing ? 100 : 250,
+                    return Command(FarmAction.TurnRight, (int)Math.Min(closing ? 100 : 250, movementBudget),
                         closing ? "Blind combat: sweeping while closing the gap." : "Blind combat: turning to face the mob that closed on us.", false, false);
                 }
                 nextBlindAdvance = now + (closing ? 250 : 900);
-                return Command(FarmAction.Forward, closing ? 250 : 200,
+                return Command(FarmAction.Forward, (int)Math.Min(closing ? 250 : 200, movementBudget),
                     closing ? "Blind combat closing pulse." : "Blind combat hold-and-swing pulse.", true, false);
             }
             if (skillIssued && now < nextSkill) return None("Waiting for the configured skill interval.");
-            int slot = profile.SkillSequence[skillIndex] - '1';
-            if (slot < 0 || slot > 3) slot = 0;
+            int slot = -1; string skillPart = "repeat";
+            for (int checkedKeys = 0; checkedKeys < profile.SkillOpeningSequence.Length + profile.SkillSequence.Length; checkedKeys++)
+            {
+                bool opening = openingIndex < profile.SkillOpeningSequence.Length;
+                int candidate;
+                if (opening) candidate = profile.SkillOpeningSequence[openingIndex++] - '1';
+                else { candidate = profile.SkillSequence[skillIndex] - '1'; skillIndex = (skillIndex + 1) % profile.SkillSequence.Length; }
+                if (Blind && candidate == 0) continue;
+                slot = candidate; skillPart = opening ? "opening" : "repeat"; break;
+            }
+            if (slot < 0) return Fail("Blind skill rotation contains only the Attack toggle; configure damaging skill keys 2 through 4.");
             int mask = 1 << slot;
-            skillIndex = (skillIndex + 1) % profile.SkillSequence.Length;
             // Keep the rotation at its configured cadence. Slowing it while "far" produced
             // only 7 swings in 35s on a client whose 10yd distance bit never turns true.
             skillIssued = true; nextSkill = now + profile.SkillIntervalMs;
-            // Slot 1 on this character is the plain "Attack" toggle (spell 6603). All 104 live
-            // skill pulses landed there, dealing zero damage while switching auto-attack off.
-            // /startattack (issued on lock) owns auto-attack; never press this slot again.
-            if (Blind && slot == 0) return None("Slot 1 is the Attack toggle; auto-attack is preserved instead.");
+            // Blind slot 1 is the verified character's Attack toggle. Skip it without
+            // charging an interval; /startattack separately maintains auto-attack.
             if (!o.ActionsKnown || (o.KnownActionsMask & mask) == 0 || (o.ReadyActionsMask & mask) == 0 || (o.UsableActionsMask & mask) == 0)
             {
                 if (Blind)
                 {
-                    // IsUsableAction reports only slot 1 while the rogue sits below 45 energy,
-                    // and on Forever clients the masks can be secret altogether. Press the
-                    // configured damaging skill anyway: skill_interval_ms is long enough for
-                    // energy to regenerate, and an uncastable keypress is harmless.
+                    // The configured blind policy permits attempts without usable-action
+                    // telemetry. A sent key is not proof the client accepted the spell;
+                    // retain the operator's interval and never invent energy or cast success.
                     unavailable = 0;
                     return Command((FarmAction)((int)FarmAction.Skill1 + slot), 120,
-                        "Blind swing: damaging slot " + (slot + 1) + " despite secret/negative usability.", true, false);
+                        "Blind " + skillPart + " skill attempt: key " + (slot + 1) + " despite unavailable usability evidence.", true, false);
                 }
                 unavailable++;
                 if (unavailable >= 3) return Fail("Three consecutive skill checks had no known, ready and usable action.");
                 return None("Configured skill is unknown, cooling down or unusable; no input sent.");
             }
             unavailable = 0;
-            return Command((FarmAction)((int)FarmAction.Skill1 + slot), 120, "Using a known, ready and usable skill against the locked live target.", true, false);
+            return Command((FarmAction)((int)FarmAction.Skill1 + slot), 120, "Sending " + skillPart + " skill key " + (slot + 1) + " with known, ready and usable action evidence.", true, false);
         }
         // Give up on a mob we cannot damage and resume the patrol. Stopping the whole session
         // here would end the run; the abandoned hash prevents an immediate re-lock of the same mob.

@@ -108,7 +108,7 @@ namespace WoWProbe
                     if(next.Action==FarmAction.None){status="WaitingForFrame";reason=next.Reason;return;}
                     if(next.HoldMilliseconds<60||next.HoldMilliseconds>250)throw new InvalidOperationException("Unbounded farming pulse rejected.");
                     ushort selected=Key(next.Action,profile.Movement);
-                    WriteLog("Farm pulse "+next.Action+" "+next.HoldMilliseconds+"ms token="+next.ExpectedTargetToken);
+                    WriteLog("Farm pulse "+next.Action+" "+next.HoldMilliseconds+"ms token="+next.ExpectedTargetToken+"; "+next.Reason);
                     if(!Continue(ticket))return;
                     FarmObservation latest=reader();if(!Continue(ticket))return;
                     problem=LiveProblem(latest)??TargetProblem(latest,next,true,expectedHash,profile);

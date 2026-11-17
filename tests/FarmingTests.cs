@@ -59,6 +59,11 @@ internal static class FarmingTests
         Run("strict farming rejects unknown vitals and invalid resource types", StrictUnknownVitals);
         Run("blind farming explicitly tolerates unreadable vitals", BlindUnknownVitals);
         Run("blind rest does not describe unreadable vitals as observed recovery", BlindUnknownRest);
+        Run("blind skipped Attack toggles do not consume skill intervals", BlindSkipToggleCadence);
+        Run("blind Attack-only rotation stops with an actionable reason", BlindAttackOnlyRefused);
+        Run("rogue opening executes once then repeats only the builder", RogueOpeningOnce);
+        Run("new verified target restarts the opening but same-target approach does not", OpeningTargetReset);
+        Run("confirmed target death preempts unfinished opening keys", OpeningDeathStops);
         Console.WriteLine("Farming tests: {0} passed, {1} failed. Synthetic observations only; no OS input.", passed, failed);
         return failed == 0 ? 0 : 1;
     }
@@ -457,6 +462,48 @@ internal static class FarmingTests
             Check(c.HoldMilliseconds >= 60 && c.HoldMilliseconds <= 250,
                 "blind pulse outside bounded input window: " + c.Action + " " + c.HoldMilliseconds + "ms");
         }
+    }
+    private static void RogueOpeningOnce()
+    {
+        var p=Profile();p.SkillOpeningSequence="242223";p.SkillSequence="2";p.SkillIntervalMs=750;
+        var o=Monster(true);var e=Locked(p,o);
+        FarmAction[] expected={FarmAction.Skill2,FarmAction.Skill4,FarmAction.Skill2,FarmAction.Skill2,FarmAction.Skill2,FarmAction.Skill3,FarmAction.Skill2,FarmAction.Skill2,FarmAction.Skill2};
+        for(int i=0;i<expected.Length;i++)
+        {
+            long at=200+i*750;Equal(expected[i],Next(e,o,at).Action,"configured opening and builder step "+i);
+            Equal(FarmAction.None,Next(e,o,at+749).Action,"no early opening or builder retry");
+        }
+    }
+    private static void OpeningTargetReset()
+    {
+        var p=Profile();p.SkillOpeningSequence="24";p.SkillSequence="2";p.SkillIntervalMs=750;
+        var o=Monster(true);var e=Locked(p,o);Equal(FarmAction.Skill2,Next(e,o,200).Action,"initial builder");
+        o.TargetInRange=false;Next(e,o,950);o.TargetInRange=true;Next(e,o,1000);
+        Equal(FarmAction.Skill4,Next(e,o,1100).Action,"same-target range transition retains opening progress");
+        p.BlindGrind=true;o=Monster(true);e=Locked(p,o);Next(e,o,200);Next(e,o,950);
+        o.TargetToken=78;Next(e,o,1000);
+        Equal(FarmAction.Skill2,Next(e,o,1100).Action,"new verified unit restarts opener");
+        Equal(FarmAction.Skill4,Next(e,o,1850).Action,"new unit gets its own maintenance step");
+    }
+    private static void OpeningDeathStops()
+    {
+        var p=Profile();p.SkillOpeningSequence="242223";p.SkillSequence="2";p.SkillIntervalMs=500;
+        var o=Monster(true);var e=Locked(p,o);Equal(FarmAction.Skill2,Next(e,o,200).Action,"first opening attempt");
+        Dead(o);Check(!Skill(Next(e,o,700).Action),"first dead frame preempts opening");
+        Check(!Skill(Next(e,o,900).Action)&&e.Status=="Loot","second dead frame enters loot instead of another opening key");
+    }
+    private static void BlindSkipToggleCadence()
+    {
+        var p=BlindProfile("112");var o=Monster(true);var e=Locked(p,o);
+        Equal(FarmAction.Skill2,Next(e,o,200).Action,"skip both toggles without spending a rotation interval");
+        Equal(FarmAction.None,Next(e,o,1699).Action,"configured cadence still applies to actual skill attempts");
+        Equal(FarmAction.Skill2,Next(e,o,1700).Action,"the next due attempt remains a damaging key");
+    }
+    private static void BlindAttackOnlyRefused()
+    {
+        var p=BlindProfile("111");var o=Monster(true);var e=Locked(p,o);
+        var c=Next(e,o,200);Equal(FarmAction.Stop,c.Action,"an Attack-only profile cannot run as a skill rotation");
+        Check(c.Reason.Contains("Attack")&&c.Reason.Contains("2"),"operator needs a concrete skill-key correction");
     }
     private static void BlindNeverTogglesAttackSlot()
     {

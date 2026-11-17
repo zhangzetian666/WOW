@@ -111,6 +111,10 @@ namespace WoWProbe
             {
                 route = RouteStore.Load(routePath);
                 baseProfile = BattleProfileStore.Load(profilePath);
+                Log("技能按键方案：开场一次=" + (baseProfile.SkillOpeningSequence.Length == 0 ? "（无）" : baseProfile.SkillOpeningSequence) +
+                    "，之后循环=" + baseProfile.SkillSequence + "，尝试间隔=" + baseProfile.SkillIntervalMs + "ms。发送按键不代表技能已成功施放。");
+                if ((baseProfile.SkillOpeningSequence + baseProfile.SkillSequence).Contains("1"))
+                    Log("盲打模式会跳过1号普攻开关；普通攻击由/startattack维持，职业技能按配置的2至4键尝试。");
             }
             catch (Exception ex) { Log("配置加载失败: " + ex.Message); return 1; }
 
