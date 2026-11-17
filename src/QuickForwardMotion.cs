@@ -6,9 +6,10 @@ namespace WoWProbe
     public sealed class QuickForwardMotion
     {
         readonly IInputBackend backend;readonly Action ensure;readonly InputFailureLatch safety;
+        readonly Func<FarmObservation,bool> ignoreNeutralTarget;
         public bool Held {get;private set;}
-        public QuickForwardMotion(IInputBackend backend,Action ensure,InputFailureLatch safety)
-        {this.backend=backend;this.ensure=ensure;this.safety=safety;}
+        public QuickForwardMotion(IInputBackend backend,Action ensure,InputFailureLatch safety,Func<FarmObservation,bool> ignoreNeutralTarget=null)
+        {this.backend=backend;this.ensure=ensure;this.safety=safety;this.ignoreNeutralTarget=ignoreNeutralTarget;}
         public void Start()
         {
             ensure();if(Held)return;
@@ -19,13 +20,13 @@ namespace WoWProbe
         public void Observe(FarmObservation o)
         {
             if(!Held)return;
-            if(!backend.IsTargetForeground()||backend.IsEmergencyPressed()||!CanMove(o))Stop();
+            if(!backend.IsTargetForeground()||backend.IsEmergencyPressed()||!CanMove(o,ignoreNeutralTarget!=null&&ignoreNeutralTarget(o)))Stop();
         }
-        public static bool CanMove(FarmObservation o)
+        public static bool CanMove(FarmObservation o,bool allowNeutralTarget=false)
         {
             return o!=null&&o.Fresh&&o.KnownCore&&o.ReadFailures==0&&!o.PlayerDead&&!o.PlayerGhost&&!o.InCombat&&!o.BagFull&&
                 o.Health>=80&&o.Health<=100&&o.ChatOpenKnown&&!o.ChatOpen&&o.CastingKnown&&!o.Casting&&!o.Channeling&&
-                !(GrindRecoveryPolicy.CanAttack(o)&&o.TargetReaction==4);
+                (allowNeutralTarget||!(GrindRecoveryPolicy.CanAttack(o)&&o.TargetReaction==4));
         }
         public void Stop()
         {

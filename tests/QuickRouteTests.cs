@@ -1,0 +1,36 @@
+using System;
+using System.IO;
+using WoWProbe;
+class QuickRouteTests
+{
+    static int passed,failed;static void Check(bool b){if(!b)throw new Exception("Fixed route behavior differs.");}
+    static QuickRoutePlan Plan()
+    {
+        var r=new RouteDocument{RouteId="manual",Name="ABCDA",MapId=1432,MapMode=1,Zone="TEST",Loop=true};
+        foreach(var p in new[]{new[]{.5,.5},new[]{.56,.5},new[]{.56,.56},new[]{.5,.56},new[]{.5,.5}})r.Points.Add(new Waypoint{X=p[0],Y=p[1],Tolerance=.001});
+        return new QuickRoutePlan{Route=r,Calibration=new NavigationCalibration{MapId=1432,MapMode=1,Zone="TEST",AxisScale=1.5,TurnRadiansPerSecond=5.85,Confirmed=true}};
+    }
+    static FarmObservation O(){return new FarmObservation{Fresh=true,KnownCore=true,MapId=1432,MapMode=1,Zone="TEST",X=.5,Y=.5,Facing=3*Math.PI/2,Health=100,PowerType=3,FoodCount=10,CastingKnown=true,ChatOpenKnown=true};}
+    static QuickCommand Step(QuickRouteFollower f,FarmObservation o,long time){o.Sequence++;return f.Step(o,time);}
+    static QuickCommand Step(QuickCombat f,FarmObservation o,long time){o.Sequence++;return f.Step(o,time);}
+    static void Reject(Action a){bool rejected=false;try{a();}catch(ArgumentException){rejected=true;}catch(FormatException){rejected=true;}catch(InvalidOperationException){rejected=true;}Check(rejected);}
+    static void Test(string s,Action a){try{a();passed++;Console.WriteLine("PASS "+s);}catch(Exception e){failed++;Console.WriteLine("FAIL "+s+": "+e.Message);}}
+    static void Target(FarmObservation o){o.TargetExists=o.TargetIdentityKnown=o.AttackabilityKnown=o.TargetCanAttack=o.TargetDeadKnown=true;o.TargetToken=8;o.TargetReaction=4;}
+    static int Main()
+    {
+        Test("ABCDA advances in order and loops beyond the legacy four-coordinate radius",()=>{var p=Plan();var o=O();var f=new QuickRouteFollower(p,o);Step(f,o,0);long t=100;for(int lap=0;lap<3;lap++)for(int i=1;i<5;i++){o.X=p.Route.Points[i].X;o.Y=p.Route.Points[i].Y;Check(Step(f,o,t).Action!=QuickAction.Stop);t+=100;Check(f.TargetIndex==(i==4?1:i+1));}Check(f.Laps==3);});
+        Test("corridor follows segments instead of accepting the polygon interior",()=>{var p=Plan();Check(p.Contains(.53,.5));Check(!p.Contains(.53,.53));Check(!p.Contains(Double.NaN,.5));Check(!p.Contains(.53,.51));});
+        Test("loop closure invalid numbers wrong purpose and mismatched calibration are rejected",()=>{for(int i=0;i<5;i++){var p=Plan();if(i==0)p.Route.Points[4].X=.51;if(i==1)p.Route.Points[1].X=Double.NaN;if(i==2)p.Route.RouteType="vendor_return";if(i==3)p.Calibration.MapId++;if(i==4)p.Calibration.Confirmed=false;Reject(()=>p.Validate(true));}});
+        Test("input snapshots are isolated from subsequent edits",()=>{var p=Plan();var o=O();var f=new QuickRouteFollower(p,o);p.Route.Points[1].X=.9;p.CorridorWidth=.02;Check(f.Plan.Route.Points[1].X==.56&&f.Plan.CorridorWidth==.005);});
+        Test("map change and route departure stop without joining an arbitrary remote segment",()=>{var o=O();var f=new QuickRouteFollower(Plan(),o);o.X=.53;o.Y=.53;Check(Step(f,o,0).Action==QuickAction.Stop);o=O();f=new QuickRouteFollower(Plan(),o);o.MapId++;Check(Step(f,o,0).Action==QuickAction.Stop);Reject(()=>new QuickRouteFollower(Plan(),o));});
+        Test("combat interruption returns to the original leg before advancing",()=>{var o=O();o.X=.53;var f=new QuickRouteFollower(Plan(),o);Step(f,o,0);f.Interrupt(o);o.Y=.502;f.Resume();Check(f.Returning&&f.TargetIndex==1);Step(f,o,100);Check(f.Returning&&f.TargetIndex==1);o.Y=.5;Step(f,o,200);Check(!f.Returning&&f.TargetIndex==1);});
+        Test("unknown-position neutral targets are probed while route movement remains authorized",()=>{var o=O();Target(o);var f=new QuickRouteFollower(Plan(),o);var e=new QuickCombat(o,750,false,f);var c=Step(e,o,0);Check(c.Action==QuickAction.RouteProbe&&QuickCombat.Matches(c,o));o.Facing=3*Math.PI/2;c=Step(e,o,200);Check(c.Action!=QuickAction.Face);c=Step(e,o,400);Check(c.RouteMovement&&QuickCombat.Matches(c,o));o.InCombat=true;Step(e,o,500);c=Step(e,o,600);Check(c.Action==QuickAction.Face);});
+        Test("known off-route targets never authorize proactive facing or skill attacks",()=>{var o=O();Target(o);o.TargetPositionKnown=true;o.TargetX=.53;o.TargetY=.53;var e=new QuickCombat(o,750,false,new QuickRouteFollower(Plan(),o));Check(Step(e,o,0).Action==QuickAction.Scan);Check(Step(e,o,200).Action!=QuickAction.Face);});
+        Test("route motion authorization is revoked at the boundary or on combat",()=>{var o=O();var f=new QuickRouteFollower(Plan(),o);var c=Step(f,o,0);Check(QuickCombat.Matches(c,o));o.InCombat=true;Check(!QuickCombat.Matches(c,o));o.InCombat=false;o.X=.53;o.Y=.53;Check(!QuickCombat.Matches(c,o));});
+        Test("a confirmed kill and loot resume the interrupted leg without skipping its next point",()=>{var o=O();Target(o);o.TargetPositionKnown=true;o.TargetX=.501;o.TargetY=.5;var f=new QuickRouteFollower(Plan(),o);var e=new QuickCombat(o,750,false,f);Step(e,o,0);Step(e,o,100);o.TargetDead=true;o.TargetCanAttack=false;Step(e,o,200);Step(e,o,300);o.LootEventsKnown=true;o.LootOpened=o.LootClosed=1;Step(e,o,1000);o.TargetExists=false;o.Y=.502;var c=Step(e,o,1100);Check(e.Kills==1&&e.Loots==1&&f.Returning&&f.TargetIndex==1&&c.RouteMovement);});
+        Test("death outside the farm corridor can initialize separate configured recovery without enabling patrol",()=>{var o=O();o.PlayerGhost=true;o.X=.32;o.Y=.47;var f=new QuickRouteFollower(Plan(),o);Check(!f.OnRoute(o)&&f.Returning);});
+        Test("saved plans round-trip points and clear machine calibration confirmation",()=>{var p=Plan();string file=Path.Combine(Path.GetTempPath(),"wow-route-"+Guid.NewGuid()+".json");try{QuickRoutePlan.Save(file,p);var q=QuickRoutePlan.Load(file);Check(q.Route.Fingerprint()==p.Route.Fingerprint()&&!q.Calibration.Confirmed);Reject(()=>q.Validate(true));}finally{if(File.Exists(file))File.Delete(file);}});
+        Test("stationary path and duplicate frames do not silently progress",()=>{var o=O();var f=new QuickRouteFollower(Plan(),o);Step(f,o,0);Check(f.Step(o,100).Action==QuickAction.None&&f.TargetIndex==1);Check(Step(f,o,12001).Action==QuickAction.Stop);});
+        Console.WriteLine("Fixed route tests: "+passed+" passed, "+failed+" failed. No game or native input.");return failed==0?0:1;
+    }
+}

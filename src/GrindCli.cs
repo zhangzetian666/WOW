@@ -102,19 +102,21 @@ namespace WoWProbe
             MouseLookInput.Run(dx,dy,ensure,held,()=>Native.SendMouseButton(true,false),()=>Native.SendMouseButton(true,true),Native.MoveMouseRelative,ms=>Pause(ms));
         }
 
-        internal static void RunQuick(int seconds, int interval, Func<bool> cancelled, Action<string> report,bool skinning=false)
+        internal static void RunQuick(int seconds, int interval, Func<bool> cancelled, Action<string> report,bool skinning=false,QuickRoutePlan plan=null)
         {
+            if(plan==null)throw new InvalidOperationException("请先手动配置固定打怪巡航路线，再点击开始。");plan.Validate(true);plan=plan.Clone();
             WindowInfo window = OpenTelemetry();
             var backend = new WindowsInputBackend(window, report);
             FarmObservation anchor = Snapshot();
-            var engine = new QuickCombat(anchor, interval,skinning);
+            var routeFollower=new QuickRouteFollower(plan,anchor);
+            var engine = new QuickCombat(anchor, interval,skinning,routeFollower);
             var safety = new InputFailureLatch();
             var stream=new QuickTelemetryStream(Snapshot,()=>clock.ElapsedMilliseconds,anchor);
             chatReader=stream.Read;
             Func<FarmObservation> read = () => { if(cancelled())throw new InvalidOperationException("用户停止。");return stream.Read(); };
             Func<GrindInputGuard> guard = () => new GrindInputGuard(backend,read,()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
             input=guard();
-            var searchMotion=new QuickForwardMotion(backend,()=>RequireInput().Ensure(),safety);
+            var searchMotion=new QuickForwardMotion(backend,()=>RequireInput().Ensure(),safety,o=>!routeFollower.MayAcquire(o));
             string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"runtime");Directory.CreateDirectory(directory);
             string prefix=Path.Combine(directory,"quick-"+DateTime.Now.ToString("yyyyMMdd-HHmmss"));
             using(var frames=new StreamWriter(prefix+"-frames.tsv",false,new UTF8Encoding(false)))
@@ -125,6 +127,8 @@ namespace WoWProbe
                 Action<string> shot=label=>{if(!backend.IsTargetForeground())return;try{using(var bitmap=Native.Capture(client))bitmap.Save(prefix+"-"+label+".png",System.Drawing.Imaging.ImageFormat.Png);}catch(Exception ex){write("截图未保存："+ex.Message);}};
                 try
                 {
+                    write("固定路线："+plan.Route.Name+"，路点"+plan.Route.Points.Count+"，按顺序循环；允许偏离"+(plan.CorridorWidth*100).ToString("F2")+"坐标点。");
+                    QuickRoutePlan.Save(prefix+"-patrol.json",plan);
                     if(anchor.BagFull)throw new InvalidOperationException("背包已满。");
                     if(!anchor.ChatOpenKnown||anchor.ChatOpen)throw new InvalidOperationException("请先关闭聊天输入框，并确认新版插件已加载。");
                     if(skinning&&(!anchor.SkinBindingKnown||!anchor.SkinBindingCorrect))throw new InvalidOperationException("请把当前剥皮技能放在7号技能栏，并确认按键为7；或取消勾选剥皮。");
@@ -188,7 +192,7 @@ namespace WoWProbe
                             read();var op=ReadOperations();var rc=recovery.Step(op,clock.ElapsedMilliseconds);
                             if(rc.Action==QuickRecoveryAction.Stop)throw new InvalidOperationException(rc.Reason);
                             if(rc.Action==QuickRecoveryAction.Complete)
-                            {completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;engine=new QuickCombat(observed,interval,skinning);autoAttackToken=0;recovery=null;write(rc.Reason);shot("revived-"+recoveries);input=guard();continue;}
+                            {completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;routeFollower.Resume();engine=new QuickCombat(observed,interval,skinning,routeFollower);autoAttackToken=0;recovery=null;write(rc.Reason);shot("revived-"+recoveries);input=guard();continue;}
                             if(rc.Action==QuickRecoveryAction.None){Thread.Sleep(60);continue;}
                             write(rc.Reason);
                             input=new GrindInputGuard(backend,()=>{var f=read();if(!QuickRecovery.Matches(rc,ReadOperations()))throw new InvalidOperationException("复活动作状态变化。");return f;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
@@ -207,7 +211,7 @@ namespace WoWProbe
                         if(completedSkins+engine.Skins!=reportedSkins){reportedSkins=completedSkins+engine.Skins;write("已确认剥皮成功，累计剥皮="+reportedSkins);shot("skin-"+reportedSkins);}
                         if(command.Action==QuickAction.Stop){searchMotion.Stop();write(command.Reason);break;}
                         if(command.Action==QuickAction.None){if(command.Report)write(command.Reason);Pause(40);continue;}
-                        bool keepMoving=command.Action==QuickAction.Patrol||command.Action==QuickAction.Scan&&!observed.InCombat||command.Action==QuickAction.Turn&&!command.MouseTurn;
+                        bool keepMoving=command.Action==QuickAction.Patrol||command.Action==QuickAction.RouteProbe||command.Action==QuickAction.Scan&&!observed.InCombat||command.Action==QuickAction.Turn&&!command.MouseTurn;
                         if(!keepMoving)searchMotion.Stop();
                         if(!QuickCombat.Matches(command,read())){searchMotion.Stop();CancelQuickMovement(backend);Pause(40);continue;}
                         write(command.Reason+" 已确认击杀="+(completedKills+engine.Kills));
@@ -238,9 +242,10 @@ namespace WoWProbe
                             {
                                 bool detour=command.Action==QuickAction.BackOff||command.Action==QuickAction.DetourTurn||command.Action==QuickAction.DetourForward;
                                 if(detour||command.Action==QuickAction.Food||command.Action==QuickAction.Drink)CancelQuickMovement(backend);
+                                if(command.RouteMovement&&command.Action==QuickAction.Turn)searchMotion.Start();
                                 int hold=command.Hold>0?command.Hold:command.Action==QuickAction.Turn?260:command.Action==QuickAction.BackOff?300:command.Action==QuickAction.DetourTurn?220:command.Action==QuickAction.DetourForward?600:80;
                                 Pulse(backend,command.Key,hold);
-                                if(command.Action==QuickAction.Face&&!read().InCombat){write("脱战接近：沿校正朝向短走450ms，再核验目标与位置。");Pulse(backend,87,450);}
+                                if(command.Action==QuickAction.Face)CancelQuickMovement(backend);
                             }
                         }
                         catch(InvalidOperationException ex)

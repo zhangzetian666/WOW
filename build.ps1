@@ -41,7 +41,7 @@ foreach ($testName in @('CampaignSettingsTests','RecoveryWorkflowTests','VendorW
     & "$bin\$testName.exe"
     if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
 }
-foreach ($testName in @('QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','VisualVitalsTests','MouseLookTests','QuickForwardMotionTests')) {
+foreach ($testName in @('QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','VisualVitalsTests','MouseLookTests','QuickForwardMotionTests','QuickRouteTests')) {
     & $compiler @common /target:exe "/out:$bin\$testName.exe" @domainSources "$projectRoot\tests\$testName.cs"
     if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
     & "$bin\$testName.exe"
@@ -63,6 +63,8 @@ if ($LASTEXITCODE -ne 0) { throw 'Readiness UI test compilation failed.' }
 if ($LASTEXITCODE -ne 0) { throw 'Grind CLI integration test compilation failed.' }
 & "$bin\GrindCliIntegrationTests.exe"
 if ($LASTEXITCODE -ne 0) { throw 'Grind CLI integration tests failed.' }
+& $compiler @common /target:exe /main:QuickRouteUiTests "/out:$bin\QuickRouteUiTests.exe" @sources "$projectRoot\tests\QuickRouteUiTests.cs"
+if ($LASTEXITCODE -ne 0) { throw 'Fixed route UI test compilation failed.' }
 & $compiler @common /target:exe /main:FishingFreshnessTests "/out:$bin\FishingFreshnessTests.exe" @sources "$projectRoot\tests\FishingFixtures.cs" "$projectRoot\tests\FishingFreshnessTests.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Fishing parent freshness test compilation failed.' }
 & "$bin\FishingFreshnessTests.exe"
@@ -74,7 +76,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Fishing UI test compilation failed.' }
 Write-Output "BUILD_OK $bin\WoWProbe.exe"
 if ($Package) {
     $dist = Join-Path $projectRoot 'dist'
-    $releaseName = 'WoWProbe-Complete-0.7.2'
+    $releaseName = 'WoWProbe-Complete-0.7.3'
     $release = Join-Path $dist $releaseName
     New-Item -ItemType Directory -Path $release -Force | Out-Null
     Copy-Item -LiteralPath "$bin\WoWProbe.exe" -Destination $release -Force

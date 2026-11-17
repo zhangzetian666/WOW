@@ -1,0 +1,99 @@
+﻿using System;
+using System.Drawing;
+using System.Globalization;
+using System.IO;
+using System.Windows.Forms;
+namespace WoWProbe
+{
+    public sealed class QuickRouteEditor:UserControl
+    {
+        readonly TextBox routeName=new TextBox{Text="我的打怪路线",Width=150},mapId=new TextBox{Width=75},zone=new TextBox{Width=120};
+        readonly NumericUpDown mode=N(1,3,1,0),corridor=N(.05m,2,.5m,2),tolerance=N(.01m,.5m,.1m,2),axis=N(.1m,10,1.5m,3),offset=N(-6.2832m,6.2832m,0,4),turn=N(.1m,10,5.85m,3),speed=N(.0001m,.2m,.008m,4);
+        readonly ComboBox sign=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,Width=85};
+        readonly CheckBox confirmed=new CheckBox{Text="本机地图与移动参数已核对",AutoSize=true};
+        readonly DataGridView grid=new DataGridView();readonly RouteCanvas canvas=new RouteCanvas{Dock=DockStyle.Fill};
+        readonly Label info=new Label{AutoSize=true};
+        readonly Func<FarmObservation> readCurrent;
+        readonly string recordingPath;
+        public QuickRouteEditor()
+            :this(null,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-patrol-recording.json")){}
+        public QuickRouteEditor(Func<FarmObservation> reader,string path)
+        {
+            readCurrent=reader;recordingPath=path;
+            Dock=DockStyle.Fill;
+            var tabs=new TabControl{Dock=DockStyle.Fill};Controls.Add(tabs);
+            var routeTab=new TabPage("固定巡航点");var settingsTab=new TabPage("本机地图与移动参数");tabs.TabPages.Add(routeTab);tabs.TabPages.Add(settingsTab);
+            var root=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=4,ColumnCount=1};root.RowStyles.Add(new RowStyle(SizeType.Absolute,34));root.RowStyles.Add(new RowStyle(SizeType.Absolute,35));root.RowStyles.Add(new RowStyle(SizeType.Percent,100));root.RowStyles.Add(new RowStyle(SizeType.Absolute,32));routeTab.Controls.Add(root);
+            var names=Row();root.Controls.Add(names,0,0);L(names,"名称");names.Controls.Add(routeName);L(names,"允许偏离（坐标点）");names.Controls.Add(corridor);L(names,"到点误差");names.Controls.Add(tolerance);
+            var buttons=Row();root.Controls.Add(buttons,0,1);buttons.Controls.Add(B("保存当前巡航点",CapturePoint));buttons.Controls.Add(B("闭合到起点",CloseLoop));buttons.Controls.Add(B("删除所选点",Delete));buttons.Controls.Add(B("载入方案",LoadPlanFile));buttons.Controls.Add(B("保存方案",Save));buttons.Controls.Add(B("导入路线",ImportRoute));
+            var center=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=1,ColumnCount=2};center.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,48));center.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,52));root.Controls.Add(center,0,2);
+            grid.Dock=DockStyle.Fill;grid.RowHeadersVisible=false;grid.AllowUserToAddRows=true;grid.AllowUserToDeleteRows=true;grid.AutoSizeColumnsMode=DataGridViewAutoSizeColumnsMode.Fill;grid.BackgroundColor=Color.White;
+            grid.Columns.Add("Point","点");grid.Columns[0].ReadOnly=true;grid.Columns[0].FillWeight=40;grid.Columns.Add("X","X（0–100）");grid.Columns.Add("Y","Y（0–100）");center.Controls.Add(grid,0,0);center.Controls.Add(canvas,1,0);
+            info.Text="手填坐标或逐点追加；例如A→B→C→D→A。路点之间请沿可通行道路设置。";root.Controls.Add(info,0,3);
+            var settings=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoScroll=true,Padding=new Padding(8)};settingsTab.Controls.Add(settings);
+            var map=Row();map.AutoSize=true;L(map,"地图ID");map.Controls.Add(mapId);L(map,"模式");map.Controls.Add(mode);L(map,"区域");map.Controls.Add(zone);map.Controls.Add(B("读取当前地图",ReadMap));settings.Controls.Add(map);
+            var first=Row();first.AutoSize=true;L(first,"横纵比");first.Controls.Add(axis);L(first,"朝向方向");sign.Items.AddRange(new object[]{"-1","+1"});sign.SelectedIndex=0;first.Controls.Add(sign);L(first,"朝向偏移");first.Controls.Add(offset);settings.Controls.Add(first);
+            var second=Row();second.AutoSize=true;L(second,"转速 rad/s");second.Controls.Add(turn);L(second,"移动速度");second.Controls.Add(speed);second.Controls.Add(B("导入标定",ImportCalibration));settings.Controls.Add(second);settings.Controls.Add(confirmed);
+            settings.Controls.Add(new Label{AutoSize=true,MaximumSize=new Size(800,0),Text="坐标使用地图显示的0–100。新电脑需核对插件、地图、方向键与移动参数。\n循环必须显式回到起点；从角色附近的路段接入，按输入顺序循环。\n只在路线范围内活动。目标位置未知时沿线走近尝试攻击，不向远处追怪；路点之间不能自动绕过山崖或建筑。"});
+            grid.CellEndEdit+=delegate{Preview();};grid.RowsRemoved+=delegate{Preview();};corridor.ValueChanged+=delegate{Preview();};tolerance.ValueChanged+=delegate{Preview();};
+            foreach(var number in new[]{axis,offset,turn,speed,mode})number.ValueChanged+=delegate{confirmed.Checked=false;Preview();};sign.SelectedIndexChanged+=delegate{confirmed.Checked=false;};mapId.TextChanged+=delegate{confirmed.Checked=false;};zone.TextChanged+=delegate{confirmed.Checked=false;};
+        }
+        static NumericUpDown N(decimal min,decimal max,decimal value,int digits){return new NumericUpDown{Minimum=min,Maximum=max,Value=value,DecimalPlaces=digits,Increment=digits>2?.0001m:digits==0?1:.01m,Width=90};}
+        static FlowLayoutPanel Row(){return new FlowLayoutPanel{AutoSize=false,Height=32,Dock=DockStyle.Top,WrapContents=false};}
+        static void L(Control parent,string s){parent.Controls.Add(new Label{Text=s,AutoSize=true,Margin=new Padding(5,7,3,0)});}
+        static Button B(string s,Action run){var b=new Button{Text=s,AutoSize=true,Margin=new Padding(2)};b.Click+=delegate{try{run();}catch(Exception e){MessageBox.Show(e.Message,"未执行",MessageBoxButtons.OK,MessageBoxIcon.Information);}};return b;}
+        public QuickRoutePlan ReadPlan(bool live)
+        {var p=ReadEditor();p.Validate(live);return p;}
+        QuickRoutePlan ReadEditor()
+        {
+            grid.EndEdit();uint id;if(!UInt32.TryParse(mapId.Text,out id)||id==0)throw new FormatException("请先读取或输入地图ID。");
+            var r=new RouteDocument{RouteId="manual-farm",Name=routeName.Text.Trim(),RouteType="farm",Loop=true,MapId=id,MapMode=(int)mode.Value,Zone=zone.Text.Trim()};
+            foreach(DataGridViewRow row in grid.Rows)
+            {
+                if(row.IsNewRow)continue;double x,y;
+                if(!Double.TryParse(Convert.ToString(row.Cells[1].Value),NumberStyles.Float,CultureInfo.InvariantCulture,out x)||!Double.TryParse(Convert.ToString(row.Cells[2].Value),NumberStyles.Float,CultureInfo.InvariantCulture,out y)||!NavigationMath.InRange(x,0,100)||!NavigationMath.InRange(y,0,100))throw new FormatException("第"+(row.Index+1)+"点必须输入0–100的X、Y坐标。");
+                r.Points.Add(new Waypoint{X=x/100,Y=y/100,Tolerance=(double)tolerance.Value/100});
+            }
+            var p=new QuickRoutePlan{Route=r,CorridorWidth=(double)corridor.Value/100,Calibration=new NavigationCalibration{MapId=id,MapMode=r.MapMode,Zone=r.Zone,AxisScale=(double)axis.Value,FacingSign=sign.SelectedIndex==0?-1:1,FacingOffset=(double)offset.Value,TurnRadiansPerSecond=(double)turn.Value,ForwardUnitsPerSecond=(double)speed.Value,Confirmed=confirmed.Checked}};
+            return p;
+        }
+        public void Bind(QuickRoutePlan p)
+        {
+            routeName.Text=p.Route.Name;mapId.Text=p.Route.MapId.ToString();mode.Value=p.Route.MapMode;zone.Text=p.Route.Zone;
+            corridor.Value=(decimal)p.CorridorWidth*100;if(p.Route.Points.Count>0)tolerance.Value=(decimal)p.Route.Points[0].Tolerance*100;
+            axis.Value=(decimal)p.Calibration.AxisScale;offset.Value=(decimal)p.Calibration.FacingOffset;turn.Value=(decimal)p.Calibration.TurnRadiansPerSecond;speed.Value=(decimal)p.Calibration.ForwardUnitsPerSecond;sign.SelectedIndex=p.Calibration.FacingSign==-1?0:1;
+            grid.Rows.Clear();foreach(var point in p.Route.Points)grid.Rows.Add("",(point.X*100).ToString("F3",CultureInfo.InvariantCulture),(point.Y*100).ToString("F3",CultureInfo.InvariantCulture));confirmed.Checked=false;Preview();
+        }
+        void Preview()
+        {
+            int count=0;foreach(DataGridViewRow row in grid.Rows)if(!row.IsNewRow)row.Cells[0].Value=count<26?((char)('A'+count++)).ToString():"P"+(++count);
+            try{var p=ReadPlan(false);grid.Rows[grid.Rows.Count-2].Cells[0].Value="A";canvas.Route=p.Route;canvas.AxisScale=p.Calibration.AxisScale;info.Text="已配置"+(p.Route.Points.Count-1)+"个巡航点并回到A；按输入顺序循环。";}catch{canvas.Route=null;info.Text="手填0–100坐标，至少两个不同点；最后一个点回到A。";}canvas.Invalidate();
+        }
+        FarmObservation Current()
+        {
+            FarmObservation o;
+            if(readCurrent!=null)o=readCurrent();
+            else
+            {
+                var form=FindForm();bool visible=form!=null&&form.Visible;
+                try{if(visible)form.Hide();GrindCli.FocusGameWindow();GrindCli.OpenTelemetry();o=GrindCli.ReadTelemetry();}
+                finally{if(visible&&!form.IsDisposed){form.Show();form.Activate();}}
+            }
+            if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||o.PlayerDead||o.PlayerGhost||o.InCombat||!NavigationMath.InRange(o.X,0,1)||!NavigationMath.InRange(o.Y,0,1))throw new InvalidOperationException("未读到新鲜、存活且脱战的角色坐标，未保存巡航点。");return o;
+        }
+        void ReadMap(){var o=Current();if(grid.Rows.Count>1&&mapId.Text!=""&&(mapId.Text!=o.MapId.ToString()||zone.Text!=o.Zone))throw new InvalidOperationException("当前地图与已有路点不同，请先另存或清空原路点。");mapId.Text=o.MapId.ToString();mode.Value=o.MapMode;zone.Text=o.Zone;}
+        void CapturePoint()
+        {
+            var o=Current();if(mapId.Text==""){mapId.Text=o.MapId.ToString();mode.Value=o.MapMode;zone.Text=o.Zone;}if(mapId.Text!=o.MapId.ToString()||(int)mode.Value!=o.MapMode||zone.Text!=o.Zone)throw new InvalidOperationException("当前地图与方案不同，不能混录。");
+            var p=ReadEditor();if(p.Route.Points.Count>2){var a=p.Route.Points[0];var z=p.Route.Points[p.Route.Points.Count-1];if(a.X==z.X&&a.Y==z.Y)p.Route.Points.RemoveAt(p.Route.Points.Count-1);}
+            p.Route.Points.Add(new Waypoint{X=Math.Round(o.X*100,3)/100,Y=Math.Round(o.Y*100,3)/100,Tolerance=(double)tolerance.Value/100});
+            QuickRoutePlan.SaveRecording(recordingPath,p);bool wasConfirmed=confirmed.Checked;Bind(p);confirmed.Checked=wasConfirmed;info.Text="已保存巡航点"+grid.Rows[grid.Rows.Count-2].Cells[0].Value+"；走到下一处后再次点击。草稿已写入本机。";
+        }
+        void CloseLoop(){grid.EndEdit();if(grid.Rows.Count<3)throw new InvalidOperationException("请先输入至少两个不同点。");var a=grid.Rows[0];var b=grid.Rows[grid.Rows.Count-2];if(Convert.ToString(a.Cells[1].Value)!=Convert.ToString(b.Cells[1].Value)||Convert.ToString(a.Cells[2].Value)!=Convert.ToString(b.Cells[2].Value))grid.Rows.Add("A",a.Cells[1].Value,a.Cells[2].Value);var p=ReadPlan(false);QuickRoutePlan.SaveRecording(recordingPath,p);Preview();}
+        void Delete(){foreach(DataGridViewRow r in grid.SelectedRows)if(!r.IsNewRow)grid.Rows.Remove(r);QuickRoutePlan.SaveRecording(recordingPath,ReadEditor());Preview();}
+        void LoadPlanFile(){using(var d=new OpenFileDialog{Filter="巡航方案|*.json"})if(d.ShowDialog()==DialogResult.OK)Bind(QuickRoutePlan.Load(d.FileName));}
+        void Save(){var p=ReadPlan(false);using(var d=new SaveFileDialog{Filter="巡航方案|*.json",FileName="我的巡航路线.json"})if(d.ShowDialog()==DialogResult.OK)QuickRoutePlan.Save(d.FileName,p);}
+        void ImportRoute(){using(var d=new OpenFileDialog{Filter="已有路线|*.json"})if(d.ShowDialog()==DialogResult.OK){var r=RouteStore.Load(d.FileName);var p=new QuickRoutePlan{Route=r,Calibration=new NavigationCalibration{MapId=r.MapId,MapMode=r.MapMode,Zone=r.Zone,AxisScale=1.5,TurnRadiansPerSecond=5.85}};Bind(p);}}
+        void ImportCalibration(){using(var d=new OpenFileDialog{Filter="地图标定|*.json"})if(d.ShowDialog()==DialogResult.OK){if(new FileInfo(d.FileName).Length>65536)throw new FormatException("标定文件过大。");var c=new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<NavigationCalibration>(File.ReadAllText(d.FileName));c.Validate();var p=ReadPlan(false);if(c.MapId!=p.Route.MapId||c.MapMode!=p.Route.MapMode||c.Zone!=p.Route.Zone)throw new FormatException("标定与路线地图不同。");p.Calibration=c;Bind(p);}}
+    }
+}
