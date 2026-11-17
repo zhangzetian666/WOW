@@ -777,6 +777,16 @@ test("modern corpse tooltip current rank skin binding and food count are indepen
     env.C_TooltipInfo.GetUnit=function()return {lines={{leftText={}}}} end
     p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],32),false)
 end)
+test("target ownership flags skip claimed mobs and distinguish the player's attacker",function()
+    local env=combatEnvironment();env.UnitIsTapDenied=function()return true end
+    env.UnitAffectingCombat=function(unit)return unit=="target" end
+    env.UnitIsUnit=function(a,b)eq(a,"targettarget");eq(b,"player");return false end
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[80],31)
+    env.UnitIsTapDenied=function()return false end;env.UnitIsUnit=function()return true end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[80],61)
+    env.UnitIsTapDenied=nil;env.UnitAffectingCombat=nil;env.UnitIsUnit=nil
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[80],0)
+end)
 for _, t in ipairs(tests) do
     local ok, message = pcall(t[2])
     if ok then passed = passed + 1; print("PASS " .. t[1])

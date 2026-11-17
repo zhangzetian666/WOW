@@ -106,7 +106,7 @@ namespace WoWProbe
         {
             if(plan==null)throw new InvalidOperationException("请先手动配置固定打怪巡航路线，再点击开始。");plan.Validate(true);plan=plan.Clone();
             WindowInfo window = OpenTelemetry();
-            var backend = new WindowsInputBackend(window, report);
+            Action<string> nativeReport=report;var backend = new WindowsInputBackend(window, message=>nativeReport(message));
             FarmObservation anchor = Snapshot();
             var routeFollower=new QuickRouteFollower(plan,anchor);
             var engine = new QuickCombat(anchor, interval,skinning,routeFollower,plan.OpeningKeys,plan.LoopKeys);
@@ -122,6 +122,7 @@ namespace WoWProbe
             using(var frames=new StreamWriter(prefix+"-frames.tsv",false,new UTF8Encoding(false)))
             using(var journal=new StreamWriter(prefix+".log",false,new UTF8Encoding(false)))
             {
+                nativeReport=message=>{journal.WriteLine(DateTimeOffset.Now.ToString("HH:mm:ss.fff")+" [input] "+message);journal.Flush();};
                 Action<string> write=message=>{journal.WriteLine(DateTimeOffset.Now.ToString("HH:mm:ss.fff")+" "+message);journal.Flush();report(message);};
                 frames.WriteLine("time\tsequence\thealth\tcombat\tdead\tghost\ttargetExists\ttargetToken\ttargetName\ttargetDeadKnown\ttargetDead\tattackable\tcastSuccess\tdeathToken\tdeathCount\tx\ty\tkillCreditNameHash\tkillCredits\tlootOpened\tchatOpen\tlootClosed\tskinKnown\tskinnable\tskinSuccess\tcastFailed\tfoodCount\ttargetReaction\tfacing");
                 Action<string> shot=label=>{if(!backend.IsTargetForeground())return;try{using(var bitmap=Native.Capture(client))bitmap.Save(prefix+"-"+label+".png",System.Drawing.Imaging.ImageFormat.Png);}catch(Exception ex){write("截图未保存："+ex.Message);}};
@@ -211,13 +212,13 @@ namespace WoWProbe
                         if(completedSkins+engine.Skins!=reportedSkins){reportedSkins=completedSkins+engine.Skins;write("已确认剥皮成功，累计剥皮="+reportedSkins);shot("skin-"+reportedSkins);}
                         if(command.Action==QuickAction.Stop){searchMotion.Stop();write(command.Reason);break;}
                         if(command.Action==QuickAction.None){if(command.Report)write(command.Reason);Pause(40);continue;}
-                        bool keepMoving=command.Action==QuickAction.Patrol||command.Action==QuickAction.RouteProbe||command.Action==QuickAction.Scan&&!observed.InCombat||command.Action==QuickAction.Turn&&!command.MouseTurn;
+                        bool keepMoving=!command.PauseForward&&(command.Action==QuickAction.Patrol||command.Action==QuickAction.RouteProbe||command.Action==QuickAction.Scan&&!observed.InCombat||command.Action==QuickAction.Turn&&!command.MouseTurn);
                         if(!keepMoving)searchMotion.Stop();
                         if(!QuickCombat.Matches(command,read())){searchMotion.Stop();CancelQuickMovement(backend);Pause(40);continue;}
                         write(command.Reason+" 已确认击杀="+(completedKills+engine.Kills));
                         if(command.Action==QuickAction.Face&&autoAttackToken!=command.Token)
                         {
-                            input=guard();ChatChecked(backend,"/startattack",()=>{var unit=read();return GrindRecoveryPolicy.CanAttack(unit)&&unit.TargetToken==command.Token;});
+                            input=guard();ChatChecked(backend,"/startattack",()=>{var unit=read();return GrindRecoveryPolicy.CanAttack(unit)&&unit.TargetToken==command.Token&&!QuickCombat.Contested(unit);});
                             autoAttackToken=command.Token;write("已对核验目标开启普通攻击。");
                         }
                         bool commandUsesChat=command.Action==QuickAction.CorpseSelect||command.Action==QuickAction.Reacquire||command.Action==QuickAction.ReturnToRoute||command.Action==QuickAction.Scan&&observed.InCombat;
@@ -245,7 +246,7 @@ namespace WoWProbe
                             {
                                 bool detour=command.Action==QuickAction.BackOff||command.Action==QuickAction.DetourTurn||command.Action==QuickAction.DetourForward;
                                 if(detour||command.Action==QuickAction.Food||command.Action==QuickAction.Drink)CancelQuickMovement(backend);
-                                if(command.RouteMovement&&command.Action==QuickAction.Turn)searchMotion.Start();
+                                if(command.RouteMovement&&command.Action==QuickAction.Turn&&!command.PauseForward)searchMotion.Start();
                                 int hold=command.Hold>0?command.Hold:command.Action==QuickAction.Turn?260:command.Action==QuickAction.BackOff?300:command.Action==QuickAction.DetourTurn?220:command.Action==QuickAction.DetourForward?600:80;
                                 Pulse(backend,command.Key,hold);
                                 // F starts native approach/facing. Leave click-to-move active

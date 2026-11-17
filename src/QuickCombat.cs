@@ -6,7 +6,7 @@ namespace WoWProbe
     public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin }
     public sealed class QuickCommand
     {
-        public QuickAction Action; public ushort Key; public uint Token,IgnoredTarget; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement;public QuickRouteFollower RouteContext;
+        public QuickAction Action; public ushort Key; public uint Token,IgnoredTarget; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement,PauseForward;public QuickRouteFollower RouteContext;
     }
 
     // Nearby combat only. The game's confirmed F/click-to-move binding supplies
@@ -93,6 +93,7 @@ namespace WoWProbe
                 if(looted&&corpse!=null)return AdvanceCorpse(o,now);
                 if(HasDeathEvidence(o,token))return ConfirmDeath(o,now);
                 if(o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken==token&&o.TargetDeadKnown&&o.TargetDead)return ConfirmDeath(o,now);
+                if(route!=null&&!o.InCombat&&o.TargetToken==token&&Contested(o))return AbandonChase(now,"目标已被其他人占有或正在战斗，跳过并继续寻怪。");
                 if(route!=null&&!o.InCombat&&(!route.TargetAllowed(o)||now-started>=12000||route.PursuitDistance(o)>route.Plan.CombatRadius-.001))return AbandonChase(now,"接近目标超时或到达追怪边界，放弃该目标并返回巡航路线。");
                 if(route!=null&&o.InCombat&&!route.TargetAllowed(o))return Stop("战斗目标已离开配置的追怪范围，停止继续追击。");
                 if(!o.TargetExists||!o.TargetIdentityKnown||o.TargetToken!=token)
@@ -191,7 +192,8 @@ namespace WoWProbe
         public bool HasDeathEvidence(FarmObservation o,uint expected)
         {return expected!=0&&expected==token&&o!=null&&o.Fresh&&(o.DeathEventsKnown&&o.DeathToken==expected&&o.TargetDeaths!=deathBase||o.KillCreditsKnown&&lockedName!=0&&o.KillCreditNameHash==lockedName&&o.KillCredits!=creditBase);}
         static bool CanAcquire(FarmObservation o)
-        {return GrindRecoveryPolicy.CanAttack(o)&&(o.InCombat||o.TargetReaction==4);}
+        {return GrindRecoveryPolicy.CanAttack(o)&&(o.InCombat&&(!o.TargetVictimKnown||o.TargetTargetsPlayer)||o.TargetReaction==4&&!Contested(o));}
+        public static bool Contested(FarmObservation o){return o!=null&&!(o.InCombat&&(!o.TargetVictimKnown||o.TargetTargetsPlayer))&&(o.TargetClaimKnown&&o.TargetClaimedByOther||o.TargetCombatKnown&&o.TargetInCombat&&(!o.TargetVictimKnown||!o.TargetTargetsPlayer));}
         public bool ShouldAcquire(FarmObservation o,long now)
         {return CanAcquire(o)&&(o.InCombat||o.TargetToken!=skippedToken||now>=skipUntil)&&(route==null||route.MayAcquire(o));}
         public bool CanInspectCorpse(FarmObservation o)
@@ -229,6 +231,7 @@ namespace WoWProbe
             if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||o.PlayerDead||o.PlayerGhost)return false;
             if(c.RouteContext!=null&&!c.RouteContext.CanOperate(o))return false;
             if(!ownedChat&&o.ChatOpenKnown&&o.ChatOpen)return false;
+            if(!o.InCombat&&Contested(o)&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill||c.Action==QuickAction.RouteProbe))return false;
             if(c.Action==QuickAction.InterruptSkin)return o.InCombat&&(o.Casting||o.Channeling);
             if(c.RouteMovement)return !o.InCombat&&!(CanAcquire(o)&&c.RouteContext.MayAcquire(o)&&o.TargetToken!=c.IgnoredTarget);
             if(c.Action==QuickAction.ReturnToRoute)return c.RouteContext!=null&&c.RouteContext.Returning&&!o.InCombat;

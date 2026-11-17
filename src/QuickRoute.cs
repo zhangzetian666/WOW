@@ -123,10 +123,15 @@ namespace WoWProbe
         public void BeginNearbySearch(FarmObservation o,long now){nearbyX=o.X;nearbyY=o.Y;SearchingNearby=true;nearbyUntil=now+2500;}
         public void TickNearbySearch(FarmObservation o,long now,bool idle)
         {
+            if(idle&&!o.InCombat&&!CanOperate(o)&&Plan.MapMatches(o)&&NavigationMath.InRange(o.X,0,1)&&NavigationMath.InRange(o.Y,0,1))JoinNearest(o);
             if(!SearchingNearby||!idle||o.InCombat)return;
             if(nearbyUntil<0)nearbyUntil=now+2500;
             if(now<nearbyUntil)return;
             SearchingNearby=false;
+            JoinNearest(o);
+        }
+        void JoinNearest(FarmObservation o)
+        {
             int nearest=0;double distance=Double.PositiveInfinity;
             for(int i=0;i<Plan.Route.Points.Count-1;i++){var w=Plan.Route.Points[i];double d=NavigationMath.Distance(o.X-w.X,o.Y-w.Y,Plan.Calibration.AxisScale);if(d<distance){distance=d;nearest=i;}}
             returnX=Plan.Route.Points[nearest].X;returnY=Plan.Route.Points[nearest].Y;TargetIndex=nearest+1;Returning=Joining=true;suspended=false;progressAt=targetAt=-1;
@@ -169,7 +174,7 @@ namespace WoWProbe
             double bearing=Math.Atan2((tx-o.X)*calibration.AxisScale,-(ty-o.Y));
             double facing=NavigationMath.Normalize(calibration.FacingSign*o.Facing+calibration.FacingOffset),delta=NavigationMath.Normalize(bearing-facing);
             string label=(Joining?"前往最近巡航点接入路线":Returning?"返回打怪前的路线位置":"沿指定路线前往路点"+(TargetIndex+1))+"，已完成"+Laps+"圈。";
-            if(Math.Abs(delta)>.12)return C(QuickAction.Turn,label,(ushort)(delta>0?39:37),Math.Max(40,Math.Min(120,(int)(Math.Abs(delta)/calibration.TurnRadiansPerSecond*1000))));
+            if(Math.Abs(delta)>.12){var turn=C(QuickAction.Turn,label,(ushort)(delta>0?39:37),Math.Max(40,Math.Min(120,(int)(Math.Abs(delta)/calibration.TurnRadiansPerSecond*1000))));turn.PauseForward=Math.Abs(delta)>.7||NavigationMath.Distance(tx-o.X,ty-o.Y,calibration.AxisScale)<.003&&Math.Abs(delta)>.2;return turn;}
             return C(QuickAction.Patrol,label,87,1000);
         }
         QuickCommand C(QuickAction a,string text,ushort key,int hold){return new QuickCommand{Action=a,Reason=text,Key=key,Hold=hold,RouteMovement=true,RouteContext=this};}

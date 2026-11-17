@@ -31,6 +31,9 @@ namespace WoWProbe
         public uint KillCredits { get; private set; }
         public bool SkinBindingKnown {get;private set;}public bool SkinBindingCorrect {get;private set;}
         public int FoodCount {get;private set;}
+        public bool TargetClaimKnown {get;private set;}public bool TargetClaimedByOther {get;private set;}
+        public bool TargetCombatKnown {get;private set;}public bool TargetInCombat {get;private set;}
+        public bool TargetVictimKnown {get;private set;}public bool TargetTargetsPlayer {get;private set;}
         public double TargetX { get; private set; }
         public double TargetY { get; private set; }
         public Rectangle Portrait { get; private set; }
@@ -43,7 +46,8 @@ namespace WoWProbe
             if(b[0]!=87 || b[1]!=67 || b[2]!=51 || b[3]!=1) throw Invalid("Unsupported WC3 signature or version.");
             int a=0,s=0;for(int i=0;i<126;i++){a=(a+b[i])%255;s=(s+a)%255;}
             if(b[126]!=a || b[127]!=s)throw Invalid("WC3 Fletcher16 checksum mismatch.");
-            for(int i=79;i<126;i++)if(b[i]!=0)throw Invalid("WC3 reserved bytes must be zero.");
+            for(int i=80;i<126;i++)if(b[i]!=0)throw Invalid("WC3 reserved bytes must be zero.");
+            if((b[79]&~63)!=0||(b[79]&3)==2||(b[79]&12)==8||(b[79]&48)==32)throw Invalid("WC3 target ownership flags are inconsistent.");
             if(b[75]>3||b[75]==2||b[76]>1||b[76]==0&&U16(b,77)!=0||b[76]==1&&U16(b,77)==65535)throw Invalid("WC3 optional action setup is inconsistent.");
             uint creditName=U32(b,66),credits=U32(b,70);
             if(b[74]>1||b[74]==0&&(creditName!=0||credits!=0)||(creditName==0)!=(credits==0))throw Invalid("WC3 kill credit evidence is inconsistent.");
@@ -72,6 +76,8 @@ namespace WoWProbe
                 ReadyActionsMask=ready,UsableActionsMask=usable,ExtraKnownFlags=k,TargetToken=token,TargetNameHash=name,
                 CastEndMilliseconds=end,LootOpened=opened,LootClosed=closed,CastSuccess=success,CastFailed=failed,SkinSuccess=skin,DeathToken=deathToken,TargetDeaths=deaths,ChatOpenKnown=(b[65]&1)!=0,ChatOpen=(b[65]&2)!=0,KillCreditsKnown=b[74]==1,KillCreditNameHash=creditName,KillCredits=credits,SkinBindingKnown=(b[75]&1)!=0,SkinBindingCorrect=(b[75]&2)!=0,FoodCount=b[76]==1?U16(b,77):-1,
                 TargetX=x==65535?Double.NaN:x/65534.0,TargetY=y==65535?Double.NaN:y/65534.0,
+                TargetClaimKnown=(b[79]&1)!=0,TargetClaimedByOther=(b[79]&2)!=0,TargetCombatKnown=(b[79]&4)!=0,TargetInCombat=(b[79]&8)!=0,
+                TargetVictimKnown=(b[79]&16)!=0,TargetTargetsPlayer=(b[79]&32)!=0,
                 Portrait=(k&1)!=0?new Rectangle(px,py,pw,ph):Rectangle.Empty };
         }
         private static void Flag(int c,int cap,int flags,int mask){if((c&cap)==0 && (flags&mask)!=0)throw Invalid("Unknown WC3 flag cannot be true.");}
@@ -94,6 +100,7 @@ namespace WoWProbe
             TargetIdentityKnown,NameHashKnown,AttackabilityKnown,TargetCanAttack,TargetIsPlayer,RangeKnown,TargetInRange,
             TargetPositionKnown,LootKnown,Lootable,SkinKnown,Skinnable,CastingKnown,Casting,Channeling,ActionsKnown,
             LootEventsKnown,CastEventsKnown,SkinSuccessKnown,PortraitKnown,VisualHealth,VisualPower,DeathEventsKnown,ChatOpenKnown,ChatOpen,KillCreditsKnown,SkinBindingKnown,SkinBindingCorrect;
+        public bool TargetClaimKnown,TargetClaimedByOther,TargetCombatKnown,TargetInCombat,TargetVictimKnown,TargetTargetsPlayer;
 
         public static FarmObservation FromPackets(ProbePacket core,CombatPacket extra,bool fresh)
         {
@@ -122,6 +129,8 @@ namespace WoWProbe
             o.KillCreditsKnown=extra.KillCreditsKnown;o.KillCreditNameHash=extra.KillCreditNameHash;o.KillCredits=extra.KillCredits;
             o.SkinBindingKnown=extra.SkinBindingKnown;o.SkinBindingCorrect=extra.SkinBindingCorrect;o.FoodCount=extra.FoodCount;
             if(!o.TargetExists)return o;
+            o.TargetClaimKnown=extra.TargetClaimKnown;o.TargetClaimedByOther=extra.TargetClaimedByOther;o.TargetCombatKnown=extra.TargetCombatKnown;o.TargetInCombat=extra.TargetInCombat;
+            o.TargetVictimKnown=extra.TargetVictimKnown;o.TargetTargetsPlayer=extra.TargetTargetsPlayer;
             o.TargetIdentityKnown=(c&1)!=0;o.TargetToken=extra.TargetToken;o.NameHashKnown=(k&4)!=0;o.TargetNameHash=extra.TargetNameHash;
             o.AttackabilityKnown=(c&2)!=0;o.TargetCanAttack=o.AttackabilityKnown && (f&1)!=0;o.TargetIsPlayer=o.AttackabilityKnown && (f&2)!=0;
             o.RangeKnown=(c&4)!=0;o.TargetInRange=o.RangeKnown && (f&4)!=0;

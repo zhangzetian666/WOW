@@ -16,7 +16,7 @@ namespace WoWProbe
         volatile bool cancelled;bool closeWhenStopped;Thread worker;
         public QuickGrindForm(bool autoStart)
         {
-            Text="固定路线自动打怪 · 拾取修复版 0.7.4";Size=new Size(1080,820);MinimumSize=new Size(960,700);Font=new Font("Microsoft YaHei UI",10);StartPosition=FormStartPosition.CenterScreen;
+            Text="固定路线自动打怪 · 巡航修复版 0.7.5";Size=new Size(1080,820);MinimumSize=new Size(960,700);Font=new Font("Microsoft YaHei UI",10);StartPosition=FormStartPosition.CenterScreen;
             var layout=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=4,ColumnCount=1,Padding=new Padding(12)};
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute,70));layout.RowStyles.Add(new RowStyle(SizeType.Percent,70));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,44));layout.RowStyles.Add(new RowStyle(SizeType.Percent,30));Controls.Add(layout);
             layout.Controls.Add(new Label{Text="配置闭合路线后点击开始，自动前往最近巡航点接入；发现附近怪物可离线接近打怪。\n无怪继续下一点；受到攻击优先还击。242223后持续2；低于80%吃食物后返回路线。\n保持游戏前台，F12急停。每轮最多10分钟；跑尸另配路线，不自动修理或售卖。",Dock=DockStyle.Fill},0,0);
@@ -26,7 +26,7 @@ namespace WoWProbe
             FormClosing+=delegate(object sender,FormClosingEventArgs e){if(worker!=null&&worker.IsAlive){closeWhenStopped=true;cancelled=true;e.Cancel=true;Append("正在停止，释放按键后关闭窗口。");}};
             Shown+=delegate{string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-patrol.json"),draft=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-patrol-recording.json");try{if(File.Exists(draft)&&( !File.Exists(path)||File.GetLastWriteTimeUtc(draft)>=File.GetLastWriteTimeUtc(path))){routeEditor.Bind(QuickRoutePlan.LoadRecording(draft));Append("已恢复上次录点草稿；可以继续保存当前巡航点，闭合后再开始。");}else if(File.Exists(path)){routeEditor.Bind(QuickRoutePlan.Load(path));Append("已载入本机上次巡航方案；核对移动参数后点击开始。");}else Append("走到A点点击“保存当前巡航点”，再走到B、C、D依次保存，最后闭合到起点。");}catch(Exception e){Append("方案未载入："+e.Message);}};
         }
-        void Append(string message){if(IsDisposed)return;if(InvokeRequired){BeginInvoke((Action)(()=>Append(message)));return;}log.AppendText(DateTime.Now.ToString("HH:mm:ss")+" "+message+Environment.NewLine);}
+        void Append(string message){if(IsDisposed||message.StartsWith("KeyDown")||message.StartsWith("KeyUp"))return;if(InvokeRequired){BeginInvoke((Action)(()=>Append(message)));return;}if(log.TextLength>70000)log.Text=log.Text.Substring(log.TextLength-40000);log.AppendText(DateTime.Now.ToString("HH:mm:ss")+" "+message+Environment.NewLine);}
         void BeginRun()
         {
             if(worker!=null&&worker.IsAlive)return;

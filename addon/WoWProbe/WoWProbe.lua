@@ -549,6 +549,21 @@ function P.BuildCombatPacket(core)
             if a~=nil and b~=nil then return a,b end
         end)
         if attack~=nil then caps=caps+2;if attack then flags=flags+1 end;if player then flags=flags+2 end end
+        local ownership=0
+        local denied=section("targetClaim",function()
+            if type(UnitIsTapDenied)=="function" then return combatBool("UnitIsTapDenied",UnitIsTapDenied,"target") end
+            if type(UnitIsTapped)=="function" and type(UnitIsTappedByPlayer)=="function" then
+                local tapped=combatBool("UnitIsTapped",UnitIsTapped,"target")
+                local mine=combatBool("UnitIsTappedByPlayer",UnitIsTappedByPlayer,"target")
+                if tapped~=nil and mine~=nil then return tapped and not mine end
+            end
+        end)
+        if denied~=nil then ownership=ownership+1;if denied then ownership=ownership+2 end end
+        local fighting=section("targetCombat",function()if type(UnitAffectingCombat)=="function" then return combatBool("UnitAffectingCombat(target)",UnitAffectingCombat,"target") end end)
+        if fighting~=nil then ownership=ownership+4;if fighting then ownership=ownership+8 end end
+        local victim=section("targetVictim",function()if type(UnitIsUnit)=="function" then return combatBool("UnitIsUnit(targettarget,player)",UnitIsUnit,"targettarget","player") end end)
+        if victim~=nil then ownership=ownership+16;if victim then ownership=ownership+32 end end
+        put(79,ownership)
         local range=section("range",function()
             local slot=actionSlot(P.rangeSlot)
             if slot then
@@ -824,7 +839,7 @@ local function printLine(text)
 end
 function P.ResetDiagnostics()
     local visible = type(WoWProbeDB) == "table" and WoWProbeDB.visible ~= false
-    WoWProbeDB = { schema = 1, addonVersion = "0.5.2", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
+    WoWProbeDB = { schema = 1, addonVersion = "0.5.3", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
     readClient(); captureBindings(); captureAPIs(); if P.panel then P.ScalePanel() end
 end
 function P.Command(command)
@@ -962,7 +977,7 @@ function P.Initialize()
     WoWProbeDB = old; WoWProbeDB.visible = visible
     if integer(old.rangeSlot,4) and old.rangeSlot>=1 then P.rangeSlot=old.rangeSlot end
     WoWProbeDB.previousSession = previous
-    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.2"
+    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.3"
     WoWProbeDB.errors, WoWProbeDB.bindings, WoWProbeDB.capabilities = {}, {}, {}
     readClient(); captureBindings(); captureAPIs()
     local ok, reason = pcall(createPanel)
