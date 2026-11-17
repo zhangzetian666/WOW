@@ -1,4 +1,4 @@
-using System;
+﻿using System;
 using System.Drawing;
 using WoWProbe;
 class QuickRecoveryTests
@@ -11,6 +11,7 @@ class QuickRecoveryTests
     static void Test(string name,Action body){try{body();passed++;Console.WriteLine("PASS "+name);}catch(Exception ex){failed++;Console.WriteLine("FAIL "+name+": "+ex.Message);}}
     static int Main()
     {
+        Test("startup route availability agrees with map mode zone and corpse purpose",()=>{var o=O().Farm;var r=new RouteDocument{RouteType="corpse_run",MapId=o.MapId,MapMode=o.MapMode,Zone=o.Zone};Check(QuickRecovery.RouteMatches(r,o));r.MapId++;Check(!QuickRecovery.RouteMatches(r,o));r.MapId=o.MapId;r.MapMode++;Check(!QuickRecovery.RouteMatches(r,o));r.MapMode=o.MapMode;r.Zone="another";Check(!QuickRecovery.RouteMatches(r,o));r.Zone=o.Zone;r.RouteType="farm";Check(!QuickRecovery.RouteMatches(r,o));Check(!QuickRecovery.RouteMatches(null,o));});
         Test("release is a single click in the observed button and ghost travel follows",()=>{var o=O();var e=Engine(o);var c=Step(e,o,0);Check(c.Action==QuickRecoveryAction.Click&&c.Release&&QuickRecovery.Matches(c,o));Check(Step(e,o,1000).Action==QuickRecoveryAction.None);o.Farm.PlayerGhost=true;Check(!QuickRecovery.Matches(c,o));Check(Step(e,o,2000).Action==QuickRecoveryAction.None);Check(Step(e,o,2200).Action!=QuickRecoveryAction.Stop);});
         Test("known zero cooldown and actual button are required to resurrect",()=>{var o=O();o.Farm.PlayerGhost=true;o.Farm.X=.344;o.Farm.Y=.512;var e=Engine(o);o.ResurrectVisible=o.ResurrectEnabled=true;o.RecoveryDelayMs=30000;Check(Step(e,o,0).Action!=QuickRecoveryAction.Click);o.RecoveryDelayMs=0;var c=Step(e,o,1000);Check(c.Action==QuickRecoveryAction.Click&&!c.Release&&QuickRecovery.Matches(c,o));o.ResurrectRegion=new Rectangle(20,20,40,40);Check(!QuickRecovery.Matches(c,o));});
         Test("two distinct positive living frames complete recovery",()=>{var o=O();var e=Engine(o);o.Farm.PlayerDead=false;o.Farm.Health=50;Check(Step(e,o,0).Action==QuickRecoveryAction.None);Check(e.Step(o,40).Action==QuickRecoveryAction.None);Check(Step(e,o,200).Action==QuickRecoveryAction.Complete);});

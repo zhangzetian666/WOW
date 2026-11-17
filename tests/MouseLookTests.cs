@@ -1,10 +1,11 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using WoWProbe;
 class MouseLookTests
 {
     static int Main()
     {
+        if(!MouseLookInput.TurnObserved(6.26,.05)||MouseLookInput.TurnObserved(1,1)||MouseLookInput.TurnObserved(1,1+2*Math.PI)||MouseLookInput.TurnObserved(Double.NaN,1)||MouseLookInput.TurnObserved(1,Double.PositiveInfinity))throw new Exception("Wrapped or unknown facing was misclassified.");
         var events=new List<string>();int x=0,y=0;
         MouseLookInput.Run(50,-18,()=>{},()=>false,()=>events.Add("down"),()=>events.Add("up"),(a,b)=>{x+=a;y+=b;},ms=>{});
         if(x!=50||y!=-18||String.Join(",",events.ToArray())!="down,up")throw new Exception("Movement or button ownership differs.");

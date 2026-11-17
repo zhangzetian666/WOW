@@ -20,6 +20,7 @@ namespace WoWProbe
         long restStarted,missingCombatTarget=-1,missingTarget=-1,nextDefensive;
         double progressX,progressY; uint progressCasts; long progressAt;
         int escapes,escapePhase;
+        double escapeFacing;long turnDeadline;
         readonly bool skinning;QuickCorpse corpse;int creditedLoots,creditedSkins;
         public int Loots {get;private set;}public int Skins {get;private set;}
         public int Kills { get; private set; }
@@ -94,8 +95,13 @@ namespace WoWProbe
                 if(escapePhase!=0)
                 {
                     if(o.InCombat){escapePhase=0;progressAt=now;}
-                    else if(escapePhase==1){escapePhase=2;return Cmd(QuickAction.DetourTurn,"脱困：换一个方向。",(ushort)(escapes%2==1?39:37));}
-                    else {escapePhase=0;progressAt=now;nextFace=now+500;return Cmd(QuickAction.DetourForward,"脱困：沿新方向短距离移动，再重新面向目标。",87);}
+                    else if(escapePhase==1){escapePhase=2;escapeFacing=o.Facing;turnDeadline=now+3000;return Cmd(QuickAction.DetourTurn,"脱困：按住鼠标右键横拖，改变角色方向。",(ushort)(escapes%2==1?39:37));}
+                    else
+                    {
+                        if(!MouseLookInput.TurnObserved(escapeFacing,o.Facing))
+                            return now<turnDeadline?Cmd(QuickAction.None,"等待确认角色实际转向，暂不前进。",0):Stop("右键转向后未观察到角色朝向变化，停止前进。");
+                        escapePhase=0;progressAt=now;nextFace=now+500;return Cmd(QuickAction.DetourForward,"脱困：已确认转向，沿新方向短距离移动，再重新面向目标。",87);
+                    }
                 }
                 double moved=(o.X-progressX)*(o.X-progressX)+(o.Y-progressY)*(o.Y-progressY);
                 if(moved>=0.00000009||o.CastEventsKnown&&o.CastSuccess!=progressCasts)

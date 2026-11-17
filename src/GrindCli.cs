@@ -85,15 +85,21 @@ namespace WoWProbe
             try
             {
                 input.Ensure();if(o.PlayerDead||o.PlayerGhost||o.InCombat||o.ChatOpen||!o.ChatOpenKnown)throw new InvalidOperationException("只在存活、脱战、聊天关闭时校准视角。");
-                Func<bool> held=()=>backend.IsKeyAlreadyDown(1)||backend.IsKeyAlreadyDown(2)||backend.IsKeyAlreadyDown(16)||backend.IsKeyAlreadyDown(17)||backend.IsKeyAlreadyDown(18);
-                if(held())throw new InvalidOperationException("请先松开鼠标及 Shift/Ctrl/Alt。");
-                Native.MoveMouse(new Point(client.Left+client.Width/2,client.Top+client.Height/2));
-                MouseLookInput.Run(dx,dy,()=>input.Ensure(),held,()=>Native.SendMouseButton(true,false),()=>Native.SendMouseButton(true,true),Native.MoveMouseRelative,ms=>Pause(ms));
+                RightMouseLook(backend,dx,dy);
                 Pause(250);var after=Snapshot();
                 Console.WriteLine("MouseLook dx="+dx+" dy="+dy+" FacingBefore="+o.Facing.ToString("F4")+" FacingAfter="+after.Facing.ToString("F4")+" PosBefore=("+o.X.ToString("F5")+","+o.Y.ToString("F5")+") PosAfter=("+after.X.ToString("F5")+","+after.Y.ToString("F5")+")");
                 return 0;
             }
             finally{input=null;}
+        }
+
+        static void RightMouseLook(IInputBackend backend,int dx,int dy)
+        {
+            Action ensure=()=>{RequireInput().Ensure();if(Native.ClientBounds(target)!=client)throw new InvalidOperationException("窗口位置或大小改变，停止鼠标转向。");};
+            Func<bool> held=()=>backend.IsKeyAlreadyDown(1)||backend.IsKeyAlreadyDown(2)||backend.IsKeyAlreadyDown(16)||backend.IsKeyAlreadyDown(17)||backend.IsKeyAlreadyDown(18);
+            ensure();if(held())throw new InvalidOperationException("请先松开鼠标及 Shift/Ctrl/Alt。");
+            Native.MoveMouse(new Point(client.Left+client.Width/2,client.Top+client.Height/2));
+            MouseLookInput.Run(dx,dy,ensure,held,()=>Native.SendMouseButton(true,false),()=>Native.SendMouseButton(true,true),Native.MoveMouseRelative,ms=>Pause(ms));
         }
 
         internal static void RunQuick(int seconds, int interval, Func<bool> cancelled, Action<string> report,bool skinning=false)
@@ -121,7 +127,18 @@ namespace WoWProbe
                     if(anchor.BagFull)throw new InvalidOperationException("背包已满。");
                     if(!anchor.ChatOpenKnown||anchor.ChatOpen)throw new InvalidOperationException("请先关闭聊天输入框，并确认新版插件已加载。");
                     if(skinning&&(!anchor.SkinBindingKnown||!anchor.SkinBindingCorrect))throw new InvalidOperationException("请把当前剥皮技能放在7号技能栏，并确认按键为7；或取消勾选剥皮。");
-                    if(!anchor.PlayerDead&&!anchor.PlayerGhost&&anchor.FoodCount==0)throw new InvalidOperationException("食物键=对应物品数量为0，请补充后再开始。");
+                    if(!anchor.PlayerDead&&!anchor.PlayerGhost&&anchor.FoodCount<1)throw new InvalidOperationException("未确认食物键=有库存，请核对插件、栏位和食物数量后再开始。");
+                    RouteDocument recoveryRoute=null;
+                    string recoveryPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-corpse-route.json");
+                    if(File.Exists(recoveryPath))
+                    {
+                        try{var configured=RouteStore.Load(recoveryPath);if(QuickRecovery.RouteMatches(configured,anchor))recoveryRoute=configured;else write("跑尸未启用：随包路线与当前地图不匹配；死亡后停止。");}
+                        catch(Exception ex){write("跑尸未启用：路线无法读取；死亡后停止。"+ex.Message);}
+                    }
+                    else write("跑尸未启用：缺少 quick-corpse-route.json；死亡后停止。");
+                    if(recoveryRoute!=null)write("已载入当前地图跑尸路线："+recoveryRoute.Name+"；仅支持已标定的墓地和末端接入区域。");
+                    if((anchor.PlayerDead||anchor.PlayerGhost)&&recoveryRoute==null)throw new InvalidOperationException("当前没有匹配的跑尸路线，不能启动死亡恢复。");
+                    write("本入口不自动修理或售卖；包满、补给不足等情况会停止。技能键和移动标定须与本角色一致。");
                     write("附近自动打怪：242223开场，之后2，间隔"+interval+"ms。生命="+anchor.Health+"%（"+(anchor.VisualHealth?"原生血条画面":"API")+"）；启动先恢复满血，脱战低于80%吃喝。");
                     Activate(window.Handle);
                     for(int i=5;i>0;i--)
@@ -161,9 +178,8 @@ namespace WoWProbe
                             {
                                 CancelQuickMovement(backend);shot("death-"+(recoveries+1));
                                 if(++recoveries>3)throw new InvalidOperationException("本轮已复活三次，停止检查装备、补给及怪物强度。");
-                                string recoveryPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-corpse-route.json");
-                                if(!File.Exists(recoveryPath))throw new InvalidOperationException("缺少当前地图的 quick-corpse-route.json 跑尸路线。");
-                                var route=RouteStore.Load(recoveryPath);
+                                if(recoveryRoute==null)throw new InvalidOperationException("当前地图没有匹配的跑尸路线，死亡恢复已停止。");
+                                var route=recoveryRoute;
                                 recovery=new QuickRecovery(route,new NavigationCalibration{MapId=route.MapId,MapMode=route.MapMode,Zone=route.Zone,Confirmed=true,AxisScale=1.5,FacingSign=-1,TurnRadiansPerSecond=5.85,ForwardUnitsPerSecond=.008},observed);
                                 write("确认死亡/幽魂，开始第"+recoveries+"次跑尸复活。");
                             }
@@ -204,6 +220,11 @@ namespace WoWProbe
                             {
                                 if(read().InCombat)Chat(backend,"/targetenemy");
                                 else Pulse(backend,command.Key,80);
+                            }
+                            else if(command.Action==QuickAction.DetourTurn)
+                            {
+                                CancelQuickMovement(backend);var before=read();RightMouseLook(backend,command.Key==39?120:-120,0);Pause(200);var after=read();
+                                write("右键转向观测："+before.Facing.ToString("F4")+" → "+after.Facing.ToString("F4")+"；确认角色转向后才前进。");
                             }
                             else
                             {

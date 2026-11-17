@@ -13,11 +13,13 @@ namespace WoWProbe
     {
         readonly RouteDocument route;readonly NavigationCalibration calibration;readonly uint map;readonly int mode;readonly string zone;
         Navigator navigator;long started=-1,last=-1,clickedAt=-1;int sequence=-1,aliveFrames;bool released,resurrected;double corpseX=Double.NaN,corpseY;
+        public static bool RouteMatches(RouteDocument route,FarmObservation state)
+        {return route!=null&&state!=null&&route.RouteType=="corpse_run"&&route.MapId==state.MapId&&route.MapMode==state.MapMode&&route.Zone==state.Zone;}
         public QuickRecovery(RouteDocument route,NavigationCalibration calibration,FarmObservation death)
         {
             if(route==null||calibration==null||death==null)throw new ArgumentNullException("recovery configuration");
             route.Validate();calibration.Validate();
-            if(route.RouteType!="corpse_run"||route.MapId!=death.MapId||route.MapMode!=death.MapMode||route.Zone!=death.Zone)throw new InvalidOperationException("跑尸路线与当前地图不匹配。");
+            if(!RouteMatches(route,death))throw new InvalidOperationException("跑尸路线与当前地图不匹配。");
             this.route=route.Clone();this.calibration=calibration.Clone();map=death.MapId;mode=death.MapMode;zone=death.Zone;
         }
         QuickRecoveryCommand Command(QuickRecoveryAction action,string reason){return new QuickRecoveryCommand{Action=action,Reason=reason};}

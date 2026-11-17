@@ -16,8 +16,8 @@ namespace WoWProbe
         {
             Text="附近自动打怪 · 盗贼";Size=new Size(700,480);MinimumSize=new Size(600,380);Font=new Font("Microsoft YaHei UI",10);StartPosition=FormStartPosition.CenterScreen;
             var layout=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=3,ColumnCount=1,Padding=new Padding(12)};
-            layout.RowStyles.Add(new RowStyle(SizeType.Absolute,90));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,44));layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));Controls.Add(layout);
-            layout.Controls.Add(new Label{Text="把角色放在黄名怪附近，关闭聊天框。启动后保持游戏在前台。\n只主动选黄名怪，F面向接近、242223后持续2；F12急停。\n死亡按配置路线跑尸；先恢复满血，脱战低于80%吃食物。\n每轮最多10分钟、复活3次；无怪或单怪超时、失焦时停止。",Dock=DockStyle.Fill},0,0);
+            layout.RowStyles.Add(new RowStyle(SizeType.Absolute,125));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,44));layout.RowStyles.Add(new RowStyle(SizeType.Percent,100));Controls.Add(layout);
+            layout.Controls.Add(new Label{Text="适用已配置键位的盗贼；把角色放在黄名怪附近，关闭聊天框。\n只主动选黄名怪，F面向接近、242223后持续2；F12急停。\n跑尸仅限匹配且已标定的路线；复活先恢复满血，脱战低于80%吃食物。\n不自动修理或售卖，包满会停止。换电脑需先安装插件、核对键位并标定。\n保持游戏前台。每轮最多10分钟、复活3次；无怪、超时或失焦时停止。",Dock=DockStyle.Fill},0,0);
             var row=new FlowLayoutPanel{Dock=DockStyle.Fill};cadence.Items.AddRange(new object[]{"750ms","500ms"});cadence.SelectedIndex=0;row.Controls.Add(start);row.Controls.Add(stop);row.Controls.Add(cadence);row.Controls.Add(skinning);layout.Controls.Add(row,0,1);layout.Controls.Add(log,0,2);
             start.Click+=delegate{BeginRun();};stop.Click+=delegate{cancelled=true;};
             FormClosing+=delegate(object sender,FormClosingEventArgs e){if(worker!=null&&worker.IsAlive){closeWhenStopped=true;cancelled=true;e.Cancel=true;Append("正在停止，释放按键后关闭窗口。");}};

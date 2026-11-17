@@ -5,6 +5,11 @@ namespace WoWProbe
     // a user's held button, and always releases our button after any failure.
     public static class MouseLookInput
     {
+        public static bool TurnObserved(double before,double after)
+        {
+            if(Double.IsNaN(before)||Double.IsNaN(after)||Double.IsInfinity(before)||Double.IsInfinity(after))return false;
+            return Math.Abs(NavigationMath.Normalize(after-before))>=.04;
+        }
         public static void Run(int dx,int dy,Action ensure,Func<bool> held,Action down,Action up,Action<int,int> move,Action<int> wait)
         {
             if(Math.Abs((long)dx)>160||Math.Abs((long)dy)>160||(dx==0&&dy==0))throw new ArgumentOutOfRangeException("dx/dy");
