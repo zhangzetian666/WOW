@@ -6,7 +6,7 @@ namespace WoWProbe
     public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin }
     public sealed class QuickCommand
     {
-        public QuickAction Action; public ushort Key; public uint Token,IgnoredTarget; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement,PauseForward;public QuickRouteFollower RouteContext;
+        public QuickAction Action; public ushort Key; public uint Token,IgnoredTarget; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement,PauseForward,CombatRecovery;public QuickRouteFollower RouteContext;
     }
 
     // Nearby combat only. The game's confirmed F/click-to-move binding supplies
@@ -34,6 +34,7 @@ namespace WoWProbe
         long restStarted,missingCombatTarget=-1,missingTarget=-1,nextDefensive;
         double progressX,progressY; uint progressCasts; long progressAt;
         int escapes,escapePhase;
+        bool escapeCombat;int combatEscapes;long combatCastAt;uint combatCasts;
         double escapeFacing;long turnDeadline;
         bool patrolPending,searchTurning;double patrolX,patrolY,searchFacing;int blockedWalks,searchEscapes;long searchDeadline,patrolCheckAt;
         readonly bool skinning;QuickCorpse corpse;int creditedLoots,creditedSkins;
@@ -53,7 +54,7 @@ namespace WoWProbe
             map=initial.MapId;mode=initial.MapMode;zone=initial.Zone;x=initial.X;y=initial.Y;this.interval=interval;this.skinning=skinning;this.route=route;
         }
         QuickCommand Cmd(QuickAction a,string r,ushort k)
-        {return new QuickCommand{Action=a,Reason=r,Key=k,Token=token,RouteContext=route};}
+        {return new QuickCommand{Action=a,Reason=r,Key=k,Token=token,RouteContext=route,CombatRecovery=escapeCombat&&(a==QuickAction.BackOff||a==QuickAction.DetourTurn||a==QuickAction.DetourForward)};}
         QuickCommand Stop(string reason){stopped=true;return Cmd(QuickAction.Stop,reason,0);}
         public QuickCommand Step(FarmObservation o,long now)
         {
@@ -67,7 +68,7 @@ namespace WoWProbe
             if(o.MapId!=map||o.MapMode!=mode||o.Zone!=zone)return Stop("地图发生变化。");
             if(route!=null){route.TickNearbySearch(o,now,token==0&&!resting);route.ObserveCombat(o);if(!route.CanOperate(o))return Stop("角色超出巡航及追怪范围，停止追击。");}
             else if(Double.IsNaN(o.X)||Double.IsNaN(o.Y)||Math.Abs(o.X-x)>0.04||Math.Abs(o.Y-y)>0.04)return Stop("离开启动位置四坐标点范围，停止追击。");
-            if(token!=0&&!looted&&now-started>=45000)return Stop("单怪45秒未确认击杀，停止并检查朝向、距离和伤害。");
+            if(token!=0&&!looted&&!o.InCombat&&now-started>=45000)return Stop("单怪45秒未确认击杀，停止并检查朝向、距离和伤害。");
             if(resting&&!o.InCombat&&now-restStarted>=60000)return Stop("60秒内未恢复满，检查食物和饮水绑定。");
             if(sequence==o.Sequence)return Cmd(QuickAction.None,"等待新一帧状态。",0);sequence=o.Sequence;
             if(!o.CastingKnown)return Stop("施法状态不可读。");
@@ -123,16 +124,22 @@ namespace WoWProbe
                 if(!o.TargetCanAttack)return Stop("目标不再可攻击。");
                 if(o.InCombat&&o.PowerType==3&&o.Health<45&&now>=nextDefensive)
                 {nextDefensive=now+120000;return Cmd(QuickAction.Defensive,"血量低于45%，尝试9闪避；继续当前战斗。",57);}
+                if(o.CastEventsKnown&&o.CastSuccess!=combatCasts){combatCasts=o.CastSuccess;combatCastAt=now;combatEscapes=0;}
                 if(escapePhase!=0)
                 {
-                    if(o.InCombat){escapePhase=0;progressAt=now;}
+                    if(o.InCombat&&!escapeCombat||!o.InCombat&&escapeCombat){escapePhase=0;escapeCombat=false;progressAt=now;}
                     else if(escapePhase==1){escapePhase=2;escapeFacing=o.Facing;turnDeadline=now+3000;return Cmd(QuickAction.DetourTurn,"脱困：按住鼠标右键横拖，改变角色方向。",(ushort)(escapes%2==1?39:37));}
                     else
                     {
                         if(!MouseLookInput.TurnObserved(escapeFacing,o.Facing))
                             return now<turnDeadline?Cmd(QuickAction.None,"等待确认角色实际转向，暂不前进。",0):Stop("右键转向后未观察到角色朝向变化，停止前进。");
-                        escapePhase=0;progressAt=now;nextFace=now+500;return Cmd(QuickAction.DetourForward,"脱困：已确认转向，沿新方向短距离移动，再重新面向目标。",87);
+                        escapePhase=0;progressAt=now;nextFace=now+500;var forward=Cmd(QuickAction.DetourForward,"脱困：已确认转向，沿新方向短距离移动，再重新面向目标。",87);escapeCombat=false;return forward;
                     }
+                }
+                if(o.InCombat&&o.CastEventsKnown&&now-combatCastAt>=3500)
+                {
+                    if(combatEscapes>=3){combatEscapes=0;combatCastAt=now+10000;}
+                    else{combatEscapes++;combatCastAt=now;escapeCombat=true;escapePhase=1;return Cmd(QuickAction.BackOff,"战斗中持续无成功施法：后退换向并试走，绕开遮挡后重新面向攻击者。",83);}
                 }
                 double moved=(o.X-progressX)*(o.X-progressX)+(o.Y-progressY)*(o.Y-progressY);
                 if(moved>=0.00000009||o.CastEventsKnown&&o.CastSuccess!=progressCasts)
@@ -142,7 +149,7 @@ namespace WoWProbe
                     if(escapes>=2)return route!=null?AbandonChase(now,"两次脱困仍未接近目标，返回路线寻找下一只。"):Stop("连续两次换向仍无法接近怪物，停止以免持续顶住障碍。");
                     escapes++;escapePhase=1;progressAt=now;return Cmd(QuickAction.BackOff,"位置持续不变且未进入战斗：取消直走，后退后换向。",83);
                 }
-                if(now-started>=45000)return Stop("单怪45秒未确认击杀，停止并检查朝向、距离和伤害。");
+                if(!o.InCombat&&now-started>=45000)return Stop("单怪45秒未确认击杀，停止并检查朝向、距离和伤害。");
                 if(now>=nextFace)
                 {nextFace=now+1500;return Cmd(QuickAction.Face,"F：让游戏面向并接近锁定怪物。",0x46);}
                 if(now>=nextSkill)
@@ -154,7 +161,7 @@ namespace WoWProbe
                 return Cmd(QuickAction.None,"等待下一拍技能。",0);
             }
             if(ShouldAcquire(o,now))
-            {if(route!=null)route.Interrupt(o);token=o.TargetToken;lockedTargetName=o.TargetName;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;opening=loopIndex=deadFrames=escapes=escapePhase=0;patrolPending=searchTurning=false;blockedWalks=searchEscapes=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName,0);}
+            {if(route!=null)route.Interrupt(o);token=o.TargetToken;lockedTargetName=o.TargetName;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;opening=loopIndex=deadFrames=escapes=escapePhase=combatEscapes=0;escapeCombat=false;combatCastAt=now;combatCasts=o.CastSuccess;patrolPending=searchTurning=false;blockedWalks=searchEscapes=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName,0);}
             if(route!=null&&!o.InCombat)
             {
                 if((route.SearchingNearby||!route.Returning)&&now>=nextScan){nextScan=now+1200;return Cmd(QuickAction.Scan,"移动中扫描附近怪物；附近无目标再前往巡航点。",9);}
@@ -252,7 +259,7 @@ namespace WoWProbe
             if(c.Action==QuickAction.Food||c.Action==QuickAction.Drink)return !o.InCombat;
             if(!o.TargetExists||!o.TargetIdentityKnown||c.Token==0||o.TargetToken!=c.Token||o.TargetIsPlayer||!o.AttackabilityKnown||!o.TargetDeadKnown)return false;
             if(c.Action==QuickAction.CorpseApproach)return o.TargetDead&&!o.InCombat&&o.SkinKnown&&o.Skinnable;
-            if(c.Action==QuickAction.BackOff||c.Action==QuickAction.DetourTurn||c.Action==QuickAction.DetourForward)return !o.InCombat&&!o.TargetDead&&o.TargetCanAttack;
+            if(c.Action==QuickAction.BackOff||c.Action==QuickAction.DetourTurn||c.Action==QuickAction.DetourForward)return (c.CombatRecovery?o.InCombat:!o.InCombat)&&!o.TargetDead&&o.TargetCanAttack;
             if(c.Action==QuickAction.Skin)return o.TargetDead&&!o.InCombat&&o.SkinKnown&&o.Skinnable&&o.SkinBindingKnown&&o.SkinBindingCorrect;
             return c.Action==QuickAction.Loot?o.TargetDead&&!o.InCombat:!o.TargetDead&&o.TargetCanAttack;
         }
