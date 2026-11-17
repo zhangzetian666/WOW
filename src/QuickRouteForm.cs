@@ -9,6 +9,7 @@ namespace WoWProbe
     {
         readonly TextBox routeName=new TextBox{Text="我的打怪路线",Width=150},mapId=new TextBox{Width=75},zone=new TextBox{Width=120};
         readonly NumericUpDown mode=N(1,3,1,0),corridor=N(.05m,2,.5m,2),tolerance=N(.01m,.5m,.1m,2),axis=N(.1m,10,1.5m,3),offset=N(-6.2832m,6.2832m,0,4),turn=N(.1m,10,5.85m,3),speed=N(.0001m,.2m,.008m,4);
+        readonly NumericUpDown chase=N(.05m,5,2,2);
         readonly ComboBox sign=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,Width=85};
         readonly CheckBox confirmed=new CheckBox{Text="本机地图与移动参数已核对",AutoSize=true};
         readonly DataGridView grid=new DataGridView();readonly RouteCanvas canvas=new RouteCanvas{Dock=DockStyle.Fill};
@@ -34,7 +35,8 @@ namespace WoWProbe
             var map=Row();map.AutoSize=true;L(map,"地图ID");map.Controls.Add(mapId);L(map,"模式");map.Controls.Add(mode);L(map,"区域");map.Controls.Add(zone);map.Controls.Add(B("读取当前地图",ReadMap));settings.Controls.Add(map);
             var first=Row();first.AutoSize=true;L(first,"横纵比");first.Controls.Add(axis);L(first,"朝向方向");sign.Items.AddRange(new object[]{"-1","+1"});sign.SelectedIndex=0;first.Controls.Add(sign);L(first,"朝向偏移");first.Controls.Add(offset);settings.Controls.Add(first);
             var second=Row();second.AutoSize=true;L(second,"转速 rad/s");second.Controls.Add(turn);L(second,"移动速度");second.Controls.Add(speed);second.Controls.Add(B("导入标定",ImportCalibration));settings.Controls.Add(second);settings.Controls.Add(confirmed);
-            settings.Controls.Add(new Label{AutoSize=true,MaximumSize=new Size(800,0),Text="坐标使用地图显示的0–100。新电脑需核对插件、地图、方向键与移动参数。\n循环必须显式回到起点；从角色附近的路段接入，按输入顺序循环。\n只在路线范围内活动。目标位置未知时沿线走近尝试攻击，不向远处追怪；路点之间不能自动绕过山崖或建筑。"});
+            var combat=Row();combat.AutoSize=true;L(combat,"离线追怪范围（坐标点）");combat.Controls.Add(chase);settings.Controls.Add(combat);
+            settings.Controls.Add(new Label{AutoSize=true,MaximumSize=new Size(800,0),Text="坐标使用地图显示的0–100。新电脑需核对插件、地图、方向键与移动参数。\n巡航沿输入顺序循环；发现附近黄名怪可离开路线接近、击杀，之后返回原路段。\n主动接近最多12秒且受追怪范围限制。受到攻击优先还击，脱战后再恢复、返回巡航；路段间请避开障碍。"});
             grid.CellEndEdit+=delegate{Preview();};grid.RowsRemoved+=delegate{Preview();};corridor.ValueChanged+=delegate{Preview();};tolerance.ValueChanged+=delegate{Preview();};
             foreach(var number in new[]{axis,offset,turn,speed,mode})number.ValueChanged+=delegate{confirmed.Checked=false;Preview();};sign.SelectedIndexChanged+=delegate{confirmed.Checked=false;};mapId.TextChanged+=delegate{confirmed.Checked=false;};zone.TextChanged+=delegate{confirmed.Checked=false;};
         }
@@ -54,13 +56,14 @@ namespace WoWProbe
                 if(!Double.TryParse(Convert.ToString(row.Cells[1].Value),NumberStyles.Float,CultureInfo.InvariantCulture,out x)||!Double.TryParse(Convert.ToString(row.Cells[2].Value),NumberStyles.Float,CultureInfo.InvariantCulture,out y)||!NavigationMath.InRange(x,0,100)||!NavigationMath.InRange(y,0,100))throw new FormatException("第"+(row.Index+1)+"点必须输入0–100的X、Y坐标。");
                 r.Points.Add(new Waypoint{X=x/100,Y=y/100,Tolerance=(double)tolerance.Value/100});
             }
-            var p=new QuickRoutePlan{Route=r,CorridorWidth=(double)corridor.Value/100,Calibration=new NavigationCalibration{MapId=id,MapMode=r.MapMode,Zone=r.Zone,AxisScale=(double)axis.Value,FacingSign=sign.SelectedIndex==0?-1:1,FacingOffset=(double)offset.Value,TurnRadiansPerSecond=(double)turn.Value,ForwardUnitsPerSecond=(double)speed.Value,Confirmed=confirmed.Checked}};
+            var p=new QuickRoutePlan{Route=r,CorridorWidth=(double)corridor.Value/100,CombatRadius=(double)chase.Value/100,Calibration=new NavigationCalibration{MapId=id,MapMode=r.MapMode,Zone=r.Zone,AxisScale=(double)axis.Value,FacingSign=sign.SelectedIndex==0?-1:1,FacingOffset=(double)offset.Value,TurnRadiansPerSecond=(double)turn.Value,ForwardUnitsPerSecond=(double)speed.Value,Confirmed=confirmed.Checked}};
             return p;
         }
         public void Bind(QuickRoutePlan p)
         {
             routeName.Text=p.Route.Name;mapId.Text=p.Route.MapId.ToString();mode.Value=p.Route.MapMode;zone.Text=p.Route.Zone;
             corridor.Value=(decimal)p.CorridorWidth*100;if(p.Route.Points.Count>0)tolerance.Value=(decimal)p.Route.Points[0].Tolerance*100;
+            chase.Value=(decimal)p.CombatRadius*100;
             axis.Value=(decimal)p.Calibration.AxisScale;offset.Value=(decimal)p.Calibration.FacingOffset;turn.Value=(decimal)p.Calibration.TurnRadiansPerSecond;speed.Value=(decimal)p.Calibration.ForwardUnitsPerSecond;sign.SelectedIndex=p.Calibration.FacingSign==-1?0:1;
             grid.Rows.Clear();foreach(var point in p.Route.Points)grid.Rows.Add("",(point.X*100).ToString("F3",CultureInfo.InvariantCulture),(point.Y*100).ToString("F3",CultureInfo.InvariantCulture));confirmed.Checked=false;Preview();
         }

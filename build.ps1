@@ -1,4 +1,4 @@
-﻿param([switch]$Package)
+﻿param([switch]$Package,[switch]$QuickCheck)
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
@@ -12,6 +12,25 @@ $common = @('/nologo','/codepage:65001','/langversion:5','/optimize+','/r:System
 $sources = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -Filter '*.cs' | ForEach-Object { $_.FullName })
 & $compiler @common /target:winexe "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\WoWProbe.exe" @sources
 if ($LASTEXITCODE -ne 0) { throw 'Application compilation failed.' }
+if ($QuickCheck) {
+    if ($Package) { throw 'QuickCheck does not produce a release package.' }
+    $quickSources = @($sources | Where-Object { [System.IO.Path]::GetFileName($_) -notmatch '(^Program\.cs$|^Native\.cs$|^CampaignNative\.cs$|^GrindCli\.cs$|^FishingAudioNative\.cs$|^AssemblyInfo\.cs$|Form\.cs$)' })
+    foreach ($testName in @('QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','QuickForwardMotionTests','QuickRouteTests','GrindSafetyTests')) {
+        & $compiler @common /target:exe "/out:$bin\$testName.exe" @quickSources "$projectRoot\tests\$testName.cs"
+        if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
+        & "$bin\$testName.exe"
+        if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
+    }
+    foreach ($testName in @('GrindCliIntegrationTests','QuickRouteUiTests')) {
+        & $compiler @common /target:exe "/main:$testName" "/out:$bin\$testName.exe" @sources "$projectRoot\tests\$testName.cs"
+        if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
+        & "$bin\$testName.exe"
+        if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
+    }
+    Copy-Item -LiteralPath "$projectRoot\assets" -Destination $bin -Recurse -Force
+    Write-Output "QUICK_BUILD_OK $bin\WoWProbe.exe (targeted checks only; no package or live game test)"
+    return
+}
 & $compiler @common /target:exe "/out:$bin\CoreTests.exe" "$projectRoot\src\Core.cs" "$projectRoot\tests\CoreTests.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Core test compilation failed.' }
 & $compiler @common /target:exe "/out:$bin\NativeTests.exe" "$projectRoot\src\Core.cs" "$projectRoot\src\Native.cs" "$projectRoot\tests\NativeTests.cs"

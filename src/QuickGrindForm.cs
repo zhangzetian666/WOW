@@ -11,7 +11,7 @@ namespace WoWProbe
         readonly Button stop=new Button{Text="停止",AutoSize=true,Enabled=false};
         readonly TextBox log=new TextBox{Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,Dock=DockStyle.Fill};
         readonly ComboBox cadence=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,Width=100};
-        readonly CheckBox skinning=new CheckBox{Text="击杀后剥皮（7键）",AutoSize=true,Checked=true};
+        readonly CheckBox skinning=new CheckBox{Text="击杀及路边尸体剥皮（7键）",AutoSize=true,Checked=true};
         readonly QuickRouteEditor routeEditor=new QuickRouteEditor();
         volatile bool cancelled;bool closeWhenStopped;Thread worker;
         public QuickGrindForm(bool autoStart)
@@ -19,7 +19,7 @@ namespace WoWProbe
             Text="固定路线自动打怪 · 盗贼";Size=new Size(1080,820);MinimumSize=new Size(960,700);Font=new Font("Microsoft YaHei UI",10);StartPosition=FormStartPosition.CenterScreen;
             var layout=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=4,ColumnCount=1,Padding=new Padding(12)};
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute,70));layout.RowStyles.Add(new RowStyle(SizeType.Percent,70));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,44));layout.RowStyles.Add(new RowStyle(SizeType.Percent,30));Controls.Add(layout);
-            layout.Controls.Add(new Label{Text="先配置A→B→C→D→A等闭合路线，角色放在路线范围内。点击开始后沿线循环找怪。\n仅主动攻击黄名怪，242223后持续2；低于80%吃食物，恢复后回到路线。F12急停。\n保持游戏前台。每轮最多10分钟；跑尸仍需另配路线，不自动修理或售卖。",Dock=DockStyle.Fill},0,0);
+            layout.Controls.Add(new Label{Text="配置闭合路线后点击开始，自动前往最近巡航点接入；发现附近怪物可离线接近打怪。\n无怪继续下一点；受到攻击优先还击。242223后持续2；低于80%吃食物后返回路线。\n保持游戏前台，F12急停。每轮最多10分钟；跑尸另配路线，不自动修理或售卖。",Dock=DockStyle.Fill},0,0);
             layout.Controls.Add(routeEditor,0,1);
             var row=new FlowLayoutPanel{Dock=DockStyle.Fill};cadence.Items.AddRange(new object[]{"750ms","500ms"});cadence.SelectedIndex=0;row.Controls.Add(start);row.Controls.Add(stop);row.Controls.Add(cadence);row.Controls.Add(skinning);layout.Controls.Add(row,0,2);layout.Controls.Add(log,0,3);
             start.Click+=delegate{BeginRun();};stop.Click+=delegate{cancelled=true;};
@@ -30,7 +30,7 @@ namespace WoWProbe
         void BeginRun()
         {
             if(worker!=null&&worker.IsAlive)return;
-            QuickRoutePlan plan;try{plan=routeEditor.ReadPlan(true);QuickRoutePlan.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-patrol.json"),plan);}catch(Exception e){Append("未开始："+e.Message);return;}
+            QuickRoutePlan plan;try{plan=routeEditor.ReadPlan(false);plan.Calibration.Confirmed=true;QuickRoutePlan.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-patrol.json"),plan);}catch(Exception e){Append("未开始："+e.Message);return;}
             cancelled=false;start.Enabled=cadence.Enabled=skinning.Enabled=routeEditor.Enabled=false;stop.Enabled=true;int interval=cadence.SelectedIndex==1?500:750;bool useSkin=skinning.Checked;GrindCli.FocusGameWindow();
             worker=new Thread(()=>{try{GrindCli.RunQuick(600,interval,()=>cancelled,Append,useSkin,plan);}catch(Exception ex){Append("停止："+ex.Message);}finally{if(!IsDisposed)BeginInvoke((Action)(()=>{worker=null;start.Enabled=cadence.Enabled=skinning.Enabled=routeEditor.Enabled=true;stop.Enabled=false;if(closeWhenStopped)Close();}));}});worker.IsBackground=true;worker.Start();
         }

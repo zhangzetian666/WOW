@@ -116,7 +116,7 @@ namespace WoWProbe
             Func<FarmObservation> read = () => { if(cancelled())throw new InvalidOperationException("用户停止。");return stream.Read(); };
             Func<GrindInputGuard> guard = () => new GrindInputGuard(backend,read,()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
             input=guard();
-            var searchMotion=new QuickForwardMotion(backend,()=>RequireInput().Ensure(),safety,o=>!routeFollower.MayAcquire(o));
+            var searchMotion=new QuickForwardMotion(backend,()=>RequireInput().Ensure(),safety,o=>!engine.ShouldAcquire(o,clock.ElapsedMilliseconds));
             string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"runtime");Directory.CreateDirectory(directory);
             string prefix=Path.Combine(directory,"quick-"+DateTime.Now.ToString("yyyyMMdd-HHmmss"));
             using(var frames=new StreamWriter(prefix+"-frames.tsv",false,new UTF8Encoding(false)))
@@ -223,7 +223,8 @@ namespace WoWProbe
                         input=new GrindInputGuard(backend,()=>{var o=read();if(!QuickCombat.Matches(command,o))throw new InvalidOperationException("目标状态变化，停止当前按键。");return o;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
                         try
                         {
-                            if(command.Action==QuickAction.Reacquire||command.Action==QuickAction.CorpseSelect){CancelQuickMovement(backend);Chat(backend,"/targetlasttarget");}
+                            if(command.Action==QuickAction.ReturnToRoute){CancelQuickMovement(backend);ChatChecked(backend,"/stopattack",()=>!read().InCombat);}
+                            else if(command.Action==QuickAction.Reacquire||command.Action==QuickAction.CorpseSelect){CancelQuickMovement(backend);Chat(backend,"/targetlasttarget");}
                             else if(command.Action==QuickAction.Scan)
                             {
                                 if(read().InCombat){searchMotion.Stop();Chat(backend,"/targetenemy");}
@@ -245,7 +246,8 @@ namespace WoWProbe
                                 if(command.RouteMovement&&command.Action==QuickAction.Turn)searchMotion.Start();
                                 int hold=command.Hold>0?command.Hold:command.Action==QuickAction.Turn?260:command.Action==QuickAction.BackOff?300:command.Action==QuickAction.DetourTurn?220:command.Action==QuickAction.DetourForward?600:80;
                                 Pulse(backend,command.Key,hold);
-                                if(command.Action==QuickAction.Face)CancelQuickMovement(backend);
+                                // F starts native approach/facing. Leave click-to-move active
+                                // between skills; subsequent observations enforce the chase leash.
                             }
                         }
                         catch(InvalidOperationException ex)

@@ -6,10 +6,13 @@ namespace WoWProbe
     {
         readonly uint token;readonly bool skinning;readonly long started;
         uint opened,closed,skinBase,failedBase;long lootAt,skinAt,skinSelectAt;bool selected,lootIssued,skinIssued,skinSelected;
+        readonly bool approach;bool approached;
         public bool Done {get;private set;}
         public int Loots {get;private set;}public int Skins {get;private set;}
         public QuickCorpse(uint token,bool skinning,FarmObservation initial,long now)
-        {if(token==0||initial==null)throw new ArgumentException("A verified corpse identity is required.");this.token=token;this.skinning=skinning;started=now;opened=initial.LootOpened;closed=initial.LootClosed;}
+            :this(token,skinning,initial,now,false){}
+        public QuickCorpse(uint token,bool skinning,FarmObservation initial,long now,bool approach)
+        {if(token==0||initial==null)throw new ArgumentException("A verified corpse identity is required.");this.token=token;this.skinning=skinning;this.approach=approach;started=now;opened=initial.LootOpened;closed=initial.LootClosed;}
         QuickCommand C(QuickAction action,string reason,ushort key){return new QuickCommand{Action=action,Token=token,Reason=reason,Key=key};}
         QuickCommand Finish(string reason){Done=true;var c=C(QuickAction.None,reason,0);c.Report=true;return c;}
         public QuickCommand Step(FarmObservation o,long now)
@@ -18,11 +21,12 @@ namespace WoWProbe
             if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||o.PlayerDead||o.PlayerGhost)return Finish("尸体状态失效，取消拾取/剥皮。");
             if(o.InCombat)
             {
-                if(now-started<2500)return C(QuickAction.None,"击杀后等待脱战，不发送拾取或剥皮按键。",0);
                 return Finish("仍在战斗，先处理附近攻击者；本具尸体不计拾取或剥皮成功。");
             }
             if(now<started||now-started>20000)return Finish("尸体处理超时，继续巡航；不计未确认的拾取/剥皮。");
             bool same=o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken==token&&!o.TargetIsPlayer&&o.TargetDeadKnown&&o.TargetDead;
+            if(approach&&same&&!approached){approached=true;return C(QuickAction.CorpseApproach,"发现路边可剥皮尸体，先按F接近，不计为本轮击杀。",70);}
+            if(approach&&now-started<1500)return C(QuickAction.None,"等待接近路边尸体。",0);
             if(skinIssued)
             {
                 if(o.CastEventsKnown&&o.CastFailed!=failedBase)return Finish("剥皮施法失败，跳过本具尸体。");
