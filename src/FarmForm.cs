@@ -22,11 +22,11 @@ namespace WoWProbe
         readonly System.Threading.Timer watchdog;
         readonly List<string> events=new List<string>();readonly object logGate=new object();
         readonly Label summary=new Label(),status=new Label(),observation=new Label();
-        readonly TextBox targetName=new TextBox(),sequence=new TextBox(),output=new TextBox();
+        readonly TextBox targetName=new TextBox(),opening=new TextBox(),sequence=new TextBox(),output=new TextBox();
         readonly ListView targets=new ListView();readonly RouteCanvas canvas=new RouteCanvas();
-        readonly NumericUpDown interval=Number(1000,5000,1500,0),heal=Number(2,80,40,0),mana=Number(1,80,35,0),recover=Number(3,100,85,0),range=Number(1,4,1,0);
+        readonly NumericUpDown interval=Number(500,5000,1500,0),heal=Number(2,80,40,0),mana=Number(1,80,35,0),recover=Number(3,100,85,0),range=Number(1,4,1,0);
         readonly CheckBox skin=new CheckBox(),approach=new CheckBox(),bindings=new CheckBox(),calibrated=new CheckBox(),positionConfirmed=new CheckBox(),reverse=new CheckBox(),loop=new CheckBox(),missingPosition=new CheckBox(),noSupplies=new CheckBox();
-        readonly ComboBox startMode=new ComboBox();
+        readonly ComboBox startMode=new ComboBox(),rogueFinisher=new ComboBox();
         RouteDocument route;BattleProfile profile,runProfile;RouteDocument runRoute;FarmEngine engine;FarmSimulator simulator;volatile FarmSession session;
         bool changing,closing;string lastState="",profileDirectory;
         public bool Busy{get{return SimulationRunning||(session!=null&&session.IsActive);}}
@@ -36,10 +36,10 @@ namespace WoWProbe
         public FarmForm(Func<FarmObservation> reader,Func<IInputBackend> backendFactory,Func<Rectangle,Bitmap> avatarCapture,Action prepareMode,Action<string> parentLog,InputFailureLatch safety)
         {
             this.reader=reader;this.backendFactory=backendFactory;this.avatarCapture=avatarCapture;this.prepareMode=prepareMode;this.parentLog=parentLog;this.safety=safety??new InputFailureLatch();
-            Text="第三阶段 · 目标与基础打怪  v0.3.0";Font=new Font("Microsoft YaHei UI",9F);BackColor=Color.FromArgb(247,249,252);ForeColor=Color.FromArgb(24,35,52);
-            Size=new Size(1180,900);MinimumSize=new Size(1100,820);StartPosition=FormStartPosition.CenterScreen;
+            Text="第三阶段 · 目标与基础打怪  v0.7.1";Font=new Font("Microsoft YaHei UI",9F);BackColor=Color.FromArgb(247,249,252);ForeColor=Color.FromArgb(24,35,52);
+            Size=new Size(1180,960);MinimumSize=new Size(1100,880);StartPosition=FormStartPosition.CenterScreen;
             var root=new TableLayoutPanel{Dock=DockStyle.Fill,Padding=new Padding(12),ColumnCount=1,RowCount=6};Controls.Add(root);
-            root.RowStyles.Add(new RowStyle(SizeType.Absolute,48));root.RowStyles.Add(new RowStyle(SizeType.Absolute,122));root.RowStyles.Add(new RowStyle(SizeType.Percent,100));root.RowStyles.Add(new RowStyle(SizeType.Absolute,182));root.RowStyles.Add(new RowStyle(SizeType.Absolute,98));root.RowStyles.Add(new RowStyle(SizeType.Absolute,90));
+            root.RowStyles.Add(new RowStyle(SizeType.Absolute,48));root.RowStyles.Add(new RowStyle(SizeType.Absolute,122));root.RowStyles.Add(new RowStyle(SizeType.Percent,100));root.RowStyles.Add(new RowStyle(SizeType.Absolute,242));root.RowStyles.Add(new RowStyle(SizeType.Absolute,98));root.RowStyles.Add(new RowStyle(SizeType.Absolute,90));
             root.Controls.Add(new Label{Text="先用离线模拟检查流程；实机运行仍待游戏电脑验证。目标按完整名称匹配，头像仅供人工参考。\nF12、失焦、数据过期会停止并释放按键；游戏中已经开始的动作可能需要手动取消。",Dock=DockStyle.Fill});
             var files=Group("1  路线、目标与配置",root,1);var rows=Rows(files,3);
             var row=Row();rows.Controls.Add(row);row.Controls.Add(Button("载入路线",LoadRoute));row.Controls.Add(Button("载入战斗配置",LoadProfile));row.Controls.Add(Button("保存战斗配置",SaveProfile));row.Controls.Add(Button("恢复演示配置",ResetDemo));row.Controls.Add(Button("导入地图标定",LoadCalibration));
@@ -48,16 +48,18 @@ namespace WoWProbe
             var center=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=2};center.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,55));center.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,45));root.Controls.Add(center,0,2);
             canvas.Dock=DockStyle.Fill;canvas.Margin=new Padding(0,5,8,5);center.Controls.Add(canvas);
             targets.Dock=DockStyle.Fill;targets.View=View.Details;targets.FullRowSelect=true;targets.HideSelection=false;targets.Columns.Add("类型",65);targets.Columns.Add("完整名称",170);targets.Columns.Add("参考头像文件",235);center.Controls.Add(targets);
-            var controls=Group("2  战斗与恢复设置",root,3);rows=Rows(controls,5);
-            row=Row();rows.Controls.Add(row);sequence.Width=80;row.Controls.Add(Label("技能顺序 1–4"));row.Controls.Add(sequence);row.Controls.Add(Label("间隔 ms"));row.Controls.Add(interval);row.Controls.Add(Label("回血低于 %"));row.Controls.Add(heal);row.Controls.Add(Label("回蓝低于 %"));row.Controls.Add(mana);row.Controls.Add(Label("恢复至 %"));row.Controls.Add(recover);row.Controls.Add(Label("测距槽位"));row.Controls.Add(range);
+            var controls=Group("2  战斗与恢复设置",root,3);rows=Rows(controls,7);
+            row=Row();rows.Controls.Add(row);opening.Width=120;sequence.Width=80;row.Controls.Add(Label("开场一次 1–4（可空）"));row.Controls.Add(opening);row.Controls.Add(Label("之后循环 1–4"));row.Controls.Add(sequence);row.Controls.Add(Label("尝试间隔 ms"));row.Controls.Add(interval);
+            row=Row();rows.Controls.Add(row);row.Controls.Add(Label("盗贼方案 · 剔骨键"));rogueFinisher.DropDownStyle=ComboBoxStyle.DropDownList;rogueFinisher.Width=140;rogueFinisher.Items.AddRange(new object[]{"请选择","1（普攻开关）","2（邪恶攻击）","3（须核对绑定）","4（切割）"});rogueFinisher.SelectedIndex=0;row.Controls.Add(rogueFinisher);row.Controls.Add(Button("应用盗贼方案",ApplyRoguePreset));row.Controls.Add(Label("先核对 2=邪恶攻击、4=切割及剔骨实际键位；不修改游戏绑定。"));
+            row=Row();rows.Controls.Add(row);row.Controls.Add(Label("回血低于 %"));row.Controls.Add(heal);row.Controls.Add(Label("回蓝低于 %"));row.Controls.Add(mana);row.Controls.Add(Label("恢复至 %"));row.Controls.Add(recover);row.Controls.Add(Label("测距槽位"));row.Controls.Add(range);
             row=Row();rows.Controls.Add(row);Check(row,skin,"拾取后剥皮");Check(row,approach,"允许按目标坐标接近");Check(row,reverse,"逆向");Check(row,loop,"循环");row.Controls.Add(Label("起点"));startMode.DropDownStyle=ComboBoxStyle.DropDownList;startMode.Width=140;startMode.Items.AddRange(new object[]{"从第一点","读取保存的断点"});startMode.SelectedIndex=0;row.Controls.Add(startMode);
             row=Row();rows.Controls.Add(row);Check(row,bindings,"已核对动作条、F交互、5剥皮、8食物、9饮水、移动键");
             row=Row();rows.Controls.Add(row);Check(row,calibrated,"已在当前地图实测标定");Check(row,positionConfirmed,"已验证客户端可提供目标坐标（允许接近时必需）");
             observation.Dock=DockStyle.Fill;rows.Controls.Add(observation);
             var run=Group("3  运行与记录",root,4);rows=Rows(run,2);row=Row();rows.Controls.Add(row);row.Controls.Add(Button("开始离线战斗模拟",StartSimulation));row.Controls.Add(Button("停止",delegate{StopWorkspace("用户停止");}));Check(row,missingPosition,"模拟缺少目标坐标");Check(row,noSupplies,"模拟没有补给");row.Controls.Add(Button("实机打怪（5秒后）",StartLive));row.Controls.Add(Button("导出本次记录",Export));status.Dock=DockStyle.Fill;rows.Controls.Add(status);
             output.Dock=DockStyle.Fill;output.Multiline=true;output.ReadOnly=true;output.ScrollBars=ScrollBars.Vertical;output.BackColor=Color.White;root.Controls.Add(output,0,5);
-            foreach(var n in new[]{interval,heal,mana,recover,range})n.ValueChanged+=delegate{SettingsChanged();};sequence.TextChanged+=delegate{SettingsChanged();};
-            foreach(var c in new[]{skin,approach,reverse,loop,bindings,calibrated,positionConfirmed,missingPosition,noSupplies})c.CheckedChanged+=delegate{SettingsChanged();};startMode.SelectedIndexChanged+=delegate{SettingsChanged();};
+            foreach(var n in new[]{interval,heal,mana,recover,range})n.ValueChanged+=delegate{SettingsChanged(true);};foreach(var text in new[]{opening,sequence})text.TextChanged+=delegate{SettingsChanged(true);};
+            foreach(var c in new[]{skin,approach,reverse,loop,missingPosition,noSupplies})c.CheckedChanged+=delegate{SettingsChanged(true);};foreach(var c in new[]{bindings,calibrated,positionConfirmed})c.CheckedChanged+=delegate{SettingsChanged(false);};startMode.SelectedIndexChanged+=delegate{SettingsChanged(true);};
             refresh.Interval=150;refresh.Tick+=delegate{RefreshState();};refresh.Start();simulationTimer.Interval=25;simulationTimer.Tick+=delegate{SimulationTick();};
             watchdog=new System.Threading.Timer(delegate{var s=session;if(s!=null)s.Tick();},null,25,25);
             FormClosing+=delegate{closing=true;refresh.Stop();StopWorkspace("战斗窗口关闭");watchdog.Dispose();simulationTimer.Dispose();refresh.Dispose();};ResetDemo();
@@ -76,15 +78,25 @@ namespace WoWProbe
         void ResetDemo(){StopWorkspace("恢复演示配置");session=null;engine=null;simulator=null;runProfile=null;runRoute=null;route=DemoRoute();profile=DemoProfile();profileDirectory=UserDirectory();changing=true;reverse.Checked=loop.Checked=missingPosition.Checked=noSupplies.Checked=false;startMode.SelectedIndex=0;changing=false;Populate();status.Text="默认离线模拟，系统输入为 0。实机功能待验证。";}
         void Populate()
         {
-            changing=true;try{sequence.Text=profile.SkillSequence;interval.Value=profile.SkillIntervalMs;heal.Value=profile.HealBelow;mana.Value=profile.ManaBelow;recover.Value=profile.RecoverTo;range.Value=profile.RangeSlot;skin.Checked=profile.Skinning;approach.Checked=profile.AllowApproach;bindings.Checked=calibrated.Checked=positionConfirmed.Checked=false;}finally{changing=false;}
+            changing=true;try{opening.Text=profile.SkillOpeningSequence;sequence.Text=profile.SkillSequence;interval.Value=profile.SkillIntervalMs;heal.Value=profile.HealBelow;mana.Value=profile.ManaBelow;recover.Value=profile.RecoverTo;range.Value=profile.RangeSlot;skin.Checked=profile.Skinning;approach.Checked=profile.AllowApproach;rogueFinisher.SelectedIndex=0;bindings.Checked=calibrated.Checked=positionConfirmed.Checked=false;}finally{changing=false;}
             UpdateTargets();Preview();summary.Text="路线 "+route.Name+" · 地图 "+route.MapId+" / "+route.MapMode+" / "+route.Zone+" · "+route.Points.Count+" 点；标定转速 "+profile.Calibration.TurnRadiansPerSecond+"，移速 "+profile.Calibration.ForwardUnitsPerSecond+"，请导入当前地图实测值。";
         }
         void Preview(){canvas.Route=reverse.Checked&&route.AllowReverse?route.Reversed():route.Clone();canvas.AxisScale=profile.Calibration.AxisScale;canvas.Invalidate();}
         void UpdateTargets(){targets.Items.Clear();foreach(var t in profile.Targets){var item=new ListViewItem(new[]{t.Kind=="monster"?"怪物":"NPC",t.Name,String.IsNullOrEmpty(t.AvatarFile)?"未保存":t.AvatarFile});item.Tag=t;targets.Items.Add(item);}}
-        void SettingsChanged(){if(changing)return;StopWorkspace("设置已修改，请重新开始");Preview();}
+        void SettingsChanged(bool clearConfirmations){if(changing)return;StopWorkspace("设置已修改，请重新开始");if(clearConfirmations){changing=true;try{bindings.Checked=calibrated.Checked=positionConfirmed.Checked=false;}finally{changing=false;}}Preview();}
+        void ApplyRoguePreset()
+        {
+            int key=rogueFinisher.SelectedIndex;
+            if(key<=0)throw new InvalidOperationException("请先核对游戏中的剔骨绑定，并选择对应按键。不会自动猜测剔骨键。");
+            if(key==1)throw new InvalidOperationException("此盗贼方案的1号键是普攻开关，不能作为剔骨。请先核对实际绑定。");
+            if(key==2||key==4)throw new InvalidOperationException("此方案已使用2号邪恶攻击和4号切割，剔骨需要独立的技能键。请先核对实际绑定。");
+            StopWorkspace("已应用盗贼方案，请重新核对实机确认项");
+            changing=true;try{opening.Text="24222"+key;sequence.Text="2";interval.Value=750;bindings.Checked=calibrated.Checked=positionConfirmed.Checked=false;}finally{changing=false;}
+            Preview();Record("盗贼方案：每个目标开场 "+opening.Text+"，之后循环2，尝试间隔750ms；剔骨键由用户选择，实机效果待验证。");
+        }
         BattleProfile Settings(bool live)
         {
-            var p=profile.Clone();p.SkillSequence=sequence.Text.Trim();p.SkillIntervalMs=(int)interval.Value;p.HealBelow=(int)heal.Value;p.ManaBelow=(int)mana.Value;p.RecoverTo=(int)recover.Value;p.RangeSlot=(int)range.Value;p.Skinning=skin.Checked;p.AllowApproach=approach.Checked;
+            var p=profile.Clone();p.SkillOpeningSequence=opening.Text.Trim();p.SkillSequence=sequence.Text.Trim();p.SkillIntervalMs=(int)interval.Value;p.HealBelow=(int)heal.Value;p.ManaBelow=(int)mana.Value;p.RecoverTo=(int)recover.Value;p.RangeSlot=(int)range.Value;p.Skinning=skin.Checked;p.AllowApproach=approach.Checked;
             p.BindingsConfirmed=live&&bindings.Checked;p.Calibration.Confirmed=live&&calibrated.Checked;p.ApproachPositionConfirmed=live&&positionConfirmed.Checked;p.Validate();return p;
         }
         FarmObservation Snapshot(){return reader==null?new FarmObservation():reader()??new FarmObservation();}
@@ -161,7 +173,7 @@ namespace WoWProbe
         {
             string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"reports","farm-"+DateTime.Now.ToString("yyyyMMdd-HHmmssfff"));Directory.CreateDirectory(path);string[] logs;lock(logGate)logs=events.ToArray();var s=session;
             var o=Snapshot();
-            var report=new {tool_version="0.3.0",created_at=DateTimeOffset.Now.ToString("o"),game_validation="pending",mode=simulator!=null?"offline_simulation":s!=null?"live_attempt":"not_started",route=runRoute,profile=runProfile,simulation=simulator==null?null:new {completed=SimulationCompleted,status=engine.Status,reason=engine.LastReason,native_input_events=simulator.InputEvents,kills=simulator.Kills,skill_casts=simulator.SkillCasts,loots=simulator.Loots,skins=simulator.Skins,heals=simulator.Heals,drinks=simulator.Drinks,missing_target_position=simulator.MissingTargetPosition,no_supplies=simulator.NoSupplies},live=s==null?null:new {status=s.Status,engine=s.EngineState,reason=s.LastReason,checkpoint=s.CurrentCheckpoint},observed_game_state=new {fresh=o.Fresh,known_core=o.KnownCore,sequence=o.Sequence,read_failures=o.ReadFailures,map_id=o.MapId,map_mode=o.MapMode,zone=o.Zone,health=o.Health,power=o.Power,power_type=o.PowerType,dead=o.PlayerDead,ghost=o.PlayerGhost,in_combat=o.InCombat,bag_full=o.BagFull,target_exists=o.TargetExists,target_identity_known=o.TargetIdentityKnown,target_token=o.TargetToken,name_hash_known=o.NameHashKnown,name_hash=o.TargetNameHash,display_name=o.TargetName,attackability_known=o.AttackabilityKnown,can_attack=o.TargetCanAttack,is_player=o.TargetIsPlayer,target_position_known=o.TargetPositionKnown,range_known=o.RangeKnown,range_slot=o.RangeSlot,in_range=o.TargetInRange,casting_known=o.CastingKnown,casting=o.Casting,channeling=o.Channeling,actions_known=o.ActionsKnown,known_actions_mask=o.KnownActionsMask,ready_actions_mask=o.ReadyActionsMask,usable_actions_mask=o.UsableActionsMask,loot_known=o.LootKnown,lootable=o.Lootable,loot_events_known=o.LootEventsKnown,loot_opened=o.LootOpened,loot_closed=o.LootClosed,skin_known=o.SkinKnown,skinnable=o.Skinnable,skin_event_known=o.SkinSuccessKnown,skin_success=o.SkinSuccess,cast_events_known=o.CastEventsKnown,cast_success=o.CastSuccess,cast_failed=o.CastFailed},input_fault=safety.Faulted,events=logs};
+            var report=new {tool_version="0.7.1",created_at=DateTimeOffset.Now.ToString("o"),game_validation="pending",mode=simulator!=null?"offline_simulation":s!=null?"live_attempt":"not_started",route=runRoute,profile=runProfile,simulation=simulator==null?null:new {completed=SimulationCompleted,status=engine.Status,reason=engine.LastReason,native_input_events=simulator.InputEvents,kills=simulator.Kills,skill_casts=simulator.SkillCasts,loots=simulator.Loots,skins=simulator.Skins,heals=simulator.Heals,drinks=simulator.Drinks,missing_target_position=simulator.MissingTargetPosition,no_supplies=simulator.NoSupplies},live=s==null?null:new {status=s.Status,engine=s.EngineState,reason=s.LastReason,checkpoint=s.CurrentCheckpoint},observed_game_state=new {fresh=o.Fresh,known_core=o.KnownCore,sequence=o.Sequence,read_failures=o.ReadFailures,map_id=o.MapId,map_mode=o.MapMode,zone=o.Zone,health=o.Health,power=o.Power,power_type=o.PowerType,dead=o.PlayerDead,ghost=o.PlayerGhost,in_combat=o.InCombat,bag_full=o.BagFull,target_exists=o.TargetExists,target_identity_known=o.TargetIdentityKnown,target_token=o.TargetToken,name_hash_known=o.NameHashKnown,name_hash=o.TargetNameHash,display_name=o.TargetName,attackability_known=o.AttackabilityKnown,can_attack=o.TargetCanAttack,is_player=o.TargetIsPlayer,target_position_known=o.TargetPositionKnown,range_known=o.RangeKnown,range_slot=o.RangeSlot,in_range=o.TargetInRange,casting_known=o.CastingKnown,casting=o.Casting,channeling=o.Channeling,actions_known=o.ActionsKnown,known_actions_mask=o.KnownActionsMask,ready_actions_mask=o.ReadyActionsMask,usable_actions_mask=o.UsableActionsMask,loot_known=o.LootKnown,lootable=o.Lootable,loot_events_known=o.LootEventsKnown,loot_opened=o.LootOpened,loot_closed=o.LootClosed,skin_known=o.SkinKnown,skinnable=o.Skinnable,skin_event_known=o.SkinSuccessKnown,skin_success=o.SkinSuccess,cast_events_known=o.CastEventsKnown,cast_success=o.CastSuccess,cast_failed=o.CastFailed},input_fault=safety.Faulted,events=logs};
             File.WriteAllText(Path.Combine(path,"farm-report.json"),new JavaScriptSerializer{MaxJsonLength=4*1024*1024}.Serialize(report),new UTF8Encoding(true));Record("记录已导出："+path);status.Text="记录已导出："+path;
         }
     }

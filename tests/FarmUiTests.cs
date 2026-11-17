@@ -15,6 +15,44 @@ class FarmUiTests
     {foreach(Control c in root.Controls){var match=c as T;if(match!=null&&c.Text==text)return match;var nested=Find<T>(c,text);if(nested!=null)return nested;}return null;}
     static void Click(FarmForm f,string text){var b=Find<Button>(f,text);if(b==null)throw new Exception("Missing UI button "+text);b.PerformClick();}
     static void Check(FarmForm f,string text,bool value){Find<CheckBox>(f,text).Checked=value;}
+    static T Field<T>(FarmForm f,string name){var field=typeof(FarmForm).GetField(name,BindingFlags.NonPublic|BindingFlags.Instance);if(field==null)throw new Exception("Missing battle control "+name);return (T)field.GetValue(f);}
+    static object Call(FarmForm f,string name,params object[] args)
+    {var method=typeof(FarmForm).GetMethod(name,BindingFlags.NonPublic|BindingFlags.Instance);if(method==null)throw new Exception("Missing battle action "+name);try{return method.Invoke(f,args);}catch(TargetInvocationException ex){throw ex.InnerException??ex;}}
+    static string Opening(BattleProfile p){var field=typeof(BattleProfile).GetField("SkillOpeningSequence");if(field==null)throw new Exception("Opening sequence cannot be saved in a battle profile");return (string)field.GetValue(p);}
+    static void Confirm(FarmForm f,bool value){foreach(var name in new[]{"bindings","calibrated","positionConfirmed"})Field<CheckBox>(f,name).Checked=value;}
+    static void NoConfirmations(FarmForm f){foreach(var name in new[]{"bindings","calibrated","positionConfirmed"})if(Field<CheckBox>(f,name).Checked)throw new Exception("Changed battle settings retained confirmation "+name);}
+    static void RejectPreset(FarmForm f)
+    {try{Call(f,"ApplyRoguePreset");}catch(InvalidOperationException){return;}throw new Exception("Unconfirmed rogue finisher was applied");}
+    static void RogueControls(FarmForm f,ref int scenarios)
+    {
+        var interval=Field<NumericUpDown>(f,"interval");
+        if(interval.Minimum!=500)throw new Exception("Battle controls still reject the requested 500ms skill interval");
+        interval.Value=500;if(((BattleProfile)Call(f,"Settings",false)).SkillIntervalMs!=500)throw new Exception("500ms did not reach battle settings");
+        interval.Value=750;if(((BattleProfile)Call(f,"Settings",false)).SkillIntervalMs!=750)throw new Exception("750ms did not reach battle settings");scenarios++;
+
+        var opening=Field<TextBox>(f,"opening");var sequence=Field<TextBox>(f,"sequence");
+        opening.Text="242223";sequence.Text="2";var applied=(BattleProfile)Call(f,"Settings",false);
+        if(Opening(applied)!="242223"||applied.SkillSequence!="2")throw new Exception("Opening and repeat sequence were not kept separately");
+        string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output");Directory.CreateDirectory(directory);string path=Path.Combine(directory,"rogue-ui-"+Guid.NewGuid().ToString("N")+".json");
+        try{BattleProfileStore.Save(path,applied);var loaded=BattleProfileStore.Load(path);typeof(FarmForm).GetField("profile",BindingFlags.NonPublic|BindingFlags.Instance).SetValue(f,loaded);Confirm(f,true);Call(f,"Populate");
+            if(opening.Text!="242223"||sequence.Text!="2"||interval.Value!=750)throw new Exception("Reloading a battle profile lost opening/repeat controls");NoConfirmations(f);}
+        finally{if(File.Exists(path))File.Delete(path);}scenarios++;
+
+        var finisher=Field<ComboBox>(f,"rogueFinisher");
+        finisher.SelectedIndex=0;string before=opening.Text+"/"+sequence.Text+"/"+interval.Value;RejectPreset(f);
+        if(before!=opening.Text+"/"+sequence.Text+"/"+interval.Value)throw new Exception("Missing finisher changed the battle settings");scenarios++;
+        finisher.SelectedIndex=1;RejectPreset(f);if(before!=opening.Text+"/"+sequence.Text+"/"+interval.Value)throw new Exception("Attack toggle was accepted as the finisher");scenarios++;
+        foreach(int key in new[]{2,4}){finisher.SelectedIndex=key;RejectPreset(f);if(before!=opening.Text+"/"+sequence.Text+"/"+interval.Value)throw new Exception("A repeated rogue ability key was accepted as the finisher");}scenarios++;
+
+        finisher.SelectedIndex=3;Confirm(f,true);Click(f,"应用盗贼方案");applied=(BattleProfile)Call(f,"Settings",false);
+        if(Opening(applied)!="242223"||applied.SkillSequence!="2"||applied.SkillIntervalMs!=750||applied.BlindGrind)throw new Exception("Explicit rogue preset has the wrong opening, repeat, interval or mode");NoConfirmations(f);scenarios++;
+        using(var image=new System.Drawing.Bitmap(f.Width,f.Height)){f.DrawToBitmap(image,new System.Drawing.Rectangle(System.Drawing.Point.Empty,f.Size));image.Save(Path.Combine(directory,"farm-rogue-ui.png"),System.Drawing.Imaging.ImageFormat.Png);}
+        File.WriteAllText(Path.Combine(directory,"farm-rogue-ui-preview.txt"),"owned_form_render; layout preview only, not desktop capture");
+
+        Confirm(f,true);Click(f,"开始离线战斗模拟");if(!f.Busy)throw new Exception("Opening-edit stop check had no running simulation");
+        opening.Text="242224";if(f.Busy)throw new Exception("Changing an opening left the previous run active");NoConfirmations(f);scenarios++;
+        Click(f,"恢复演示配置");
+    }
     static Dictionary<string,object> Report()
     {
         var directories=new DirectoryInfo(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"reports")).GetDirectories("farm-*");Array.Sort(directories,delegate(DirectoryInfo a,DirectoryInfo b){return a.LastWriteTimeUtc.CompareTo(b.LastWriteTimeUtc);});
@@ -31,6 +69,7 @@ class FarmUiTests
             t.Tick+=delegate{
                 try{
                     if(stage==0){
+                        RogueControls(f,ref scenarios);
                         var low=FarmForm.DemoProfile();low.CriticalHealth=1;low.HealBelow=2;low.ManaBelow=1;low.RecoverTo=3;low.Validate();typeof(FarmForm).GetField("profile",BindingFlags.NonPublic|BindingFlags.Instance).SetValue(f,low);typeof(FarmForm).GetMethod("Populate",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(f,null);
                         var applied=(BattleProfile)typeof(FarmForm).GetMethod("Settings",BindingFlags.NonPublic|BindingFlags.Instance).Invoke(f,new object[]{false});if(applied.HealBelow!=2||applied.RecoverTo!=3)throw new Exception("Valid low recovery thresholds cannot populate imported controls");scenarios++;
                         Click(f,"恢复演示配置");Click(f,"开始离线战斗模拟");time=6000;single.Tick();if(single.Pending||single.Active||fake.Events!=0||!f.Busy)throw new Exception("Simulation failed to cancel previous input or publish busy state");
