@@ -136,7 +136,9 @@ namespace WoWProbe
                         escapePhase=0;progressAt=now;nextFace=now+500;var forward=Cmd(QuickAction.DetourForward,"脱困：已确认转向，沿新方向短距离移动，再重新面向目标。",87);escapeCombat=false;return forward;
                     }
                 }
-                if(o.InCombat&&o.CastEventsKnown&&now-combatCastAt>=3500)
+                // The configured rogue loop needs energy. Waiting for a resource
+                // is not evidence of a blocked approach or a wrong facing.
+                if(o.InCombat&&o.CastEventsKnown&&now-combatCastAt>=3500&&(o.PowerType!=3||o.Power>100||o.Power>=45))
                 {
                     if(combatEscapes>=3){combatEscapes=0;combatCastAt=now+10000;}
                     else{combatEscapes++;combatCastAt=now;escapeCombat=true;escapePhase=1;return Cmd(QuickAction.BackOff,"战斗中持续无成功施法：后退换向并试走，绕开遮挡后重新面向攻击者。",83);}
