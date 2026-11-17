@@ -17,6 +17,7 @@ namespace WoWProbe
         {
             Native.SetProcessDPIAware();
             if(args.Length>0&&args[0]=="move"){try{return GrindCli.Move(args);}catch(Exception ex){Console.WriteLine(ex.Message);return 1;}}
+            if(args.Length>0&&args[0]=="look"){try{return GrindCli.Look(args);}catch(Exception ex){Console.WriteLine(ex.Message);return 1;}}
             if(args.Length>0&&(args[0]=="quick"||args[0]=="quick-start"))
             {
                 Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);

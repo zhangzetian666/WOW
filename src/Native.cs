@@ -158,6 +158,12 @@ namespace WoWProbe
             var input=new INPUT{Type=0,Data=new INPUTUNION{Mouse=new MOUSEINPUT{Flags=right?(up?16u:8u):(up?4u:2u),Extra=UIntPtr.Zero}}};
             if(SendInput(1,new INPUT[]{input},InputStructureSize)!=1)throw new Win32Exception(Marshal.GetLastWin32Error(),"鼠标按钮未发送。");
         }
+        public static void MoveMouseRelative(int dx,int dy)
+        {
+            if(Math.Abs((long)dx)>32||Math.Abs((long)dy)>32)throw new ArgumentOutOfRangeException("dx/dy");
+            var input=new INPUT{Type=0,Data=new INPUTUNION{Mouse=new MOUSEINPUT{X=dx,Y=dy,Flags=0x2001u,Extra=UIntPtr.Zero}}};
+            if(SendInput(1,new[]{input},InputStructureSize)!=1)throw new Win32Exception(Marshal.GetLastWin32Error(),"相对鼠标移动未发送。");
+        }
         // Release any ClipCursor restriction a previous run left behind so physical
         // clicks land where the operating system (and the operator) expect them.
         public static void UnclipCursor() { try { ClipCursor(IntPtr.Zero); } catch { } }

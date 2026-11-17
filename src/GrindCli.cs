@@ -58,7 +58,7 @@ namespace WoWProbe
         {
             int duration;ushort key;
             if(args.Length!=3||!Int32.TryParse(args[2],out duration)||duration<40||duration>1500)return 2;
-            switch(args[1]){case "forward":case "jump":key=87;break;case "back":key=83;break;case "left":key=37;break;case "right":key=39;break;default:return 2;}
+            switch(args[1]){case "forward":case "jump":key=87;break;case "back":key=83;break;case "left":key=37;break;case "right":key=39;break;case "strafeleft":key=65;break;case "straferight":key=68;break;default:return 2;}
             var window=OpenTelemetry();var backend=new WindowsInputBackend(window,null);var o=Snapshot();
             Activate(window.Handle);
             input=new GrindInputGuard(backend,Snapshot,()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),new InputFailureLatch(),o.MapId,o.MapMode,o.Zone);
@@ -71,6 +71,26 @@ namespace WoWProbe
                     try{backend.KeyDown(87);Pulse(backend,32,80);Pause(duration);}finally{backend.KeyUp(87);}
                 }
                 else Pulse(backend,key,duration);
+                return 0;
+            }
+            finally{input=null;}
+        }
+
+        public static int Look(string[] args)
+        {
+            int dx,dy;
+            if(args.Length!=3||!Int32.TryParse(args[1],out dx)||!Int32.TryParse(args[2],out dy)||Math.Abs((long)dx)>160||Math.Abs((long)dy)>160||(dx==0&&dy==0))return 2;
+            var window=OpenTelemetry();var backend=new WindowsInputBackend(window,null);var o=Snapshot();Activate(window.Handle);
+            input=new GrindInputGuard(backend,Snapshot,()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),new InputFailureLatch(),o.MapId,o.MapMode,o.Zone);
+            try
+            {
+                input.Ensure();if(o.PlayerDead||o.PlayerGhost||o.InCombat||o.ChatOpen||!o.ChatOpenKnown)throw new InvalidOperationException("只在存活、脱战、聊天关闭时校准视角。");
+                Func<bool> held=()=>backend.IsKeyAlreadyDown(1)||backend.IsKeyAlreadyDown(2)||backend.IsKeyAlreadyDown(16)||backend.IsKeyAlreadyDown(17)||backend.IsKeyAlreadyDown(18);
+                if(held())throw new InvalidOperationException("请先松开鼠标及 Shift/Ctrl/Alt。");
+                Native.MoveMouse(new Point(client.Left+client.Width/2,client.Top+client.Height/2));
+                MouseLookInput.Run(dx,dy,()=>input.Ensure(),held,()=>Native.SendMouseButton(true,false),()=>Native.SendMouseButton(true,true),Native.MoveMouseRelative,ms=>Pause(ms));
+                Pause(250);var after=Snapshot();
+                Console.WriteLine("MouseLook dx="+dx+" dy="+dy+" FacingBefore="+o.Facing.ToString("F4")+" FacingAfter="+after.Facing.ToString("F4")+" PosBefore=("+o.X.ToString("F5")+","+o.Y.ToString("F5")+") PosAfter=("+after.X.ToString("F5")+","+after.Y.ToString("F5")+")");
                 return 0;
             }
             finally{input=null;}
