@@ -2,6 +2,11 @@ using System;
 using System.Drawing;
 namespace WoWProbe
 {
+    public sealed class QuickDeathRate
+    {
+        readonly System.Collections.Generic.Queue<long> recent=new System.Collections.Generic.Queue<long>();long last=-1;
+        public bool TryRecover(long now){if(now<0||now<last)return false;last=now;while(recent.Count>0&&now-recent.Peek()>=600000)recent.Dequeue();if(recent.Count>=3)return false;recent.Enqueue(now);return true;}
+    }
     public enum QuickRecoveryAction { None, Key, Click, Complete, Stop }
     public sealed class QuickRecoveryCommand
     {
@@ -12,15 +17,18 @@ namespace WoWProbe
     public sealed class QuickRecovery
     {
         readonly RouteDocument route;readonly NavigationCalibration calibration;readonly uint map;readonly int mode;readonly string zone;
+        readonly bool actualCorpseRouting;
+        readonly double deathX=Double.NaN,deathY=Double.NaN;
         Navigator navigator;long started=-1,last=-1,clickedAt=-1;int sequence=-1,aliveFrames;bool released,resurrected;double corpseX=Double.NaN,corpseY;
         public static bool RouteMatches(RouteDocument route,FarmObservation state)
         {return route!=null&&state!=null&&route.RouteType=="corpse_run"&&route.MapId==state.MapId&&route.MapMode==state.MapMode&&route.Zone==state.Zone;}
-        public QuickRecovery(RouteDocument route,NavigationCalibration calibration,FarmObservation death)
+        public QuickRecovery(RouteDocument route,NavigationCalibration calibration,FarmObservation death,bool actualCorpseRouting=false)
         {
-            if(route==null||calibration==null||death==null)throw new ArgumentNullException("recovery configuration");
-            route.Validate();calibration.Validate();
-            if(!RouteMatches(route,death))throw new InvalidOperationException("跑尸路线与当前地图不匹配。");
-            this.route=route.Clone();this.calibration=calibration.Clone();map=death.MapId;mode=death.MapMode;zone=death.Zone;
+            if(calibration==null||death==null||route==null&&!actualCorpseRouting)throw new ArgumentNullException("recovery configuration");
+            calibration.Validate();if(route!=null){route.Validate();if(!RouteMatches(route,death))throw new InvalidOperationException("跑尸路线与当前地图不匹配。");}
+            if(calibration.MapId!=death.MapId||calibration.MapMode!=death.MapMode||calibration.Zone!=death.Zone)throw new InvalidOperationException("跑尸移动参数与当前地图不匹配。");
+            this.route=route==null?null:route.Clone();this.calibration=calibration.Clone();map=death.MapId;mode=death.MapMode;zone=death.Zone;this.actualCorpseRouting=actualCorpseRouting;
+            if(death.PlayerDead&&!death.PlayerGhost&&NavigationMath.InRange(death.X,0,1)&&NavigationMath.InRange(death.Y,0,1)){deathX=death.X;deathY=death.Y;}
         }
         QuickRecoveryCommand Command(QuickRecoveryAction action,string reason){return new QuickRecoveryCommand{Action=action,Reason=reason};}
         QuickRecoveryCommand Stop(string reason){return Command(QuickRecoveryAction.Stop,reason);}
@@ -46,9 +54,13 @@ namespace WoWProbe
                 released=true;clickedAt=now;var c=Command(QuickRecoveryAction.Click,"死亡：点击已验证的释放灵魂按钮。");c.Release=true;c.Region=o.ReleaseRegion;return c;
             }
             if(resurrected)return now-clickedAt>10000?Stop("点击复活后十秒仍未存活。"):Command(QuickRecoveryAction.None,"等待实际复活。");
-            if(!o.CorpseKnown||!NavigationMath.InRange(o.CorpseX,0,1)||!NavigationMath.InRange(o.CorpseY,0,1))return Stop("实际尸体坐标不可读，不能自动跑尸。");
-            if(Double.IsNaN(corpseX)){corpseX=o.CorpseX;corpseY=o.CorpseY;}
-            else if(NavigationMath.Distance(o.CorpseX-corpseX,o.CorpseY-corpseY,calibration.AxisScale)>.001)return Stop("本轮尸体坐标发生变化。");
+            bool apiCorpse=o.CorpseKnown&&NavigationMath.InRange(o.CorpseX,0,1)&&NavigationMath.InRange(o.CorpseY,0,1);
+            bool recorded=actualCorpseRouting&&!Double.IsNaN(deathX);
+            if(!apiCorpse&&!recorded)return Stop("实际尸体坐标及记录的死亡点均不可用，不能自动跑尸。");
+            double cx=apiCorpse?o.CorpseX:deathX,cy=apiCorpse?o.CorpseY:deathY;
+            if(apiCorpse&&recorded&&NavigationMath.Distance(cx-deathX,cy-deathY,calibration.AxisScale)>.005)return Stop("尸体坐标与本轮记录的死亡点不匹配。");
+            if(Double.IsNaN(corpseX)){corpseX=cx;corpseY=cy;}
+            else if(NavigationMath.Distance(cx-corpseX,cy-corpseY,calibration.AxisScale)>.005)return Stop("本轮尸体坐标发生变化。");
             if(o.ResurrectKnown&&o.ResurrectVisible&&o.ResurrectEnabled&&o.RecoveryDelayKnown&&o.RecoveryDelayMs==0)
             {
                 if(NavigationMath.Distance(f.X-corpseX,f.Y-corpseY,calibration.AxisScale)>.035)return Stop("复活按钮出现但距离尸体异常。");
@@ -56,12 +68,20 @@ namespace WoWProbe
             }
             if(navigator==null)
             {
-                if(NavigationMath.Distance(f.X-route.Points[0].X,f.Y-route.Points[0].Y,calibration.AxisScale)>.012)return Stop("当前墓地不在已配置跑尸路线起点附近。");
-                var work=route.Clone();var end=work.Points[work.Points.Count-1];
+                bool knownGraveyard=route!=null&&NavigationMath.Distance(f.X-route.Points[0].X,f.Y-route.Points[0].Y,calibration.AxisScale)<=.012;
+                if(!knownGraveyard&&!actualCorpseRouting)return Stop("当前墓地不在已配置跑尸路线起点附近。");
+                var work=route==null?new RouteDocument{RouteId="observed-corpse",Name="实际死亡点跑尸",RouteType="corpse_run",MapId=map,MapMode=mode,Zone=zone}:route.Clone();
+                if(actualCorpseRouting)
+                {
+                    if(knownGraveyard){int nearest=0;double best=Double.PositiveInfinity;for(int i=0;i<work.Points.Count;i++){var p=work.Points[i];double d=NavigationMath.Distance(corpseX-p.X,corpseY-p.Y,calibration.AxisScale);if(d<best){best=d;nearest=i;}}if(nearest<work.Points.Count-1)work.Points.RemoveRange(nearest+1,work.Points.Count-nearest-1);}
+                    else{work.Points.Clear();work.Points.Add(new Waypoint{X=f.X,Y=f.Y,Tolerance=.001});}
+                }
+                var end=work.Points[work.Points.Count-1];
                 double distance=NavigationMath.Distance(corpseX-end.X,corpseY-end.Y,calibration.AxisScale);
-                if(distance>.04)return Stop("实际尸体超出已验证路线的末端接入范围。");
+                if(distance>.04&&!actualCorpseRouting)return Stop("实际尸体超出已验证路线的末端接入范围。");
                 if(distance>.008)
                 {double ratio=(distance-.008)/distance;work.Points.Add(new Waypoint{X=end.X+(corpseX-end.X)*ratio,Y=end.Y+(corpseY-end.Y)*ratio,Tolerance=.001,Action="wait"});}
+                if(work.Points.Count<2)return Command(QuickRecoveryAction.None,"已接近实际死亡点，等待尸体复活按钮和冷却，不与灵魂医者交互。");
                 navigator=new Navigator(work,calibration,false,false,0,NavigationPurpose.CorpseRun,80000);
             }
             var n=navigator.Step(new NavigationSample{X=f.X,Y=f.Y,Facing=f.Facing,MapId=f.MapId,MapMode=f.MapMode,Zone=f.Zone,Sequence=f.Sequence,Fresh=f.Fresh,KnownCore=f.KnownCore,Ghost=f.PlayerGhost,Dead=f.PlayerDead,Combat=f.InCombat,ReadFailures=f.ReadFailures},now);

@@ -7,9 +7,10 @@ namespace WoWProbe
     {
         readonly IInputBackend backend;readonly Action ensure;readonly InputFailureLatch safety;
         readonly Func<FarmObservation,bool> ignoreNeutralTarget;
+        readonly int restBelow;
         public bool Held {get;private set;}
-        public QuickForwardMotion(IInputBackend backend,Action ensure,InputFailureLatch safety,Func<FarmObservation,bool> ignoreNeutralTarget=null)
-        {this.backend=backend;this.ensure=ensure;this.safety=safety;this.ignoreNeutralTarget=ignoreNeutralTarget;}
+        public QuickForwardMotion(IInputBackend backend,Action ensure,InputFailureLatch safety,Func<FarmObservation,bool> ignoreNeutralTarget=null,int restBelow=80)
+        {this.backend=backend;this.ensure=ensure;this.safety=safety;this.ignoreNeutralTarget=ignoreNeutralTarget;this.restBelow=restBelow;}
         public void Start()
         {
             ensure();if(Held)return;
@@ -20,12 +21,12 @@ namespace WoWProbe
         public void Observe(FarmObservation o)
         {
             if(!Held)return;
-            if(!backend.IsTargetForeground()||backend.IsEmergencyPressed()||!CanMove(o,ignoreNeutralTarget!=null&&ignoreNeutralTarget(o)))Stop();
+            if(!backend.IsTargetForeground()||backend.IsEmergencyPressed()||!CanMove(o,ignoreNeutralTarget!=null&&ignoreNeutralTarget(o),restBelow))Stop();
         }
-        public static bool CanMove(FarmObservation o,bool allowNeutralTarget=false)
+        public static bool CanMove(FarmObservation o,bool allowNeutralTarget=false,int restBelow=80)
         {
-            return o!=null&&o.Fresh&&o.KnownCore&&o.ReadFailures==0&&!o.PlayerDead&&!o.PlayerGhost&&!o.InCombat&&!o.BagFull&&
-                o.Health>=80&&o.Health<=100&&o.ChatOpenKnown&&!o.ChatOpen&&o.CastingKnown&&!o.Casting&&!o.Channeling&&
+            return restBelow>=30&&restBelow<=95&&o!=null&&o.Fresh&&o.KnownCore&&o.ReadFailures==0&&!o.PlayerDead&&!o.PlayerGhost&&!o.InCombat&&!o.BagFull&&
+                o.Health>=restBelow&&o.Health<=100&&o.ChatOpenKnown&&!o.ChatOpen&&o.CastingKnown&&!o.Casting&&!o.Channeling&&
                 (allowNeutralTarget||!(GrindRecoveryPolicy.CanAttack(o)&&o.TargetReaction==4));
         }
         public void Stop()

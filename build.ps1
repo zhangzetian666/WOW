@@ -15,7 +15,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Application compilation failed.' }
 if ($QuickCheck) {
     if ($Package) { throw 'QuickCheck does not produce a release package.' }
     $quickSources = @($sources | Where-Object { [System.IO.Path]::GetFileName($_) -notmatch '(^Program\.cs$|^Native\.cs$|^CampaignNative\.cs$|^GrindCli\.cs$|^FishingAudioNative\.cs$|^AssemblyInfo\.cs$|Form\.cs$)' })
-    foreach ($testName in @('RoutesTests','QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','QuickForwardMotionTests','QuickRouteTests','GrindSafetyTests')) {
+    foreach ($testName in @('RoutesTests','QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','QuickForwardMotionTests','QuickRouteTests','QuickVendorTests','GrindSafetyTests')) {
         & $compiler @common /target:exe "/out:$bin\$testName.exe" @quickSources "$projectRoot\tests\$testName.cs"
         if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
         & "$bin\$testName.exe"
@@ -60,7 +60,7 @@ foreach ($testName in @('CampaignSettingsTests','RecoveryWorkflowTests','VendorW
     & "$bin\$testName.exe"
     if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
 }
-foreach ($testName in @('QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','VisualVitalsTests','MouseLookTests','QuickForwardMotionTests','QuickRouteTests')) {
+foreach ($testName in @('QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','VisualVitalsTests','MouseLookTests','QuickForwardMotionTests','QuickRouteTests','QuickVendorTests')) {
     & $compiler @common /target:exe "/out:$bin\$testName.exe" @domainSources "$projectRoot\tests\$testName.cs"
     if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
     & "$bin\$testName.exe"
@@ -95,7 +95,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Fishing UI test compilation failed.' }
 Write-Output "BUILD_OK $bin\WoWProbe.exe"
 if ($Package) {
     $dist = Join-Path $projectRoot 'dist'
-    $releaseName = 'WoWProbe-Complete-0.7.5'
+    $releaseName = 'WoWProbe-Complete-0.8.0'
     $release = Join-Path $dist $releaseName
     New-Item -ItemType Directory -Path $release -Force | Out-Null
     Copy-Item -LiteralPath "$bin\WoWProbe.exe" -Destination $release -Force

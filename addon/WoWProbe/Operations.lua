@@ -32,6 +32,58 @@ local function rectangle(frame,r)
     if x<0 or y<0 or w<1 or h<1 or x+w>r.physicalWidth or y+h>r.physicalHeight then return nil end
     return {x,y,w,h}
 end
+function P.ReadRepairState()
+    local flags,cost,money=0,0,0;local rect
+    local price=attempt(GetRepairAllCost);if price and integer(price[1],U32-1) then flags=flags+8;cost=price[1] end
+    local balance=attempt(GetMoney);if balance and integer(balance[1],U32-1) then flags=flags+16;money=balance[1] end
+    local button=MerchantRepairAllButton
+    if button then
+        flags=flags+1
+        local on=shown(button)
+        if on==true and shown(MerchantFrame)==true then
+            rect=rectangle(button,WoWProbeDB and WoWProbeDB.renderer)
+            if rect then flags=flags+2;local enabled=attempt(button.IsEnabled,button);if enabled and (enabled[1]==true or enabled[1]==1) then flags=flags+4 end end
+        end
+    end
+    return flags,rect,cost,money
+end
+function P.ReadDurability()
+    if type(GetInventoryItemDurability)~="function" then return 0,0 end
+    local count,minimum,red=0,10000,false
+    for slot=1,19 do
+        local ok,current,maximum=pcall(GetInventoryItemDurability,slot)
+        if not ok then return 0,0 end
+        if current~=nil or maximum~=nil then
+            if not finite(current) or not finite(maximum) or maximum<=0 or current<0 or current>maximum then return 0,0 end
+            count=count+1;minimum=math.min(minimum,floor(current/maximum*10000));if current==0 then red=true end
+        end
+    end
+    return count>0 and (red and 3 or 1) or 0,count>0 and minimum or 0
+end
+function P.ReadGoodsGossip()
+    local r=WoWProbeDB and WoWProbeDB.renderer
+    if not GossipFrame then return 0 end
+    local visible=shown(GossipFrame);if visible==nil then return 0 end;if not visible then return 1 end
+    local budget=256;local visited={}
+    local function matches(text)
+        if type(text)~="string" then return false end
+        text=string.gsub(string.gsub(text,"|c%x%x%x%x%x%x%x%x",""),"|r","")
+        return string.find(text,"我想看看你的货物",1,true)~=nil or string.find(text,"让我看看你的货物",1,true)~=nil or string.find(text,"我想浏览你的货物",1,true)~=nil or string.find(string.lower(text),"browse your goods",1,true)~=nil
+    end
+    local function inspect(frame,depth)
+        if not frame or visited[frame] or budget<=0 or depth>8 then return nil end
+        visited[frame]=true;budget=budget-1;if shown(frame)~=true then return nil end
+        local kind=attempt(frame.GetObjectType,frame);local enabled=attempt(frame.IsEnabled,frame)
+        if kind and kind[1]=="Button" and enabled and (enabled[1]==true or enabled[1]==1) then
+            local text=attempt(frame.GetText,frame);local found=text and matches(text[1])
+            local regions=attempt(frame.GetRegions,frame);if regions then for _,region in ipairs(regions)do local value=attempt(region.GetText,region);if value and matches(value[1]) then found=true end end end
+            if found then return rectangle(frame,r) end
+        end
+        local children=attempt(frame.GetChildren,frame);if children then for _,child in ipairs(children)do local rect=inspect(child,depth+1);if rect then return rect end end end
+    end
+    local rect=inspect(GossipFrame,0);if not rect then for i=1,32 do rect=inspect(_G["GossipTitleButton"..i],0);if rect then break end end end
+    return rect and 7 or 3,rect
+end
 local function popupState(r)
     local result={known=false}
     if type(StaticPopupDialogs)~="table" then return result end

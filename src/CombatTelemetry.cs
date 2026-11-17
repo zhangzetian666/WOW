@@ -34,6 +34,10 @@ namespace WoWProbe
         public bool TargetClaimKnown {get;private set;}public bool TargetClaimedByOther {get;private set;}
         public bool TargetCombatKnown {get;private set;}public bool TargetInCombat {get;private set;}
         public bool TargetVictimKnown {get;private set;}public bool TargetTargetsPlayer {get;private set;}
+        public bool GossipGoodsVisible {get;private set;}public Rectangle GossipGoodsRegion {get;private set;}
+        public bool GearKnown {get;private set;}public bool GearRed {get;private set;}public int Durability {get;private set;}
+        public bool RepairButtonVisible {get;private set;}public bool RepairButtonEnabled {get;private set;}public Rectangle RepairRegion {get;private set;}
+        public bool RepairCostKnown {get;private set;}public uint RepairCost {get;private set;}public bool MoneyKnown {get;private set;}public uint Money {get;private set;}
         public double TargetX { get; private set; }
         public double TargetY { get; private set; }
         public Rectangle Portrait { get; private set; }
@@ -46,7 +50,12 @@ namespace WoWProbe
             if(b[0]!=87 || b[1]!=67 || b[2]!=51 || b[3]!=1) throw Invalid("Unsupported WC3 signature or version.");
             int a=0,s=0;for(int i=0;i<126;i++){a=(a+b[i])%255;s=(s+a)%255;}
             if(b[126]!=a || b[127]!=s)throw Invalid("WC3 Fletcher16 checksum mismatch.");
-            for(int i=80;i<126;i++)if(b[i]!=0)throw Invalid("WC3 reserved bytes must be zero.");
+            for(int i=109;i<126;i++)if(b[i]!=0)throw Invalid("WC3 reserved bytes must be zero.");
+            int durability=U16(b,90),repair=b[92],rx=U16(b,93),ry=U16(b,95),rw=U16(b,97),rh=U16(b,99);
+            if((b[89]!=0&&b[89]!=1&&b[89]!=3)||b[89]==0&&durability!=0||durability>10000||b[89]==3&&durability!=0)throw Invalid("WC3 durability evidence is inconsistent.");
+            if((repair&~31)!=0||(repair&2)!=0&&(repair&1)==0||(repair&4)!=0&&(repair&3)!=3||((repair&2)!=0?(rw==0||rh==0||rw>512||rh>512||rx+rw>65535||ry+rh>65535):(rx!=0||ry!=0||rw!=0||rh!=0))||(repair&8)==0&&U32(b,101)!=0||(repair&16)==0&&U32(b,105)!=0)throw Invalid("WC3 repair button or cost evidence is inconsistent.");
+            if(b[80]!=0&&b[80]!=1&&b[80]!=3&&b[80]!=7)throw Invalid("WC3 gossip flags are inconsistent.");
+            int gx=U16(b,81),gy=U16(b,83),gw=U16(b,85),gh=U16(b,87);if(b[80]==7?(gw==0||gh==0||gw>2048||gh>512||gx+gw>65535||gy+gh>65535):(gx!=0||gy!=0||gw!=0||gh!=0))throw Invalid("WC3 goods option rectangle is invalid.");
             if((b[79]&~63)!=0||(b[79]&3)==2||(b[79]&12)==8||(b[79]&48)==32)throw Invalid("WC3 target ownership flags are inconsistent.");
             if(b[75]>3||b[75]==2||b[76]>1||b[76]==0&&U16(b,77)!=0||b[76]==1&&U16(b,77)==65535)throw Invalid("WC3 optional action setup is inconsistent.");
             uint creditName=U32(b,66),credits=U32(b,70);
@@ -78,6 +87,8 @@ namespace WoWProbe
                 TargetX=x==65535?Double.NaN:x/65534.0,TargetY=y==65535?Double.NaN:y/65534.0,
                 TargetClaimKnown=(b[79]&1)!=0,TargetClaimedByOther=(b[79]&2)!=0,TargetCombatKnown=(b[79]&4)!=0,TargetInCombat=(b[79]&8)!=0,
                 TargetVictimKnown=(b[79]&16)!=0,TargetTargetsPlayer=(b[79]&32)!=0,
+                GossipGoodsVisible=b[80]==7,GossipGoodsRegion=b[80]==7?new Rectangle(gx,gy,gw,gh):Rectangle.Empty,
+                GearKnown=(b[89]&1)!=0,GearRed=(b[89]&2)!=0,Durability=(b[89]&1)!=0?durability:-1,RepairButtonVisible=(repair&2)!=0,RepairButtonEnabled=(repair&4)!=0,RepairRegion=(repair&2)!=0?new Rectangle(rx,ry,rw,rh):Rectangle.Empty,RepairCostKnown=(repair&8)!=0,RepairCost=U32(b,101),MoneyKnown=(repair&16)!=0,Money=U32(b,105),
                 Portrait=(k&1)!=0?new Rectangle(px,py,pw,ph):Rectangle.Empty };
         }
         private static void Flag(int c,int cap,int flags,int mask){if((c&cap)==0 && (flags&mask)!=0)throw Invalid("Unknown WC3 flag cannot be true.");}
@@ -101,6 +112,8 @@ namespace WoWProbe
             TargetPositionKnown,LootKnown,Lootable,SkinKnown,Skinnable,CastingKnown,Casting,Channeling,ActionsKnown,
             LootEventsKnown,CastEventsKnown,SkinSuccessKnown,PortraitKnown,VisualHealth,VisualPower,DeathEventsKnown,ChatOpenKnown,ChatOpen,KillCreditsKnown,SkinBindingKnown,SkinBindingCorrect;
         public bool TargetClaimKnown,TargetClaimedByOther,TargetCombatKnown,TargetInCombat,TargetVictimKnown,TargetTargetsPlayer;
+        public bool GossipGoodsVisible;public Rectangle GossipGoodsRegion;
+        public bool GearKnown,GearRed,RepairButtonVisible,RepairButtonEnabled,RepairCostKnown,MoneyKnown;public int Durability=-1;public uint RepairCost,Money;public Rectangle RepairRegion;
 
         public static FarmObservation FromPackets(ProbePacket core,CombatPacket extra,bool fresh)
         {
@@ -128,6 +141,8 @@ namespace WoWProbe
             o.ChatOpenKnown=extra.ChatOpenKnown;o.ChatOpen=extra.ChatOpen;
             o.KillCreditsKnown=extra.KillCreditsKnown;o.KillCreditNameHash=extra.KillCreditNameHash;o.KillCredits=extra.KillCredits;
             o.SkinBindingKnown=extra.SkinBindingKnown;o.SkinBindingCorrect=extra.SkinBindingCorrect;o.FoodCount=extra.FoodCount;
+            o.GossipGoodsVisible=extra.GossipGoodsVisible;o.GossipGoodsRegion=extra.GossipGoodsRegion;
+            o.GearKnown=extra.GearKnown;o.GearRed=extra.GearRed;o.Durability=extra.Durability;o.RepairButtonVisible=extra.RepairButtonVisible;o.RepairButtonEnabled=extra.RepairButtonEnabled;o.RepairRegion=extra.RepairRegion;o.RepairCostKnown=extra.RepairCostKnown;o.RepairCost=extra.RepairCost;o.MoneyKnown=extra.MoneyKnown;o.Money=extra.Money;
             if(!o.TargetExists)return o;
             o.TargetClaimKnown=extra.TargetClaimKnown;o.TargetClaimedByOther=extra.TargetClaimedByOther;o.TargetCombatKnown=extra.TargetCombatKnown;o.TargetInCombat=extra.TargetInCombat;
             o.TargetVictimKnown=extra.TargetVictimKnown;o.TargetTargetsPlayer=extra.TargetTargetsPlayer;

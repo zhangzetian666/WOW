@@ -787,6 +787,30 @@ test("target ownership flags skip claimed mobs and distinguish the player's atta
     env.UnitIsTapDenied=nil;env.UnitAffectingCombat=nil;env.UnitIsUnit=nil
     p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[80],0)
 end)
+test("goods gossip uses visible enabled real button text and rejects unrelated choices",function()
+    local env=combatEnvironment();local root=object();local button=object();env.GossipFrame=root
+    function root:GetChildren()return button end
+    function button:GetObjectType()return "Button" end
+    function button:IsEnabled()return true end
+    function button:GetText()return "我想看看你的货物。" end
+    function button:GetRect()return 20,500,200,20 end
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[81],7);assert(word(p,85)>0)
+    function button:GetText()return "完成任务" end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[81],3);eq(word(p,85),0)
+    root:Hide();p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[81],1)
+end)
+test("durability and repair button cost are passive and distinguish broken from repaired",function()
+    local env=combatEnvironment();env.GetInventoryItemDurability=function(slot)if slot==16 then return 0,100 end end
+    env.GetRepairAllCost=function()return 50,true end;env.GetMoney=function()return 100 end
+    env.MerchantFrame:Show();env.MerchantRepairAllButton=object()
+    function env.MerchantRepairAllButton:IsEnabled()return true end
+    function env.MerchantRepairAllButton:GetRect()return 20,400,24,24 end
+    env.RepairAllItems=function()error("protected repair must never be called by the addon")end
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[90],3);eq(word(p,90),0);eq(p[93],31);eq(dword(p,101),50);eq(dword(p,105),100)
+    env.GetInventoryItemDurability=function(slot)if slot==16 then return 100,100 end end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[90],1);eq(word(p,90),10000)
+    env.MerchantRepairAllButton:Hide();p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[93],2),false)
+end)
 for _, t in ipairs(tests) do
     local ok, message = pcall(t[2])
     if ok then passed = passed + 1; print("PASS " .. t[1])

@@ -29,7 +29,7 @@ class QuickRouteUiTests
                 observation.Fresh=true;observation.MapId=43;rejected=false;try{capture.Invoke(recorder,null);}catch(TargetInvocationException){rejected=true;}
                 if(!rejected||File.ReadAllText(recording)!=before)throw new Exception("Cross-map capture modified recording.");
             }
-            using(var form=new QuickGrindForm(false))
+            using(var form=new QuickGrindForm(false,true))
             {
                 var editor=(QuickRouteEditor)typeof(QuickGrindForm).GetField("routeEditor",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(form);
                 var route=new RouteDocument{RouteId="ui-demo",Name="ABCDA界面检查",MapId=42,MapMode=2,Zone="SIMULATION",Loop=true};
@@ -39,9 +39,19 @@ class QuickRouteUiTests
                 grid.Rows[1].Cells[1].Value="51.25";var plan=editor.ReadPlan(false);
                 if(plan.Route.Points.Count!=5||plan.Route.Points[1].X!=.5125||!plan.Route.Loop)throw new Exception("Manual percent coordinates did not round-trip.");
                 bool rejected=false;try{editor.ReadPlan(true);}catch(InvalidOperationException){rejected=true;}if(!rejected)throw new Exception("Imported calibration was implicitly confirmed.");
+                var vendorX=(NumericUpDown)typeof(QuickRouteEditor).GetField("vendorX",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(editor);vendorX.Value=51.25m;
+                var vendorY=(NumericUpDown)typeof(QuickRouteEditor).GetField("vendorY",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(editor);vendorY.Value=52.5m;
+                ((CheckBox)typeof(QuickRouteEditor).GetField("vendorEnabled",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(editor)).Checked=true;
+                ((NumericUpDown)typeof(QuickRouteEditor).GetField("restBelow",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(editor)).Value=70;
+                ((TextBox)typeof(QuickRouteEditor).GetField("drinkKey",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(editor)).Text="5";
+                plan=editor.ReadPlan(false);if(!plan.Vendor.Enabled||plan.Vendor.X!=.5125||plan.Vendor.Y!=.525||plan.RestBelowPercent!=70||plan.DrinkKey!="5")throw new Exception("Vendor coordinates or recovery settings did not bind.");
+                ((NumericUpDown)typeof(QuickRouteEditor).GetField("repairX",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(editor)).Value=53;
+                ((NumericUpDown)typeof(QuickRouteEditor).GetField("repairY",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(editor)).Value=54;
+                editor.EnableAutoRepair();plan=editor.ReadPlan(false);if(!plan.Repair.Enabled||plan.Repair.X!=.53||plan.Repair.Y!=.54)throw new Exception("Repair point did not bind.");
                 form.Show();Application.DoEvents();
                 string output=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output");Directory.CreateDirectory(output);
                 using(var bitmap=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(bitmap,new Rectangle(Point.Empty,form.Size));bitmap.Save(Path.Combine(output,"fixed-route-ui.png"),System.Drawing.Imaging.ImageFormat.Png);}
+                var tabs=(TabControl)editor.Controls[0];foreach(TabPage page in tabs.TabPages)if(page.Text=="自动售卖"||page.Text=="恢复设置"||page.Text=="自动修理"){tabs.SelectedTab=page;Application.DoEvents();using(var bitmap=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(bitmap,new Rectangle(Point.Empty,form.Size));bitmap.Save(Path.Combine(output,page.Text=="自动售卖"?"quick-vendor-ui.png":page.Text=="自动修理"?"quick-repair-ui.png":"quick-recovery-ui.png"),System.Drawing.Imaging.ImageFormat.Png);}}
                 form.Close();
             }
             Console.WriteLine("Fixed route UI: repeated A B C D capture, immediate persistence, draft restore, closure, duplicate/stale/map rejection, manual percentage editing, unconfirmed import and preview rendering passed. No game input.");return 0;

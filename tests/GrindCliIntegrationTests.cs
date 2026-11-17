@@ -33,6 +33,16 @@ class GrindCliIntegrationTests
             }
         });
         Test("owned chat exemption never authorizes combat keys or a changed reacquire target",delegate{var o=new FarmObservation{Fresh=true,KnownCore=true,ChatOpenKnown=true,ChatOpen=true};Assert(!QuickCombat.MatchesChatCommand(new QuickCommand{Action=QuickAction.Skill},o));o.TargetExists=o.TargetIdentityKnown=true;o.TargetToken=8;Assert(!QuickCombat.MatchesChatCommand(new QuickCommand{Action=QuickAction.Reacquire,Token=7},o));o.Fresh=false;Assert(!QuickCombat.MatchesChatCommand(new QuickCommand{Action=QuickAction.CorpseSelect,Token=7},o));});
+        Test("combat arriving after Enter closes interrupted return chat through a fresh safety guard",delegate{
+            var o=new FarmObservation{Fresh=true,KnownCore=true,MapId=42,MapMode=2,Zone="TEST",Health=100,ChatOpenKnown=true};var b=new Backend();long now=0;var text=new System.Text.StringBuilder();
+            b.Released=k=>{if(k==13){o.ChatOpen=true;o.InCombat=true;}if(k==27)o.ChatOpen=false;};
+            Func<GrindInputGuard> baseGuard=()=>new GrindInputGuard(b,()=>o,()=>now,ms=>now+=ms,new InputFailureLatch(),42,2,"TEST");
+            var targetGuard=new GrindInputGuard(b,()=>{if(o.InCombat)throw new InvalidOperationException("目标状态变化，停止当前按键。");return o;},()=>now,ms=>now+=ms,new InputFailureLatch(),42,2,"TEST");
+            typeof(GrindCli).GetField("input",Flags).SetValue(null,targetGuard);typeof(GrindCli).GetField("chatReader",Flags).SetValue(null,(Func<FarmObservation>)(()=>o));
+            Reject(()=>Call("ChatChecked",null,"/stopattack",(Func<bool>)(()=>!o.InCombat),(Action<char>)(c=>text.Append(c))));Assert(o.ChatOpen&&text.Length==0);
+            Call("CloseInterruptedChat",null,baseGuard());Assert(!o.ChatOpen&&o.InCombat&&b.Down==2&&b.Up==2);
+            o.ChatOpen=true;b.Emergency=true;Reject(()=>Call("CloseInterruptedChat",null,baseGuard()));Assert(o.ChatOpen&&b.Down==2);
+        });
         Console.WriteLine("Grind CLI integration tests: "+passed+" passed, "+failed+" failed. No native input backend was constructed.");return failed==0?0:1;
     }
 }

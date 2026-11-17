@@ -652,6 +652,12 @@ function P.BuildCombatPacket(core)
             if countOK and integer(count,U16-1) then put(76,1);u16(77,count) end
         elseif itemOK then put(76,1);u16(77,0) end
     end)
+    if type(P.ReadGoodsGossip)=="function" then
+        local ok,gossip,rect=pcall(P.ReadGoodsGossip)
+        if ok then put(80,gossip or 0);if gossip==7 and rect then for i=1,4 do u16(79+i*2,rect[i]) end end end
+    end
+    if type(P.ReadDurability)=="function" then local ok,flags,value=pcall(P.ReadDurability);if ok then put(89,flags or 0);u16(90,value or 0) end end
+    if type(P.ReadRepairState)=="function" then local ok,flags,rect,cost,money=pcall(P.ReadRepairState);if ok then put(92,flags or 0);if rect then for i=1,4 do u16(91+i*2,rect[i]) end end;u32(101,cost or 0);u32(105,money or 0) end end
     put(6,caps);put(7,flags);put(56,extra)
     local a,b=0,0;for i=1,126 do a=(a+p[i])%255;b=(b+a)%255 end;put(126,a);put(127,b)
     WoWProbeDB.lastCombatPacket={sequence=p[5]+p[6]*256,capabilities=caps,flags=flags,extraKnown=extra,
@@ -839,7 +845,7 @@ local function printLine(text)
 end
 function P.ResetDiagnostics()
     local visible = type(WoWProbeDB) == "table" and WoWProbeDB.visible ~= false
-    WoWProbeDB = { schema = 1, addonVersion = "0.5.3", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
+    WoWProbeDB = { schema = 1, addonVersion = "0.5.5", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
     readClient(); captureBindings(); captureAPIs(); if P.panel then P.ScalePanel() end
 end
 function P.Command(command)
@@ -977,7 +983,7 @@ function P.Initialize()
     WoWProbeDB = old; WoWProbeDB.visible = visible
     if integer(old.rangeSlot,4) and old.rangeSlot>=1 then P.rangeSlot=old.rangeSlot end
     WoWProbeDB.previousSession = previous
-    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.3"
+    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.5"
     WoWProbeDB.errors, WoWProbeDB.bindings, WoWProbeDB.capabilities = {}, {}, {}
     readClient(); captureBindings(); captureAPIs()
     local ok, reason = pcall(createPanel)

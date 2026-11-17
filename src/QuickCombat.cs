@@ -21,6 +21,10 @@ namespace WoWProbe
         readonly HashSet<uint> inspectedCorpses=new HashSet<uint>();
         string lockedTargetName;
         readonly string openingKeys,loopKeys;int loopIndex;
+        readonly int restBelow;readonly ushort drinkKey;
+        readonly bool permitFullBags;
+        public bool HasActiveWork {get{return token!=0||resting;}}
+        public static ushort ConfiguredKey(string text){string v=CleanKeys(text,true);if(v.Length>1)throw new FormatException("饮水键只能填一个按键，盗贼可留空。");return (ushort)(v.Length==0?0:v[0]=='='?187:v[0]=='-'?189:v[0]);}
         public static string CleanKeys(string keys,bool allowEmpty)
         {if(keys==null)throw new FormatException("技能序列不能为空值。");var b=new System.Text.StringBuilder();foreach(char c in keys){if(Char.IsWhiteSpace(c))continue;if(!(c>='0'&&c<='9')&&c!='-'&&c!='=')throw new FormatException("技能序列只支持0–9、-、=键，可用空格分隔。");b.Append(c);}if(b.Length>64||!allowEmpty&&b.Length==0)throw new FormatException("循环技能须为1至64个按键，开场可以留空。");return b.ToString();}
         sealed class DeferredCorpse {public uint Token;public QuickCorpse Corpse;public int Loots,Skins;}
@@ -39,11 +43,13 @@ namespace WoWProbe
         public QuickCombat(FarmObservation initial,int interval,bool skinning):this(initial,interval,skinning,null){}
         public QuickCombat(FarmObservation initial,int interval,bool skinning,QuickRouteFollower route)
             :this(initial,interval,skinning,route,"242223","2"){}
-        public QuickCombat(FarmObservation initial,int interval,bool skinning,QuickRouteFollower route,string openingKeys,string loopKeys)
+        public QuickCombat(FarmObservation initial,int interval,bool skinning,QuickRouteFollower route,string openingKeys,string loopKeys,int restBelow=80,ushort drinkKey=0,bool permitFullBags=false)
         {
             if(initial==null||!initial.Fresh||!initial.KnownCore)throw new InvalidOperationException("需要连续有效的插件数据。");
             if(interval<100||interval>5000)throw new ArgumentOutOfRangeException("interval");
             this.openingKeys=CleanKeys(openingKeys,true);this.loopKeys=CleanKeys(loopKeys,false);
+            this.permitFullBags=permitFullBags;
+            if(restBelow<30||restBelow>95)throw new ArgumentOutOfRangeException("restBelow");if(drinkKey!=0&&!((drinkKey>=48&&drinkKey<=57)||drinkKey==187||drinkKey==189))throw new ArgumentException("Invalid drink key.");this.restBelow=restBelow;this.drinkKey=drinkKey;
             map=initial.MapId;mode=initial.MapMode;zone=initial.Zone;x=initial.X;y=initial.Y;this.interval=interval;this.skinning=skinning;this.route=route;
         }
         QuickCommand Cmd(QuickAction a,string r,ushort k)
@@ -56,7 +62,7 @@ namespace WoWProbe
             if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0)return Stop("插件状态失效，停止输入。");
             if(o.PlayerDead||o.PlayerGhost)return Stop("角色死亡或处于灵魂状态。");
             if(o.ChatOpenKnown&&o.ChatOpen)return Stop("聊天输入框打开，停止战斗按键。");
-            if(o.BagFull&&!o.InCombat)return Stop("背包已满。");
+            if(o.BagFull&&!o.InCombat&&!permitFullBags)return Stop("背包已满。");
             if(o.Health<0||o.Health>100)return Stop("生命值不可读，不能确认恢复完成。");
             if(o.MapId!=map||o.MapMode!=mode||o.Zone!=zone)return Stop("地图发生变化。");
             if(route!=null){route.TickNearbySearch(o,now,token==0&&!resting);route.ObserveCombat(o);if(!route.CanOperate(o))return Stop("角色超出巡航及追怪范围，停止追击。");}
@@ -70,15 +76,15 @@ namespace WoWProbe
                 if(!resting&&!o.InCombat&&o.FoodCount==0)return Stop("食物栏位已耗尽，补充食物后再继续打怪。");
                 bool mana=o.PowerType==0;
                 if(mana&&(o.Power<0||o.Power>100))return Stop("法力值不可读，不能确认饮水完成。");
-                if(!resting&&!o.InCombat&&(o.Health<(initialRest?99:80)||mana&&o.Power<(initialRest?99:80)))
+                if(!resting&&!o.InCombat&&(o.Health<(initialRest?99:restBelow)||mana&&o.Power<(initialRest?99:restBelow)))
                 {resting=true;restStarted=now;food=drink=false;if(route!=null)route.Interrupt(o);}
-                if(resting&&o.InCombat){resting=false;initialRest=true;food=drink=false;}
+                if(resting&&o.InCombat){resting=false;initialRest=true;food=drink=false;if(o.Casting||o.Channeling)return Cmd(QuickAction.InterruptSkin,"吃喝期间受到攻击，停止恢复施法并优先反击。",27);}
                 if(resting)
                 {
                     if(o.Health>=99&&(!mana||o.Power>=99)){resting=false;initialRest=false;if(route!=null)route.BeginNearbySearch(o,now);return Cmd(QuickAction.None,"已观察到血量和适用法力恢复至满。",0);}
                     if(now-restStarted>=60000)return Stop("60秒内未恢复满，检查食物和饮水绑定。");
                     if(!food&&o.Health<99){food=true;return Cmd(QuickAction.Food,"血量低于恢复要求，按=吃食物。",0xBB);}
-                    if(mana&&!drink&&o.Power<99)return Stop("附近打怪入口仅配置了盗贼；法力职业请先配置饮水按键。");
+                    if(mana&&!drink&&o.Power<99){if(drinkKey==0)return Stop("法力不足，请在恢复设置填写饮水键并放置饮水物品。");drink=true;return Cmd(QuickAction.Drink,"法力低于恢复要求，按已配置饮水键，等待恢复至99%。",drinkKey);}
                     return Cmd(QuickAction.None,"吃喝恢复中，等待血条达到99%。",0);
                 }
                 initialRest=false;
@@ -219,7 +225,7 @@ namespace WoWProbe
                 deferredCorpses.Push(new DeferredCorpse{Token=token,Corpse=corpse,Loots=creditedLoots,Skins=creditedSkins});token=0;corpse=null;looted=false;c.Report=true;
                 if(o.Casting||o.Channeling){c.Action=QuickAction.InterruptSkin;c.Key=27;c.Reason="剥皮期间受到攻击：取消本次施法，先处理攻击者。";}
             }
-            else if(corpse.Done){token=0;corpse=null;nextScan=now;if(route!=null)route.BeginNearbySearch(o,now);}
+            else if(corpse.Done){inspectedCorpses.Add(token);token=0;corpse=null;nextScan=now;if(route!=null)route.BeginNearbySearch(o,now);}
             c.RouteContext=route;return c;
         }
         public static bool Matches(QuickCommand c,FarmObservation o)

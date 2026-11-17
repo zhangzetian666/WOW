@@ -13,11 +13,16 @@ namespace WoWProbe
         public double CombatRadius=.02;
         public string OpeningKeys="242223",LoopKeys="2";
         public int SkillIntervalMs=750;
-        public void ValidateSkills(){QuickCombat.CleanKeys(OpeningKeys,true);QuickCombat.CleanKeys(LoopKeys,false);if(SkillIntervalMs<100||SkillIntervalMs>5000)throw new FormatException("技能间隔须为0.10至5.00秒。");}
+        public int RestBelowPercent=80;public string DrinkKey="";
+        public QuickVendorSettings Vendor=new QuickVendorSettings();
+        public QuickVendorSettings Repair=new QuickVendorSettings();
+        public void ValidateSkills(){QuickCombat.CleanKeys(OpeningKeys,true);QuickCombat.CleanKeys(LoopKeys,false);QuickCombat.ConfiguredKey(DrinkKey);if(RestBelowPercent<30||RestBelowPercent>95)throw new FormatException("吃喝触发阈值须为30–95%。");if(SkillIntervalMs<100||SkillIntervalMs>5000)throw new FormatException("技能间隔须为0.10至5.00秒。");}
         public void Validate(bool live)
         {
             if(SchemaVersion!=1||Route==null||Calibration==null)throw new FormatException("无效的巡航方案。");
             Route.Validate();Calibration.Validate();
+            if(Vendor==null)throw new FormatException("商人设置无效。");Vendor.Validate();
+            if(Repair==null)throw new FormatException("修理NPC设置无效。");Repair.Validate();
             ValidateSkills();
             if(Route.RouteType!="farm"||!Route.Loop)throw new FormatException("请选择打怪用途的闭合循环路线。");
             if(!NavigationMath.InRange(CorridorWidth,.0005,.02))throw new FormatException("路线偏离范围必须为0.05至2个坐标点。");
@@ -29,7 +34,7 @@ namespace WoWProbe
             {if(i>0&&NavigationMath.Distance(Route.Points[i].X-Route.Points[i-1].X,Route.Points[i].Y-Route.Points[i-1].Y,Calibration.AxisScale)<1e-8)throw new FormatException("相邻路点不能重复。");if(Route.Points[i].Tolerance>CorridorWidth/2)throw new FormatException("路点到达误差须小于路线偏离范围的一半。");if(Route.Points[i].WaitMilliseconds!=0||Route.Points[i].Action=="interact")throw new FormatException("打怪巡航路点不支持等待或商人交互动作。");}
             if(live&&!Calibration.Confirmed)throw new InvalidOperationException("请先核对本机地图与移动参数。");
         }
-        public QuickRoutePlan Clone(){return new QuickRoutePlan{SchemaVersion=SchemaVersion,Route=Route.Clone(),Calibration=Calibration.Clone(),CorridorWidth=CorridorWidth,CombatRadius=CombatRadius,OpeningKeys=OpeningKeys,LoopKeys=LoopKeys,SkillIntervalMs=SkillIntervalMs};}
+        public QuickRoutePlan Clone(){return new QuickRoutePlan{SchemaVersion=SchemaVersion,Route=Route.Clone(),Calibration=Calibration.Clone(),CorridorWidth=CorridorWidth,CombatRadius=CombatRadius,OpeningKeys=OpeningKeys,LoopKeys=LoopKeys,SkillIntervalMs=SkillIntervalMs,RestBelowPercent=RestBelowPercent,DrinkKey=DrinkKey,Vendor=Vendor.Clone(),Repair=Repair.Clone()};}
         public bool MapMatches(FarmObservation o){return o!=null&&o.MapId==Route.MapId&&o.MapMode==Route.MapMode&&o.Zone==Route.Zone;}
         public double DistanceToRoute(double x,double y)
         {double px,py;int end;Project(x,y,out px,out py,out end);return NavigationMath.Distance(x-px,y-py,Calibration.AxisScale);}
@@ -75,6 +80,8 @@ namespace WoWProbe
             if(p==null||p.SchemaVersion!=1||p.Route==null||p.Calibration==null||p.Route.Points==null||p.Route.Points.Count>4999)throw new FormatException("录点草稿无效。");
             p.Calibration.Validate();RouteChecks.Label(p.Route.RouteId,"route_id");RouteChecks.Label(p.Route.Name,"name");RouteChecks.Binding(p.Route.MapId,p.Route.MapMode,p.Route.Zone);
             p.ValidateSkills();
+            if(p.Vendor==null)throw new FormatException("商人设置无效。");p.Vendor.Validate();
+            if(p.Repair==null)throw new FormatException("修理NPC设置无效。");p.Repair.Validate();
             if(!NavigationMath.InRange(p.CombatRadius,p.CorridorWidth,.05))throw new FormatException("录点草稿追怪范围无效。");
             if(p.Route.SchemaVersion!=1||p.Route.RouteType!="farm"||!p.Route.Loop||p.Route.MapId!=p.Calibration.MapId||p.Route.MapMode!=p.Calibration.MapMode||p.Route.Zone!=p.Calibration.Zone||!NavigationMath.InRange(p.CorridorWidth,.0005,.02))throw new FormatException("录点草稿地图或范围无效。");
             for(int i=0;i<p.Route.Points.Count;i++)
@@ -82,7 +89,9 @@ namespace WoWProbe
         }
         static QuickRoutePlan Load(string path,bool recording)
         {
-            var root=RouteJson.Object(RouteFiles.Load(path));RouteJson.Keys(root,"SchemaVersion,Route,Calibration,CorridorWidth,CombatRadius,OpeningKeys,LoopKeys,SkillIntervalMs","CombatRadius,OpeningKeys,LoopKeys,SkillIntervalMs");
+            var root=RouteJson.Object(RouteFiles.Load(path));RouteJson.Keys(root,"SchemaVersion,Route,Calibration,CorridorWidth,CombatRadius,OpeningKeys,LoopKeys,SkillIntervalMs,RestBelowPercent,DrinkKey,Vendor,Repair","CombatRadius,OpeningKeys,LoopKeys,SkillIntervalMs,RestBelowPercent,DrinkKey,Vendor,Repair");
+            if(root.ContainsKey("Vendor"))RouteJson.Keys(RouteJson.Object(root["Vendor"]),"Enabled,X,Y,Name",null);
+            if(root.ContainsKey("Repair"))RouteJson.Keys(RouteJson.Object(root["Repair"]),"Enabled,X,Y,Name",null);
             var r=RouteJson.Object(root["Route"]);RouteJson.Keys(r,"SchemaVersion,RouteId,Name,RouteType,Zone,MapId,MapMode,AllowReverse,Loop,Points",null);
             var c=RouteJson.Object(root["Calibration"]);RouteJson.Keys(c,"AxisScale,FacingSign,FacingOffset,TurnRadiansPerSecond,ForwardUnitsPerSecond,Confirmed,MapId,MapMode,Zone",null);
             var points=r["Points"] as System.Collections.Generic.List<object>;if(points==null)throw new FormatException("缺少路点列表。");foreach(var point in points)RouteJson.Keys(RouteJson.Object(point),"X,Y,Tolerance,WaitMilliseconds,Action",null);
@@ -100,6 +109,7 @@ namespace WoWProbe
         public bool SearchingNearby {get;private set;}
         double nearbyX,nearbyY;long nearbyUntil=-1;
         double returnX,returnY,progressX,progressY,defenseRadius;long last=-1,progressAt=-1,targetAt=-1;int sequence=-1;bool suspended;
+        int escapePhase,escapeAttempts;double escapeFacing;long escapeDeadline;
         public QuickRouteFollower(QuickRoutePlan plan,FarmObservation start)
         {
             plan.Validate(true);Plan=plan.Clone();
@@ -134,7 +144,7 @@ namespace WoWProbe
         {
             int nearest=0;double distance=Double.PositiveInfinity;
             for(int i=0;i<Plan.Route.Points.Count-1;i++){var w=Plan.Route.Points[i];double d=NavigationMath.Distance(o.X-w.X,o.Y-w.Y,Plan.Calibration.AxisScale);if(d<distance){distance=d;nearest=i;}}
-            returnX=Plan.Route.Points[nearest].X;returnY=Plan.Route.Points[nearest].Y;TargetIndex=nearest+1;Returning=Joining=true;suspended=false;progressAt=targetAt=-1;
+            returnX=Plan.Route.Points[nearest].X;returnY=Plan.Route.Points[nearest].Y;TargetIndex=nearest+1;Returning=Joining=true;suspended=false;progressAt=targetAt=-1;escapePhase=0;
         }
         public bool InCombatArea(FarmObservation o){return o!=null&&Plan.MapMatches(o)&&Plan.WithinCombatArea(o.X,o.Y);}
         public void ObserveCombat(FarmObservation o)
@@ -147,7 +157,7 @@ namespace WoWProbe
         {return TargetAllowed(o)&&(o.InCombat||SearchingNearby||OnRoute(o)&&!Returning&&!suspended);}
         public void Interrupt(FarmObservation o)
         {
-            if(!suspended){if(!Returning)Plan.ProjectSegment(o.X,o.Y,TargetIndex,out returnX,out returnY);suspended=true;}
+            escapePhase=0;if(!suspended){if(!Returning)Plan.ProjectSegment(o.X,o.Y,TargetIndex,out returnX,out returnY);suspended=true;}
         }
         public void Resume(){if(suspended){Returning=true;suspended=false;progressAt=targetAt=-1;}}
         public QuickCommand Step(FarmObservation o,long now)
@@ -160,12 +170,14 @@ namespace WoWProbe
             if(targetAt<0)targetAt=now;if(now-targetAt>120000)return C(QuickAction.Stop,"两分钟未到达下一个路点，请检查路线与移动标定。",0,0);
             if(progressAt<0){progressAt=now;progressX=o.X;progressY=o.Y;}
             if(NavigationMath.Distance(o.X-progressX,o.Y-progressY,Plan.Calibration.AxisScale)>.0002){progressAt=now;progressX=o.X;progressY=o.Y;}
-            if(now-progressAt>12000)return C(QuickAction.Stop,"路线持续无位移，停止；请检查路点间障碍。",0,0);
+            if(escapePhase==1){escapePhase=2;escapeFacing=o.Facing;escapeDeadline=now+3000;var mouse=C(QuickAction.DetourTurn,"巡航脱困：按住鼠标右键换视角及角色方向。",(ushort)(escapeAttempts%2==1?39:37),0);mouse.MouseTurn=true;return mouse;}
+            if(escapePhase==2){if(!MouseLookInput.TurnObserved(escapeFacing,o.Facing))return now<escapeDeadline?C(QuickAction.None,"等待确认实际转向后再试走。",0,0):C(QuickAction.Stop,"脱困没有观察到角色转向，停止检查右键控制。",0,0);escapePhase=0;progressAt=now;return C(QuickAction.DetourForward,"巡航脱困：已确认换方向，短距离试走后继续原路线。",87,650);}
+            if(now-progressAt>2500){if(++escapeAttempts>3)return C(QuickAction.Stop,"三次换向仍受阻，停止检查障碍或增加绕行路点。",0,0);escapePhase=1;progressAt=now;return C(QuickAction.BackOff,"前进无实际位移：先后退，再右键换方向绕开障碍。",83,250);}
             double tx=Returning?returnX:Plan.Route.Points[TargetIndex].X,ty=Returning?returnY:Plan.Route.Points[TargetIndex].Y;
             double tolerance=Returning?Tolerance:Plan.Route.Points[TargetIndex].Tolerance;
             if(NavigationMath.Distance(tx-o.X,ty-o.Y,Plan.Calibration.AxisScale)<=tolerance)
             {
-                progressAt=targetAt=now;
+                progressAt=targetAt=now;escapeAttempts=0;
                 if(Returning){Returning=Joining=false;defenseRadius=0;}
                 else {TargetIndex++;if(TargetIndex>=Plan.Route.Points.Count){TargetIndex=1;Laps++;}}
                 tx=Plan.Route.Points[TargetIndex].X;ty=Plan.Route.Points[TargetIndex].Y;
