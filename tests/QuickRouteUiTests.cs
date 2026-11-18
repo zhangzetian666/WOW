@@ -26,6 +26,7 @@ class QuickRouteUiTests
                 if(recorder.ReadPlan(false).Route.Points.Count!=5||QuickRoutePlan.LoadRecording(recording).Route.Points.Count!=5)throw new Exception("Closure was not persisted as ABCDA.");
                 var flags=BindingFlags.Instance|BindingFlags.NonPublic;
                 var service=(QuickServiceRoutePanel)typeof(QuickRouteEditor).GetField("vendorRoute",flags).GetValue(recorder);
+                recorder.EnableAutoVendor();recorder.EnableAutoRepair();
                 typeof(QuickServiceRoutePanel).GetMethod("StartRecording",flags).Invoke(service,null);
                 if(!recorder.RecordingServiceRoute||QuickRoutePlan.LoadRecording(recording).Vendor.RouteComplete)throw new Exception("Recording did not keep an incomplete draft.");
                 observation.Sequence++;observation.Y+=.001;typeof(QuickServiceRoutePanel).GetMethod("RecordSample",flags).Invoke(service,null);
