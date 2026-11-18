@@ -139,11 +139,11 @@ namespace WoWProbe
                     string recoveryPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-corpse-route.json");
                     if(File.Exists(recoveryPath))
                     {
-                        try{var configured=RouteStore.Load(recoveryPath);if(QuickRecovery.RouteMatches(configured,anchor))recoveryRoute=configured;else write("忽略不匹配的旧跑尸路线；死亡后使用记录的实际死亡点。");}
-                        catch(Exception ex){write("旧跑尸路线无法读取，改用记录的实际死亡点。"+ex.Message);}
+                        try{var configured=RouteStore.Load(recoveryPath);if(QuickRecovery.RouteMatches(configured,anchor))recoveryRoute=configured;else if(configured.RouteId=="recorded-ghost")throw new InvalidOperationException("跑尸录制路线与当前地图不匹配，请在跑尸路线页重新录制。");else write("忽略不匹配的旧跑尸路线；死亡后使用记录的实际死亡点。");}
+                        catch(Exception ex){throw new InvalidOperationException("跑尸路线无法使用，请检查或重新录制："+ex.Message);}
                     }
                     else write("跑尸按实际死亡点导航，不要求另行录制墓地路线。");
-                    if(recoveryRoute!=null)write("旧跑尸路线作为可选已知路段；最终前往本轮实际死亡点，不与灵魂医者交互。");
+                    if(recoveryRoute!=null)write("已加载跑尸路线；沿已录路点返回，再接近本轮死亡点，不与灵魂医者交互。");
                     write(plan.Vendor.Enabled?"包满自动前往售卖NPC，确认空位恢复后返回；修理按独立设置执行。":"未启用售卖NPC；包满将停止，请在自动售卖页填写商人坐标。");
                     write("技能设置：开场="+plan.OpeningKeys+"，循环="+plan.LoopKeys+"，间隔="+interval+"ms。生命="+anchor.Health+"%（"+(anchor.VisualHealth?"原生血条画面":"API")+"）；启动先恢复满血，脱战低于"+plan.RestBelowPercent+"%吃喝。");
                     Activate(window.Handle);

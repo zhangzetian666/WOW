@@ -23,8 +23,10 @@ namespace WoWProbe
         readonly string recordingPath;
         readonly TabControl tabs=new TabControl{Dock=DockStyle.Fill};
         readonly QuickServiceRoutePanel vendorRoute,repairRoute;
+        readonly QuickServiceRoutePanel corpseRoute;QuickVendorSettings corpseSettings=new QuickVendorSettings();
+        string CorpsePath {get{return Path.Combine(Path.GetDirectoryName(recordingPath),"quick-corpse-route.json");}}
         public event Action ServiceRecordingChanged;
-        public bool RecordingServiceRoute {get{return vendorRoute!=null&&vendorRoute.IsRecording||repairRoute!=null&&repairRoute.IsRecording;}}
+        public bool RecordingServiceRoute {get{return vendorRoute!=null&&vendorRoute.IsRecording||repairRoute!=null&&repairRoute.IsRecording||corpseRoute!=null&&corpseRoute.IsRecording;}}
         public QuickRouteEditor()
             :this(null,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-patrol-recording.json")){}
         public QuickRouteEditor(Func<FarmObservation> reader,string path)
@@ -32,12 +34,15 @@ namespace WoWProbe
             readCurrent=reader;recordingPath=path;
             Dock=DockStyle.Fill;
             vendorRoute=CreateServicePanel(false);repairRoute=CreateServicePanel(true);
+            corpseRoute=new QuickServiceRoutePanel(()=>ReadCurrent(true),()=>readCurrent!=null?readCurrent():GrindCli.ReadTelemetry(),ReadEditor,()=>corpseSettings.Clone(),s=>{corpseSettings=s.Clone();corpseRoute.Bind(s);},SaveCorpseRoute,UpdateRecordingState,()=>vendorRoute.IsRecording||repairRoute.IsRecording,readCurrent==null,true);
             Controls.Add(tabs);
             var routeTab=new TabPage("固定巡航点");var settingsTab=new TabPage("本机地图与移动参数");tabs.TabPages.Add(routeTab);tabs.TabPages.Add(settingsTab);
             var skillTab=new TabPage("技能设置");tabs.TabPages.Add(skillTab);var skillPanel=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(10)};skillTab.Controls.Add(skillPanel);
             tabs.TabPages.Add(ServiceTab(false));
             var restTab=new TabPage("恢复设置");tabs.TabPages.Add(restTab);var restPanel=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(10)};restTab.Controls.Add(restPanel);var restRow=Row();restRow.AutoSize=true;L(restRow,"脱战血量/适用法力低于（%）");restRow.Controls.Add(restBelow);L(restRow,"饮水键（法力职业填写）");restRow.Controls.Add(drinkKey);restPanel.Controls.Add(restRow);restPanel.Controls.Add(new Label{AutoSize=true,MaximumSize=new Size(780,0),Text="自动吃喝已启用。把食物放在主动作条第12格（=键）。\n脱战低于阈值就吃喝，恢复至99%后再寻怪；启动、复活后先恢复满。\n盗贼使用能量，只吃食物补血，不会按饮水键。法力职业请把饮水物品放在上方填写的键。\n吃喝期间受到攻击优先反击，脱战后重新恢复。食物耗尽或60秒仍未恢复会停止并提示。"});
             tabs.TabPages.Add(ServiceTab(true));
+            var corpseTab=new TabPage("跑尸路线");var corpsePanel=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(10),AutoScroll=true};corpseTab.Controls.Add(corpsePanel);corpsePanel.Controls.Add(new Label{AutoSize=true,MaximumSize=new Size(760,0),Text="释放灵魂后，在墓地点击开始录制；保持灵魂状态绕过障碍走到打怪区，点击结束录制，再复活。\n录制期间不会自动移动。死亡后沿此路线跑尸，不与灵魂医者复活。路线单独保存在 quick-corpse-route.json。"});corpsePanel.Controls.Add(corpseRoute);tabs.TabPages.Add(corpseTab);
+            if(File.Exists(CorpsePath)){try{var r=RouteStore.Load(CorpsePath);if(r.RouteType=="corpse_run"){corpseSettings=new QuickVendorSettings{Enabled=true,RouteComplete=true,Points=r.Points,X=r.Points[r.Points.Count-1].X,Y=r.Points[r.Points.Count-1].Y};corpseRoute.Bind(corpseSettings);}}catch(Exception ex){corpsePanel.Controls.Add(new Label{AutoSize=true,Text="旧跑尸路线未载入："+ex.Message});}}
             var sk1=Row();sk1.AutoSize=true;L(sk1,"每只怪开场一次（可留空）");sk1.Controls.Add(openingKeys);skillPanel.Controls.Add(sk1);var sk2=Row();sk2.AutoSize=true;L(sk2,"之后重复循环");sk2.Controls.Add(loopKeys);L(sk2,"技能间隔（秒）");sk2.Controls.Add(skillSeconds);skillPanel.Controls.Add(sk2);skillPanel.Controls.Add(new Label{AutoSize=true,Text="例如循环填242223，间隔填0.75，就每0.75秒尝试下一键并循环。\n开场填242223、循环填2，则每只怪先打242223，之后持续2。\n支持0–9、-、=键；新怪重新从开场开始。发送尝试不等于技能施放成功。"});
             var root=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=4,ColumnCount=1};root.RowStyles.Add(new RowStyle(SizeType.Absolute,34));root.RowStyles.Add(new RowStyle(SizeType.Absolute,35));root.RowStyles.Add(new RowStyle(SizeType.Percent,100));root.RowStyles.Add(new RowStyle(SizeType.Absolute,32));routeTab.Controls.Add(root);
             var names=Row();root.Controls.Add(names,0,0);L(names,"名称");names.Controls.Add(routeName);L(names,"允许偏离（坐标点）");names.Controls.Add(corridor);L(names,"到点误差");names.Controls.Add(tolerance);
@@ -67,7 +72,7 @@ namespace WoWProbe
         {return new QuickServiceRoutePanel(Current,()=>readCurrent!=null?readCurrent():GrindCli.ReadTelemetry(),ReadEditor,()=>ServiceSettings(repair),s=>{ApplyService(repair,s);if(s.RouteComplete)ApplyService(!repair,s.Clone());},()=>QuickRoutePlan.SaveRecording(recordingPath,ReadEditor()),UpdateRecordingState,()=>repair?vendorRoute!=null&&vendorRoute.IsRecording:repairRoute!=null&&repairRoute.IsRecording,readCurrent==null);}
         void UpdateRecordingState()
         {
-            bool active=RecordingServiceRoute;foreach(TabPage page in tabs.TabPages)page.Enabled=!active||page.Text=="自动售卖"&&vendorRoute.IsRecording||page.Text=="自动修理"&&repairRoute.IsRecording;
+            bool active=RecordingServiceRoute;foreach(TabPage page in tabs.TabPages)page.Enabled=!active||page.Text=="自动售卖"&&vendorRoute.IsRecording||page.Text=="自动修理"&&repairRoute.IsRecording||page.Text=="跑尸路线"&&corpseRoute.IsRecording;
             vendorEnabled.Enabled=repairEnabled.Enabled=!active;
             if(!active)Preview();if(ServiceRecordingChanged!=null)ServiceRecordingChanged();
         }
@@ -116,7 +121,9 @@ namespace WoWProbe
             int count=0;foreach(DataGridViewRow row in grid.Rows)if(!row.IsNewRow)row.Cells[0].Value=count<26?((char)('A'+count++)).ToString():"P"+(++count);
             try{var p=ReadPlan(false);grid.Rows[grid.Rows.Count-2].Cells[0].Value="A";canvas.Route=p.Route;canvas.AxisScale=p.Calibration.AxisScale;info.Text="已配置"+(p.Route.Points.Count-1)+"个巡航点并回到A；按输入顺序循环。";}catch{canvas.Route=null;info.Text="手填0–100坐标，至少两个不同点；最后一个点回到A。";}canvas.Invalidate();
         }
-        FarmObservation Current()
+        void SaveCorpseRoute(){if(!corpseSettings.RouteComplete)return;var p=ReadEditor();var r=new RouteDocument{RouteId="recorded-ghost",Name="墓地到打怪区",RouteType="corpse_run",MapId=p.Route.MapId,MapMode=p.Route.MapMode,Zone=p.Route.Zone};foreach(var w in corpseSettings.Points)r.Points.Add(w.Clone());RouteStore.Save(CorpsePath,r);}
+        FarmObservation Current(){return ReadCurrent(false);}
+        FarmObservation ReadCurrent(bool ghost)
         {
             FarmObservation o;
             if(readCurrent!=null)o=readCurrent();
@@ -126,7 +133,7 @@ namespace WoWProbe
                 try{if(visible)form.Hide();GrindCli.FocusGameWindow();GrindCli.OpenTelemetry();o=GrindCli.ReadTelemetry();}
                 finally{if(visible&&!form.IsDisposed){form.Show();form.Activate();}}
             }
-            if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||o.PlayerDead||o.PlayerGhost||o.InCombat||!NavigationMath.InRange(o.X,0,1)||!NavigationMath.InRange(o.Y,0,1))throw new InvalidOperationException("未读到新鲜、存活且脱战的角色坐标，未保存巡航点。");return o;
+            if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||(ghost?!o.PlayerGhost:o.PlayerDead||o.PlayerGhost)||o.InCombat||!NavigationMath.InRange(o.X,0,1)||!NavigationMath.InRange(o.Y,0,1))throw new InvalidOperationException(ghost?"请先释放灵魂，在墓地以灵魂状态录制跑尸路线。":"未读到新鲜、存活且脱战的角色坐标，未保存巡航点。");return o;
         }
         void ReadMap(){var o=Current();if(grid.Rows.Count>1&&mapId.Text!=""&&(mapId.Text!=o.MapId.ToString()||zone.Text!=o.Zone))throw new InvalidOperationException("当前地图与已有路点不同，请先另存或清空原路点。");mapId.Text=o.MapId.ToString();mode.Value=o.MapMode;zone.Text=o.Zone;}
         void CapturePoint()

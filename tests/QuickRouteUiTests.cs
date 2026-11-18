@@ -34,6 +34,14 @@ class QuickRouteUiTests
                 var repairService=(QuickServiceRoutePanel)typeof(QuickRouteEditor).GetField("repairRoute",flags).GetValue(recorder);
                 typeof(QuickServiceRoutePanel).GetMethod("StartRecording",flags).Invoke(repairService,null);typeof(QuickServiceRoutePanel).GetMethod("CancelRecording",flags).Invoke(repairService,null);
                 if(recorder.RecordingServiceRoute||recorder.ReadPlan(false).Repair.Points.Count!=3||recorder.ReadPlan(false).Vendor.Points.Count!=3)throw new Exception("Cancel failed to preserve the shared NPC route.");
+                var ghostPanel=(QuickServiceRoutePanel)typeof(QuickRouteEditor).GetField("corpseRoute",flags).GetValue(recorder);
+                observation.PlayerDead=observation.PlayerGhost=true;
+                typeof(QuickServiceRoutePanel).GetMethod("StartRecording",flags).Invoke(ghostPanel,null);
+                observation.X+=.001;observation.Sequence++;
+                typeof(QuickServiceRoutePanel).GetMethod("EndRecording",flags).Invoke(ghostPanel,null);
+                var ghostFile=Path.Combine(Path.GetDirectoryName(recording),"quick-corpse-route.json");var ghostSaved=RouteStore.Load(ghostFile);
+                if(ghostSaved.RouteType!="corpse_run"||ghostSaved.RouteId!="recorded-ghost"||ghostSaved.Points.Count!=2||recorder.RecordingServiceRoute)throw new Exception("Ghost route recording did not save or unlock controls.");
+                observation.PlayerDead=observation.PlayerGhost=false;File.Delete(ghostFile);
                 before=File.ReadAllText(recording);observation.Fresh=false;rejected=false;try{capture.Invoke(recorder,null);}catch(TargetInvocationException){rejected=true;}
                 if(!rejected||File.ReadAllText(recording)!=before)throw new Exception("Stale capture modified recording.");
                 observation.Fresh=true;observation.MapId=43;rejected=false;try{capture.Invoke(recorder,null);}catch(TargetInvocationException){rejected=true;}

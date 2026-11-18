@@ -25,6 +25,7 @@ namespace WoWProbe
         bool openingPending;uint openingCast;
         bool meleeConfirmed;uint meleeBaseline;
         int contactHealth=255;
+        long lastDefenseScan=-10000;
         readonly int restBelow;readonly ushort drinkKey;
         readonly bool permitFullBags;
         public bool HasActiveWork {get{return token!=0||resting;}}
@@ -76,6 +77,13 @@ namespace WoWProbe
             if(resting&&!o.InCombat&&now-restStarted>=60000)return Stop("60秒内未恢复满，检查食物和饮水绑定。");
             if(sequence==o.Sequence)return Cmd(QuickAction.None,"等待新一帧状态。",0);sequence=o.Sequence;
             if(!o.CastingKnown)return Stop("施法状态不可读。");
+            if(o.InCombat&&token!=0&&!looted&&!o.TargetExists){if(route!=null)route.Interrupt(o);token=0;nextScan=Math.Min(nextScan,now);}
+            if(o.InCombat&&!looted&&o.TargetExists&&o.TargetVictimKnown&&!o.TargetTargetsPlayer)
+            {
+                if(route!=null)route.Interrupt(o);token=0;resting=false;initialRest=true;
+                if(now-lastDefenseScan<300)return Cmd(QuickAction.None,"已受攻击，等待切换到攻击本人的怪物。",0);
+                lastDefenseScan=now;nextScan=now+300;return Cmd(QuickAction.Scan,"受到攻击：停止原行程，优先切换并核验攻击者。",9);
+            }
             if(token==0)
             {
                 if(!resting&&!o.InCombat&&o.FoodCount==0)return Stop("食物栏位已耗尽，补充食物后再继续打怪。");

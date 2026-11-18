@@ -18,6 +18,7 @@ namespace WoWProbe
     {
         readonly RouteDocument route;readonly NavigationCalibration calibration;readonly uint map;readonly int mode;readonly string zone;
         readonly bool actualCorpseRouting;
+        int detourPhase;double detourFacing;
         readonly double deathX=Double.NaN,deathY=Double.NaN;
         Navigator navigator;long started=-1,last=-1,clickedAt=-1;int sequence=-1,aliveFrames;bool released,resurrected;double corpseX=Double.NaN,corpseY;
         public static bool RouteMatches(RouteDocument route,FarmObservation state)
@@ -36,7 +37,7 @@ namespace WoWProbe
         {
             if(started<0)started=now;
             if(now<0||now<last)return Stop("复活流程时钟异常。");last=now;
-            if(now-started>240000)return Stop("四分钟内未完成跑尸复活，停止。");
+            if(now-started>(route!=null&&route.RouteId=="recorded-ghost"?1800000:240000))return Stop("跑尸复活超时，停止检查路线。");
             if(o==null||!o.Fresh||o.Farm==null||!o.Farm.Fresh||!o.Farm.KnownCore||o.Farm.ReadFailures!=0)return Stop("复活状态或按钮数据不可读。");
             var f=o.Farm;
             if(f.MapId!=map||f.MapMode!=mode||f.Zone!=zone)return Stop("复活地图发生变化。");
@@ -69,23 +70,29 @@ namespace WoWProbe
             if(navigator==null)
             {
                 bool knownGraveyard=route!=null&&NavigationMath.Distance(f.X-route.Points[0].X,f.Y-route.Points[0].Y,calibration.AxisScale)<=.012;
+                bool strict=route!=null&&route.RouteId=="recorded-ghost";
+                if(strict&&!knownGraveyard)return Stop("当前墓地与录制的跑尸路线起点不匹配，请重新录制；不直线穿越障碍。");
                 if(!knownGraveyard&&!actualCorpseRouting)return Stop("当前墓地不在已配置跑尸路线起点附近。");
                 var work=route==null?new RouteDocument{RouteId="observed-corpse",Name="实际死亡点跑尸",RouteType="corpse_run",MapId=map,MapMode=mode,Zone=zone}:route.Clone();
                 if(actualCorpseRouting)
                 {
-                    if(knownGraveyard){int nearest=0;double best=Double.PositiveInfinity;for(int i=0;i<work.Points.Count;i++){var p=work.Points[i];double d=NavigationMath.Distance(corpseX-p.X,corpseY-p.Y,calibration.AxisScale);if(d<best){best=d;nearest=i;}}if(nearest<work.Points.Count-1)work.Points.RemoveRange(nearest+1,work.Points.Count-nearest-1);}
+                    if(knownGraveyard){if(!strict){int nearest=0;double best=Double.PositiveInfinity;for(int i=0;i<work.Points.Count;i++){var p=work.Points[i];double d=NavigationMath.Distance(corpseX-p.X,corpseY-p.Y,calibration.AxisScale);if(d<best){best=d;nearest=i;}}if(nearest<work.Points.Count-1)work.Points.RemoveRange(nearest+1,work.Points.Count-nearest-1);}}
                     else{work.Points.Clear();work.Points.Add(new Waypoint{X=f.X,Y=f.Y,Tolerance=.001});}
                 }
                 var end=work.Points[work.Points.Count-1];
                 double distance=NavigationMath.Distance(corpseX-end.X,corpseY-end.Y,calibration.AxisScale);
+                if(strict&&distance>.02)return Stop("死亡点距已录跑尸终点过远，请延长或重录跑尸路线；不跨越未知路段。");
                 if(distance>.04&&!actualCorpseRouting)return Stop("实际尸体超出已验证路线的末端接入范围。");
                 if(distance>.008)
                 {double ratio=(distance-.008)/distance;work.Points.Add(new Waypoint{X=end.X+(corpseX-end.X)*ratio,Y=end.Y+(corpseY-end.Y)*ratio,Tolerance=.001,Action="wait"});}
                 if(work.Points.Count<2)return Command(QuickRecoveryAction.None,"已接近实际死亡点，等待尸体复活按钮和冷却，不与灵魂医者交互。");
-                navigator=new Navigator(work,calibration,false,false,0,NavigationPurpose.CorpseRun,80000);
+                if(strict){work=QuickServicePaths.StraightSegments(new QuickRoutePlan{Route=work,Calibration=calibration},work);work.RouteType="corpse_run";}
+                navigator=new Navigator(work,calibration,false,false,0,NavigationPurpose.CorpseRun,120000){ForwardPulseLimit=3000};
             }
+            if(detourPhase!=0){if(detourPhase==1)detourFacing=f.Facing;else if(!MouseLookInput.TurnObserved(detourFacing,f.Facing))return Stop("跑尸脱困未确认朝向改变，停止盲目前进。");var move=Command(QuickRecoveryAction.Key,detourPhase==1?"跑尸受阻：转向换方向。":"跑尸脱困：短距离试走，再接回录制路线。");move.Key=(ushort)(detourPhase==1?39:87);move.Hold=350;detourPhase=detourPhase==1?2:0;return move;}
             var n=navigator.Step(new NavigationSample{X=f.X,Y=f.Y,Facing=f.Facing,MapId=f.MapId,MapMode=f.MapMode,Zone=f.Zone,Sequence=f.Sequence,Fresh=f.Fresh,KnownCore=f.KnownCore,Ghost=f.PlayerGhost,Dead=f.PlayerDead,Combat=f.InCombat,ReadFailures=f.ReadFailures},now);
             if(n.Action==NavigationAction.Stop)return Stop("跑尸停止："+n.Reason);
+            if(n.Action==NavigationAction.Jump||n.Action==NavigationAction.StrafeLeft){detourPhase=1;var back=Command(QuickRecoveryAction.Key,"跑尸前进无位移：后退后换方向脱困。");back.Key=83;back.Hold=250;return back;}
             if(n.Action==NavigationAction.None||n.Action==NavigationAction.Completed)return Command(QuickRecoveryAction.None,"等待复活距离及冷却就绪。");
             ushort key=n.Action==NavigationAction.Forward?(ushort)87:n.Action==NavigationAction.TurnLeft?(ushort)37:n.Action==NavigationAction.TurnRight?(ushort)39:n.Action==NavigationAction.StrafeLeft?(ushort)65:n.Action==NavigationAction.StrafeRight?(ushort)68:(ushort)32;
             var result=Command(QuickRecoveryAction.Key,"跑尸："+n.Reason);result.Key=key;result.Hold=n.HoldMilliseconds;return result;

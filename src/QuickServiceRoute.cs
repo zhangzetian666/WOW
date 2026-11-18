@@ -5,17 +5,17 @@ namespace WoWProbe
     // Recording reads coordinates only; it never injects movement or changes focus.
     public sealed class QuickServiceRecording
     {
-        readonly QuickRoutePlan plan;long lastTime=-1,lastGood;int sequence=-1;
+        readonly QuickRoutePlan plan;readonly bool ghost;long lastTime=-1,lastGood;int sequence=-1;
         readonly List<Waypoint> points=new List<Waypoint>();
         public int Count {get{return points.Count;}}
-        public QuickServiceRecording(QuickRoutePlan plan,FarmObservation start,long now)
+        public QuickServiceRecording(QuickRoutePlan plan,FarmObservation start,long now,bool ghost=false)
         {
-            plan.Validate(false);this.plan=plan.Clone();Check(start);
-            if(!plan.Contains(start.X,start.Y))throw new InvalidOperationException("请先走到打怪巡航路线附近，再开始录制NPC路线。");
+            plan.Validate(false);this.plan=plan.Clone();this.ghost=ghost;Check(start);
+            if(!ghost&&!plan.Contains(start.X,start.Y))throw new InvalidOperationException("请先走到打怪巡航路线附近，再开始录制NPC路线。");
             Add(start);lastGood=lastTime=now;sequence=start.Sequence;
         }
         void Check(FarmObservation o)
-        {if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||o.PlayerDead||o.PlayerGhost||!plan.MapMatches(o)||!NavigationMath.InRange(o.X,0,1)||!NavigationMath.InRange(o.Y,0,1))throw new InvalidOperationException("录制坐标失效、死亡或地图变化；请回到最后录点后重试，不能跨过未记录路段。");}
+        {if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||(ghost?!o.PlayerGhost:o.PlayerDead||o.PlayerGhost)||!plan.MapMatches(o)||!NavigationMath.InRange(o.X,0,1)||!NavigationMath.InRange(o.Y,0,1))throw new InvalidOperationException(ghost?"跑尸录制需要保持灵魂状态、同一地图和有效坐标。":"录制坐标失效、死亡或地图变化；请回到最后录点后重试，不能跨过未记录路段。");}
         void Add(FarmObservation o){if(points.Count>=4990)throw new InvalidOperationException("NPC路线已达到4990点，请结束录制。");points.Add(new Waypoint{X=o.X,Y=o.Y,Tolerance=.0004});}
         public bool Observe(FarmObservation o,long now,bool endpoint=false)
         {
@@ -29,6 +29,7 @@ namespace WoWProbe
         public QuickVendorSettings Finish(FarmObservation o,long now,QuickVendorSettings settings)
         {
             Observe(o,now,true);if(points.Count<2)throw new InvalidOperationException("请实际走到NPC旁，路线至少需要两个不同位置。");
+            if(ghost&&!plan.WithinCombatArea(o.X,o.Y))throw new InvalidOperationException("请沿可通行路线走到打怪巡航区域附近，再结束跑尸录制。");
             var s=settings.Clone();s.Points=Snapshot();s.RouteComplete=true;s.Enabled=true;s.X=o.X;s.Y=o.Y;
             if(o.TargetExists&&o.TargetIdentityKnown&&!o.TargetIsPlayer&&o.AttackabilityKnown&&!o.TargetCanAttack&&o.TargetDeadKnown&&!o.TargetDead)s.Name=o.TargetName;
             s.RequireRoute();return s;
