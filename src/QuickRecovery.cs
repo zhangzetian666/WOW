@@ -79,14 +79,13 @@ namespace WoWProbe
                     if(knownGraveyard){if(!strict){int nearest=0;double best=Double.PositiveInfinity;for(int i=0;i<work.Points.Count;i++){var p=work.Points[i];double d=NavigationMath.Distance(corpseX-p.X,corpseY-p.Y,calibration.AxisScale);if(d<best){best=d;nearest=i;}}if(nearest<work.Points.Count-1)work.Points.RemoveRange(nearest+1,work.Points.Count-nearest-1);}}
                     else{work.Points.Clear();work.Points.Add(new Waypoint{X=f.X,Y=f.Y,Tolerance=.001});}
                 }
+                if(strict){work=QuickServicePaths.StraightSegments(new QuickRoutePlan{Route=work,Calibration=calibration},work);work.RouteType="corpse_run";}
                 var end=work.Points[work.Points.Count-1];
                 double distance=NavigationMath.Distance(corpseX-end.X,corpseY-end.Y,calibration.AxisScale);
-                if(strict&&distance>.02)return Stop("死亡点距已录跑尸终点过远，请延长或重录跑尸路线；不跨越未知路段。");
                 if(distance>.04&&!actualCorpseRouting)return Stop("实际尸体超出已验证路线的末端接入范围。");
                 if(distance>.008)
                 {double ratio=(distance-.008)/distance;work.Points.Add(new Waypoint{X=end.X+(corpseX-end.X)*ratio,Y=end.Y+(corpseY-end.Y)*ratio,Tolerance=.001,Action="wait"});}
                 if(work.Points.Count<2)return Command(QuickRecoveryAction.None,"已接近实际死亡点，等待尸体复活按钮和冷却，不与灵魂医者交互。");
-                if(strict){work=QuickServicePaths.StraightSegments(new QuickRoutePlan{Route=work,Calibration=calibration},work);work.RouteType="corpse_run";}
                 navigator=new Navigator(work,calibration,false,false,0,NavigationPurpose.CorpseRun,120000){ForwardPulseLimit=3000};
             }
             if(detourPhase!=0){if(detourPhase==1)detourFacing=f.Facing;else if(!MouseLookInput.TurnObserved(detourFacing,f.Facing))return Stop("跑尸脱困未确认朝向改变，停止盲目前进。");var move=Command(QuickRecoveryAction.Key,detourPhase==1?"跑尸受阻：转向换方向。":"跑尸脱困：短距离试走，再接回录制路线。");move.Key=(ushort)(detourPhase==1?39:87);move.Hold=350;detourPhase=detourPhase==1?2:0;return move;}

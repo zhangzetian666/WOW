@@ -39,7 +39,7 @@ namespace WoWProbe
                 settled=false;settledSince=-1;if(combatSince<0)combatSince=now;
                 bool attacker=o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken!=token&&!o.TargetIsPlayer&&o.TargetDeadKnown&&!o.TargetDead&&o.AttackabilityKnown&&o.TargetCanAttack;
                 bool damage=lastHealth>=0&&lastHealth<=100&&o.Health>=0&&o.Health<lastHealth;lastHealth=o.Health;
-                if(!attacker&&!damage&&now-combatSince<2500)return C(QuickAction.None,"击杀后等待战斗标记清除，保留尸体，不继续巡航。",0);
+                if(!lootIssued&&!skinIssued&&!approached&&!attacker&&!damage&&now-combatSince<2500)return C(QuickAction.None,"击杀后等待战斗标记清除，保留尸体，不继续巡航。",0);
                 Interrupted=true;return C(QuickAction.None,"确认新攻击或持续战斗，暂存尸体，先处理攻击者。",0);
             }
             combatSince=-1;lastHealth=o.Health;
