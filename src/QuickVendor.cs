@@ -25,12 +25,12 @@ namespace WoWProbe
         public void ResumeAfterCombat(OperationObservation o,long now)
         {
             if(o==null||!o.Fresh||o.Farm==null||!plan.MapMatches(o.Farm))throw new InvalidOperationException("NPC路线恢复状态无效。");
-            if((phase==Phase.Outbound||phase==Phase.Return)&&nav!=null){nav=QuickServicePaths.Navigate(plan,nav.WorkingRoute,o.Farm,nav.TargetIndex);stateAt=now;sequence=-1;return;}
+            detourPhase=0;if((phase==Phase.Outbound||phase==Phase.Return)&&nav!=null){nav=QuickServicePaths.Navigate(plan,nav.WorkingRoute,o.Farm,nav.TargetIndex);stateAt=now;sequence=-1;return;}
             bool done=merchantVerified&&(sharedService?o.Farm.GearKnown&&o.Farm.Durability>=10000&&(!saleRequired||o.FreeSlotsKnown&&o.InventoryEventsKnown&&o.InventoryRevision!=revision&&o.FreeSlots>free&&!o.Farm.BagFull):repair?o.Farm.GearKnown&&o.Farm.Durability>=10000:o.FreeSlotsKnown&&o.InventoryEventsKnown&&o.InventoryRevision!=revision&&o.FreeSlots>free&&!o.Farm.BagFull);
             nav=done?ReturnTravel(o.Farm):QuickServicePaths.Navigate(plan,outbound,o.Farm,outbound.Points.Count-1);phase=done?Phase.Return:nav==null?Phase.Select:Phase.Outbound;stateAt=now;sequence=-1;token=hash=0;if(done&&o.MerchantOpen){phase=Phase.Close;closed=o.MerchantClosed;closeAfterCombat=true;}if(!done){repairIssued=false;merchantVerified=false;saleAt=-1;}
         }
         long started=-1,stateAt,nextSelect,saleAt=-1;int sequence=-1,attempts;uint token,hash,revision,opened,closed;int free;
-        bool merchantVerified;
+        bool merchantVerified;int detourPhase;double detourFacing;
         bool closeAfterCombat;
         readonly bool repair;bool repairIssued;bool sharedService,saleRequired;
         public QuickVendorEngine(QuickRoutePlan plan,OperationObservation start,bool repair=false)
@@ -63,11 +63,18 @@ namespace WoWProbe
             if(o.Farm.InCombat)return C(QuickVendorAction.None,"先处理攻击者，暂缓售卖行程。");
             if(sequence==o.Sequence)return C(QuickVendorAction.None,"等待商人状态更新。");sequence=o.Sequence;
             var f=o.Farm;
+            if(detourPhase!=0&&(phase==Phase.Outbound||phase==Phase.Return))
+            {
+                if(detourPhase==1)detourFacing=f.Facing;
+                else if(!MouseLookInput.TurnObserved(detourFacing,f.Facing))return C(QuickVendorAction.Stop,"脱困转向后未确认朝向改变，停止盲目前进。");
+                var detour=C(QuickVendorAction.Key,detourPhase==1?"NPC路线受阻：转向换方向。":"NPC路线脱困：短距离试走，再接回原路线。");
+                detour.Key=(ushort)(detourPhase==1?39:87);detour.Hold=350;detourPhase=detourPhase==1?2:0;return detour;
+            }
             if(phase==Phase.Close&&closeAfterCombat){closeAfterCombat=false;var close=C(QuickVendorAction.Key,"反击结束，先关闭仍打开的商店再返回巡航。");close.Key=27;return close;}
             if(phase==Phase.Outbound||phase==Phase.Return)
             {
                 if(nav==null){phase=phase==Phase.Outbound?Phase.Select:Phase.Done;stateAt=now;}
-                else{var n=nav.Step(new NavigationSample{Fresh=f.Fresh,KnownCore=f.KnownCore,ReadFailures=f.ReadFailures,X=f.X,Y=f.Y,Facing=f.Facing,MapId=f.MapId,MapMode=f.MapMode,Zone=f.Zone,Sequence=f.Sequence,BagFull=f.BagFull},now);if(n.Action==NavigationAction.Stop)return C(QuickVendorAction.Stop,"商人行程受阻："+n.Reason);if(n.Action==NavigationAction.Completed){nav=null;phase=phase==Phase.Outbound?Phase.Select:Phase.Done;stateAt=now;}else if(n.Action!=NavigationAction.None){var c=C(QuickVendorAction.Key,phase==Phase.Outbound?"沿已录制路线前往NPC，第"+(n.TargetIndex+1)+"个路点。":"沿去程逆序返回，第"+(n.TargetIndex+1)+"个路点。");c.Key=movement.For(n.Action);c.Hold=n.HoldMilliseconds;return c;}else return C(QuickVendorAction.None,n.Reason);}
+                else{var n=nav.Step(new NavigationSample{Fresh=f.Fresh,KnownCore=f.KnownCore,ReadFailures=f.ReadFailures,X=f.X,Y=f.Y,Facing=f.Facing,MapId=f.MapId,MapMode=f.MapMode,Zone=f.Zone,Sequence=f.Sequence,BagFull=f.BagFull},now);if(n.Action==NavigationAction.Jump||n.Action==NavigationAction.StrafeLeft){detourPhase=1;var back=C(QuickVendorAction.Key,"NPC路线前进无位移：先后退，再转向绕开障碍。");back.Key=83;back.Hold=250;return back;}if(n.Action==NavigationAction.Stop)return C(QuickVendorAction.Stop,"商人行程受阻："+n.Reason);if(n.Action==NavigationAction.Completed){nav=null;phase=phase==Phase.Outbound?Phase.Select:Phase.Done;stateAt=now;}else if(n.Action!=NavigationAction.None){var c=C(QuickVendorAction.Key,phase==Phase.Outbound?"沿已录制路线前往NPC，第"+(n.TargetIndex+1)+"个路点。":"沿去程逆序返回，第"+(n.TargetIndex+1)+"个路点。");c.Key=movement.For(n.Action);c.Hold=n.HoldMilliseconds;return c;}else return C(QuickVendorAction.None,n.Reason);}
             }
             if(phase==Phase.Select)
             {

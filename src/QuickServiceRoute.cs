@@ -37,7 +37,7 @@ namespace WoWProbe
     public static class QuickServicePaths
     {
         static int NearbyServicePoint(QuickRoutePlan p,QuickVendorSettings s,FarmObservation o,out double distance)
-        {distance=Double.PositiveInfinity;int index=-1;for(int i=0;i<s.Points.Count;i++){var w=s.Points[i];double d=NavigationMath.Distance(o.X-w.X,o.Y-w.Y,p.Calibration.AxisScale);if(d<distance){distance=d;index=i;}}return distance<=.0015?index:-1;}
+        {distance=Double.PositiveInfinity;int index=-1;for(int i=0;i<s.Points.Count;i++){var w=s.Points[i];double d=NavigationMath.Distance(o.X-w.X,o.Y-w.Y,p.Calibration.AxisScale);if(d<distance){distance=d;index=i;}}return index;}
         public static RouteDocument StartReturn(QuickRoutePlan p,FarmObservation start)
         {
             if(!p.MapMatches(start)||start.PlayerDead||start.PlayerGhost)return null;
@@ -46,7 +46,7 @@ namespace WoWProbe
             {
                 if(s==null||!s.RouteComplete||s.Points==null||s.Points.Count<2)continue;
                 double d;int index=NearbyServicePoint(p,s,start,out d);
-                if(index>0&&d<best){selected=s;selectedIndex=index;best=d;}
+                if(index>0&&d<best&&(d<=.0015||!p.Contains(start.X,start.Y)&&d<p.DistanceToRoute(start.X,start.Y))){selected=s;selectedIndex=index;best=d;}
             }
             if(selected==null)return null;
             selected.RequireRoute();
@@ -62,7 +62,7 @@ namespace WoWProbe
             var r=Empty(p);Add(r,new Waypoint{X=start.X,Y=start.Y,Tolerance=.0004});
             if(NavigationMath.Distance(start.X-service.X,start.Y-service.Y,p.Calibration.AxisScale)<=.0015)return r;
             double nearbyDistance;int nearby=NearbyServicePoint(p,service,start,out nearbyDistance);
-            if(nearby>0){for(int i=nearby;i<service.Points.Count;i++)Add(r,service.Points[i]);return r;}
+            if(nearby>0&&(nearbyDistance<=.0015||!p.Contains(start.X,start.Y)&&nearbyDistance<p.DistanceToRoute(start.X,start.Y))){for(int i=nearby;i<service.Points.Count;i++)Add(r,service.Points[i]);return r;}
             var a=service.Points[0];if(p.DistanceToRoute(a.X,a.Y)>p.CorridorWidth)throw new InvalidOperationException("NPC路线起点不在当前巡航路线附近，请重新从巡航路线录制。");
             if(p.DistanceToRoute(start.X,start.Y)>p.CombatRadius)throw new InvalidOperationException("当前位置离巡航路线过远，不能直接接入NPC路线。");
             double sx,sy,ax,ay;int se,ae;p.Project(start.X,start.Y,out sx,out sy,out se);p.Project(a.X,a.Y,out ax,out ay,out ae);
