@@ -72,7 +72,17 @@ class QuickRouteUiTests
                 var tabs=(TabControl)editor.Controls[0];foreach(TabPage page in tabs.TabPages)if(page.Text=="自动售卖"||page.Text=="恢复设置"||page.Text=="自动修理"){tabs.SelectedTab=page;Application.DoEvents();using(var bitmap=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(bitmap,new Rectangle(Point.Empty,form.Size));bitmap.Save(Path.Combine(output,page.Text=="自动售卖"?"quick-vendor-ui.png":page.Text=="自动修理"?"quick-repair-ui.png":"quick-recovery-ui.png"),System.Drawing.Imaging.ImageFormat.Png);}}
                 form.Close();
             }
-            Console.WriteLine("Fixed route UI: repeated A B C D capture, immediate persistence, draft restore, closure, duplicate/stale/map rejection, manual percentage editing, unconfirmed import and preview rendering passed. No game input.");return 0;
+            var newFile=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output","new-patrol-"+Guid.NewGuid(),"draft.json");
+            var position=new FarmObservation{Fresh=true,KnownCore=true,MapId=42,MapMode=2,Zone="SIMULATION",X=.5,Y=.5};
+            using(var editor=new QuickRouteEditor(()=>position,newFile))
+            {
+                var flags=BindingFlags.Instance|BindingFlags.NonPublic;var create=typeof(QuickRouteEditor).GetMethod("NewRoute",flags);
+                create.Invoke(editor,null);var first=QuickRoutePlan.LoadRecording(newFile);if(first.Route.Points.Count!=1)throw new Exception("New route did not start at A.");
+                position.MapId=43;position.Zone="OTHER";position.X=.6;create.Invoke(editor,null);
+                var next=QuickRoutePlan.LoadRecording(newFile);var archives=Directory.GetFiles(Path.Combine(Path.GetDirectoryName(newFile),"patrol-routes"),"*.json");
+                if(next.Route.MapId!=43||next.Route.Points.Count!=1||next.Route.Points[0].X!=.6||archives.Length!=1||QuickRoutePlan.LoadRecording(archives[0]).Route.MapId!=42)throw new Exception("New route did not preserve old route and bind new map.");
+            }
+            Console.WriteLine("Fixed route UI: recording, imports, new-route creation with old-route archive, and preview checks passed. No game input.");return 0;
         }
         catch(Exception e){Console.WriteLine(e);return 1;}
     }
