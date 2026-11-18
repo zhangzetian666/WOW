@@ -1,5 +1,5 @@
 using System.Reflection;
 [assembly: AssemblyTitle("WoWProbe Complete Campaign and Readiness")]
 [assembly: AssemblyDescription("Recorded workflows, portable campaign plans, read-only readiness and feedback summaries with explicitly armed bounded input")]
-[assembly: AssemblyVersion("0.8.18.0")]
-[assembly: AssemblyFileVersion("0.8.18.0")]
+[assembly: AssemblyVersion("0.8.19.0")]
+[assembly: AssemblyFileVersion("0.8.19.0")]
