@@ -202,10 +202,10 @@ namespace WoWProbe
                             try
                             {
                                 if(rc.Action==QuickRecoveryAction.Key)Pulse(backend,rc.Key,rc.Hold);
-                                else {var point=new Point(client.X+rc.Region.X+rc.Region.Width/2,client.Y+rc.Region.Y+rc.Region.Height/2);input.Click(point,false,p=>Native.ClientBounds(target)==client&&client.Contains(p),Native.MoveMouse,Native.SendMouseButton);}
+                                else {var point=new Point(client.X+rc.Region.X+rc.Region.Width/2,client.Y+rc.Region.Y+rc.Region.Height/2);write("复活鼠标目标：屏幕("+point.X+","+point.Y+") 按钮="+rc.Region);input.Click(point,false,p=>Native.ClientBounds(target)==client&&client.Contains(p),Native.MoveMouse,Native.SendMouseButton);write("复活点击已发送，尚未确认存活。");}
                             }
                             catch(InvalidOperationException ex)
-                            {if((ex.Message!="复活动作状态变化。"&&ex.Message!="CLI observations are unavailable, unknown or stale."&&ex.Message!="屏幕状态已超时。")||rc.Action!=QuickRecoveryAction.Click||safety.Faulted||backend.IsEmergencyPressed()||!backend.IsTargetForeground())throw;}
+                            {if((ex.Message!="复活动作状态变化。"&&ex.Message!="CLI observations are unavailable, unknown or stale."&&ex.Message!="屏幕状态已超时。")||rc.Action!=QuickRecoveryAction.Click||safety.Faulted||backend.IsEmergencyPressed()||!backend.IsTargetForeground())throw;write("复活点击状态变化："+ex.Message+"；重新读取按钮后再尝试。");}
                             input=guard();if(rc.Action==QuickRecoveryAction.Click){recoveryLoadingUntil=clock.ElapsedMilliseconds+8000;Thread.Sleep(80);}else Pause(80);continue;
                         }
                         bool needRepair=plan.Repair.Enabled&&(repairFirst||observed.GearKnown&&observed.GearRed);

@@ -20,7 +20,7 @@ namespace WoWProbe
         readonly bool actualCorpseRouting;
         int detourPhase;double detourFacing;
         readonly double deathX=Double.NaN,deathY=Double.NaN;
-        Navigator navigator;long started=-1,last=-1,clickedAt=-1;int sequence=-1,aliveFrames;bool released,resurrected;double corpseX=Double.NaN,corpseY;
+        Navigator navigator;long started=-1,last=-1,clickedAt=-1;int sequence=-1,aliveFrames,resurrectAttempts;bool released,resurrected;double corpseX=Double.NaN,corpseY;
         public static bool RouteMatches(RouteDocument route,FarmObservation state)
         {return route!=null&&state!=null&&route.RouteType=="corpse_run"&&route.MapId==state.MapId&&route.MapMode==state.MapMode&&route.Zone==state.Zone;}
         public QuickRecovery(RouteDocument route,NavigationCalibration calibration,FarmObservation death,bool actualCorpseRouting=false)
@@ -54,7 +54,7 @@ namespace WoWProbe
                 if(!o.ReleaseKnown||!o.ReleaseVisible||!o.ReleaseEnabled)return Command(QuickRecoveryAction.None,"等待可用的释放灵魂按钮。");
                 released=true;clickedAt=now;var c=Command(QuickRecoveryAction.Click,"死亡：点击已验证的释放灵魂按钮。");c.Release=true;c.Region=o.ReleaseRegion;return c;
             }
-            if(resurrected)return now-clickedAt>10000?Stop("点击复活后十秒仍未存活。"):Command(QuickRecoveryAction.None,"等待实际复活。");
+            if(resurrected){if(now-clickedAt>10000)return Stop("复活尝试后十秒仍未存活，请检查弹窗和点击记录。");if(now-clickedAt<1500||resurrectAttempts>=3||!o.ResurrectKnown||!o.ResurrectVisible||!o.ResurrectEnabled||!o.RecoveryDelayKnown||o.RecoveryDelayMs!=0)return Command(QuickRecoveryAction.None,"等待实际复活或重新可用的复活按钮。");}
             bool apiCorpse=o.CorpseKnown&&NavigationMath.InRange(o.CorpseX,0,1)&&NavigationMath.InRange(o.CorpseY,0,1);
             bool recorded=actualCorpseRouting&&!Double.IsNaN(deathX);
             if(!apiCorpse&&!recorded)return Stop("实际尸体坐标及记录的死亡点均不可用，不能自动跑尸。");
@@ -65,7 +65,7 @@ namespace WoWProbe
             if(o.ResurrectKnown&&o.ResurrectVisible&&o.ResurrectEnabled&&o.RecoveryDelayKnown&&o.RecoveryDelayMs==0)
             {
                 if(NavigationMath.Distance(f.X-corpseX,f.Y-corpseY,calibration.AxisScale)>.035)return Stop("复活按钮出现但距离尸体异常。");
-                resurrected=true;clickedAt=now;var c=Command(QuickRecoveryAction.Click,"跑尸到达：点击已验证的复活按钮。");c.Region=o.ResurrectRegion;return c;
+                resurrected=true;resurrectAttempts++;clickedAt=now;var c=Command(QuickRecoveryAction.Click,"跑尸到达：尝试点击当前复活按钮（"+resurrectAttempts+"/3），等待存活证据。");c.Region=o.ResurrectRegion;return c;
             }
             if(navigator==null)
             {
