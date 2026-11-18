@@ -157,7 +157,7 @@ namespace WoWProbe
                     long end=seconds<=0?long.MaxValue:clock.ElapsedMilliseconds+seconds*1000L;var deathRate=new QuickDeathRate();int reportedKills=0,reportedLoots=0,reportedSkins=0,frameSequence=-1,completedKills=0,completedLoots=0,completedSkins=0,recoveries=0;uint picturedToken=0,autoAttackToken=0;
                     QuickRecovery recovery=null;
                     QuickVendorEngine vendorTrip=null;bool vendorDefending=false,suppressFullBagSale=false;
-                    long recoveryLoadingUntil=-1;
+                    long recoveryLoadingUntil=-1,observationLostAt=-1;
                     while((clock.ElapsedMilliseconds<end||vendorTrip!=null||recovery!=null)&&!cancelled())
                     {
                         if(recovery!=null&&clock.ElapsedMilliseconds<recoveryLoadingUntil)
@@ -166,13 +166,16 @@ namespace WoWProbe
                             bool healthy=false;try{var transition=stream.Read();healthy=transition!=null&&transition.Fresh&&transition.KnownCore&&transition.ReadFailures==0;}catch(InvalidOperationException){}
                             if(!healthy){Thread.Sleep(80);continue;}input=guard();
                         }
-                        try{input.Ensure();}
+                        FarmObservation observed=null;
+                        try{input.Ensure();observed=read();if(observed==null||!observed.Fresh||!observed.KnownCore||observed.ReadFailures!=0)throw new InvalidOperationException("CLI observations are unavailable, unknown or stale.");}
                         catch(InvalidOperationException ex)
                         {
-                            if(recovery==null||clock.ElapsedMilliseconds>=recoveryLoadingUntil||backend.IsEmergencyPressed()||!backend.IsTargetForeground()||safety.Faulted||(ex.Message!="CLI observations are unavailable, unknown or stale."&&ex.Message!="屏幕状态已超时。"))throw;
+                            if(backend.IsEmergencyPressed()||!backend.IsTargetForeground()||safety.Faulted||(ex.Message!="CLI observations are unavailable, unknown or stale."&&ex.Message!="屏幕状态已超时。"))throw;
+                            searchMotion.Stop();if(observationLostAt<0){observationLostAt=clock.ElapsedMilliseconds;write("游戏状态暂不可读，暂停输入并等待恢复（最多2秒）。");}
+                            if(!(recovery!=null&&clock.ElapsedMilliseconds<recoveryLoadingUntil)&&clock.ElapsedMilliseconds-observationLostAt>=2000)throw new InvalidOperationException("游戏状态连续2秒不可读，请检查游戏画面及插件状态。",ex);
                             input=guard();Thread.Sleep(80);continue;
                         }
-                        var observed=read();
+                        if(observationLostAt>=0){observationLostAt=-1;write("游戏状态已恢复，继续核验当前动作。");}
                         searchMotion.Observe(observed);
                         if(observed.Sequence!=frameSequence)
                         {
@@ -293,7 +296,7 @@ namespace WoWProbe
                             if(commandUsesChat&&CloseInterruptedChat(backend,input))write("目标在聊天命令期间变化，已关闭本工具打开的输入框，再重新核验。");
                             CancelQuickMovement(backend);
                         }
-                        input=guard();Pause(40);
+                        input=guard();Thread.Sleep(40);
                     }
                     write("已停止。本轮确认击杀："+(completedKills+engine.Kills)+"；拾取完成："+(completedLoots+engine.Loots)+"；剥皮成功："+(completedSkins+engine.Skins)+"。按键尝试不代表成功。");
                     shot("stop");
