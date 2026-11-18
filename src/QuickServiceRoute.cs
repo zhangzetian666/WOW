@@ -14,7 +14,7 @@ namespace WoWProbe
             Add(start);lastGood=lastTime=now;sequence=start.Sequence;
         }
         void Check(FarmObservation o)
-        {if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||(ghost?!o.PlayerGhost:o.PlayerDead||o.PlayerGhost)||!plan.MapMatches(o)||!NavigationMath.InRange(o.X,0,1)||!NavigationMath.InRange(o.Y,0,1))throw new InvalidOperationException(ghost?"跑尸录制需要保持灵魂状态、同一地图和有效坐标。":"录制坐标失效、死亡或地图变化；请回到最后录点后重试，不能跨过未记录路段。");}
+        {if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||(ghost?o.PlayerDead&&!o.PlayerGhost:o.PlayerDead||o.PlayerGhost)||!plan.MapMatches(o)||!NavigationMath.InRange(o.X,0,1)||!NavigationMath.InRange(o.Y,0,1))throw new InvalidOperationException(ghost?"跑尸录制需要存活或灵魂状态、同一地图和有效坐标。":"录制坐标失效、死亡或地图变化；请回到最后录点后重试，不能跨过未记录路段。");}
         void Add(FarmObservation o){if(points.Count>=4990)throw new InvalidOperationException("NPC路线已达到4990点，请结束录制。");points.Add(new Waypoint{X=o.X,Y=o.Y,Tolerance=.0004});}
         public bool Observe(FarmObservation o,long now,bool endpoint=false)
         {

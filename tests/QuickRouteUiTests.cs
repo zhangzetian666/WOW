@@ -39,7 +39,7 @@ class QuickRouteUiTests
                 observation.PlayerDead=observation.PlayerGhost=true;
                 typeof(QuickServiceRoutePanel).GetMethod("StartRecording",flags).Invoke(ghostPanel,null);
                 observation.X+=.001;observation.Sequence++;
-                typeof(QuickServiceRoutePanel).GetMethod("EndRecording",flags).Invoke(ghostPanel,null);
+                observation.PlayerDead=observation.PlayerGhost=false;typeof(QuickServiceRoutePanel).GetMethod("EndRecording",flags).Invoke(ghostPanel,null);
                 var ghostFile=Path.Combine(Path.GetDirectoryName(recording),"quick-corpse-route.json");var ghostSaved=RouteStore.Load(ghostFile);
                 if(ghostSaved.RouteType!="corpse_run"||ghostSaved.RouteId!="recorded-ghost"||ghostSaved.Points.Count!=2||recorder.RecordingServiceRoute)throw new Exception("Ghost route recording did not save or unlock controls.");
                 observation.PlayerDead=observation.PlayerGhost=false;File.Delete(ghostFile);

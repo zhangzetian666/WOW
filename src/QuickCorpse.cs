@@ -45,7 +45,7 @@ namespace WoWProbe
             combatSince=-1;lastHealth=o.Health;
             if(now<started||now-started>20000)return Finish("尸体处理超时，继续巡航；不计未确认的拾取/剥皮。");
             bool same=o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken==token&&!o.TargetIsPlayer&&o.TargetDeadKnown&&o.TargetDead;
-            if(approach&&same&&!approached){approached=true;return C(QuickAction.CorpseApproach,"发现路边可剥皮尸体，先按F接近，不计为本轮击杀。",70);}
+            if(approach&&same&&!approached){approached=true;return C(QuickAction.CorpseApproach,"发现路边可拾取或剥皮尸体，先按F接近，不计为本轮击杀。",70);}
             if(approach&&now-started<1500)return C(QuickAction.None,"等待接近路边尸体。",0);
             if(skinIssued)
             {

@@ -110,8 +110,8 @@ namespace WoWProbe
             if((o.Casting||o.Channeling)&&!(o.InCombat&&looted&&corpse!=null))return Cmd(QuickAction.None,"等待当前施法。",0);
             if(token==0&&!o.InCombat&&deferredCorpses.Count>0)
             {var pending=deferredCorpses.Pop();token=pending.Token;corpse=pending.Corpse;creditedLoots=pending.Loots;creditedSkins=pending.Skins;looted=true;corpse.Resume(o,now);return AdvanceCorpse(o,now);}
-            if(token==0&&CanInspectCorpse(o)&&o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken!=0&&!o.TargetIsPlayer&&o.TargetDeadKnown&&o.TargetDead&&o.SkinKnown&&o.Skinnable&&!inspectedCorpses.Contains(o.TargetToken)&&(route==null||route.TargetAllowed(o)))
-            {if(route!=null)route.Interrupt(o);token=o.TargetToken;inspectedCorpses.Add(token);looted=true;started=now;corpse=new QuickCorpse(token,true,o,now,true);creditedLoots=creditedSkins=0;return AdvanceCorpse(o,now);}
+            if(token==0&&CanInspectCorpse(o)&&o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken!=0&&!o.TargetIsPlayer&&o.TargetDeadKnown&&o.TargetDead&&(o.LootKnown&&o.Lootable||skinning&&o.SkinKnown&&o.Skinnable)&&!inspectedCorpses.Contains(o.TargetToken)&&(route==null||route.TargetAllowed(o)))
+            {if(route!=null)route.Interrupt(o);token=o.TargetToken;inspectedCorpses.Add(token);looted=true;started=now;corpse=new QuickCorpse(token,skinning,o,now,true);creditedLoots=creditedSkins=0;return AdvanceCorpse(o,now);}
             if(token!=0)
             {
                 if(looted&&corpse!=null)return AdvanceCorpse(o,now);
@@ -240,7 +240,7 @@ namespace WoWProbe
         public bool ShouldAcquire(FarmObservation o,long now)
         {return CanAcquire(o)&&(o.InCombat||o.TargetToken!=skippedToken||now>=skipUntil)&&(route==null||route.MayAcquire(o));}
         public bool CanInspectCorpse(FarmObservation o)
-        {return skinning&&token==0&&!resting&&o!=null&&!o.InCombat&&!o.BagFull&&o.Health>=80&&(route==null||!route.Returning&&route.OnRoute(o));}
+        {return token==0&&!resting&&o!=null&&!o.InCombat&&!o.BagFull&&o.Health>=80&&(route==null||!route.Returning&&route.OnRoute(o));}
         QuickCommand AbandonChase(long now,string reason)
         {skippedToken=token;skipUntil=now+15000;token=0;corpse=null;missingTarget=-1;nextScan=now;route.Resume();return Cmd(QuickAction.ReturnToRoute,reason,0);}
         QuickCommand ConfirmDeath(FarmObservation o,long now)
@@ -289,7 +289,7 @@ namespace WoWProbe
             if(c.Action==QuickAction.Turn)return !o.InCombat&&!CanAcquire(o);
             if(c.Action==QuickAction.Food||c.Action==QuickAction.Drink)return !o.InCombat;
             if(!o.TargetExists||!o.TargetIdentityKnown||c.Token==0||o.TargetToken!=c.Token||o.TargetIsPlayer||!o.AttackabilityKnown||!o.TargetDeadKnown)return false;
-            if(c.Action==QuickAction.CorpseApproach)return o.TargetDead&&!o.InCombat&&o.SkinKnown&&o.Skinnable;
+            if(c.Action==QuickAction.CorpseApproach)return o.TargetDead&&!o.InCombat&&(o.LootKnown&&o.Lootable||o.SkinKnown&&o.Skinnable);
             if(c.Action==QuickAction.BackOff||c.Action==QuickAction.DetourTurn||c.Action==QuickAction.DetourForward)return (c.CombatRecovery?o.InCombat:!o.InCombat)&&!o.TargetDead&&o.TargetCanAttack;
             if(c.Action==QuickAction.Skin)return o.TargetDead&&!o.InCombat&&o.SkinKnown&&o.Skinnable&&o.SkinBindingKnown&&o.SkinBindingCorrect;
             return c.Action==QuickAction.Loot?o.TargetDead&&!o.InCombat:!o.TargetDead&&o.TargetCanAttack;
