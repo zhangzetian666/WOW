@@ -37,6 +37,7 @@ namespace WoWProbe
         long last=-1, nextSkill, nextFace, nextScan, started, lootUntil;
         bool stopped, looted,initialRest=true,resting,food,drink,reacquired;
         long restStarted,missingCombatTarget=-1,missingTarget=-1,nextDefensive;
+        long foodProgressAt,drinkProgressAt;int restHealth,restPower,foodRetries,drinkRetries;
         double progressX,progressY; uint progressCasts; long progressAt;
         int escapes,escapePhase;
         bool escapeCombat;int combatEscapes;long combatCastAt;uint combatCasts;
@@ -90,14 +91,18 @@ namespace WoWProbe
                 bool mana=o.PowerType==0;
                 if(mana&&(o.Power<0||o.Power>100))return Stop("法力值不可读，不能确认饮水完成。");
                 if(!resting&&!o.InCombat&&(o.Health<(initialRest?99:restBelow)||mana&&o.Power<(initialRest?99:restBelow)))
-                {resting=true;restStarted=now;food=drink=false;if(route!=null)route.Interrupt(o);}
+                {resting=true;restStarted=now;food=drink=false;foodProgressAt=drinkProgressAt=now;restHealth=o.Health;restPower=o.Power;foodRetries=drinkRetries=0;if(route!=null)route.Interrupt(o);}
                 if(resting&&o.InCombat){resting=false;initialRest=true;food=drink=false;if(o.Casting||o.Channeling)return Cmd(QuickAction.InterruptSkin,"吃喝期间受到攻击，停止恢复施法并优先反击。",27);}
                 if(resting)
                 {
                     if(o.Health>=99&&(!mana||o.Power>=99)){resting=false;initialRest=false;if(route!=null)route.BeginNearbySearch(o,now);return Cmd(QuickAction.None,"已观察到血量和适用法力恢复至满。",0);}
                     if(now-restStarted>=60000)return Stop("60秒内未恢复满，检查食物和饮水绑定。");
-                    if(!food&&o.Health<99){food=true;return Cmd(QuickAction.Food,"血量低于恢复要求，按=吃食物。",0xBB);}
-                    if(mana&&!drink&&o.Power<99){if(drinkKey==0)return Stop("法力不足，请在恢复设置填写饮水键并放置饮水物品。");drink=true;return Cmd(QuickAction.Drink,"法力低于恢复要求，按已配置饮水键，等待恢复至99%。",drinkKey);}
+                    if(o.Health>restHealth)foodProgressAt=now;restHealth=o.Health;
+                    if(mana&&o.Power>restPower)drinkProgressAt=now;restPower=o.Power;
+                    if(o.Health<99&&(!food||now-foodProgressAt>=6000&&foodRetries<3&&o.FoodCount!=0))
+                    {bool retry=food;food=true;foodProgressAt=now;if(retry)foodRetries++;return Cmd(QuickAction.Food,retry?"吃食物后6秒未见回血，自动重试食物键，无需手动补按。":"血量低于恢复要求，自动按=吃食物。",0xBB);}
+                    if(mana&&o.Power<99&&(!drink||now-drinkProgressAt>=6000&&drinkRetries<3))
+                    {if(drinkKey==0)return Stop("法力不足，请在恢复设置填写饮水键并放置饮水物品。");bool retry=drink;drink=true;drinkProgressAt=now;if(retry)drinkRetries++;return Cmd(QuickAction.Drink,retry?"饮水后6秒未见法力恢复，自动重试饮水键。":"法力低于恢复要求，自动按配置饮水键，等待恢复至99%。",drinkKey);}
                     return Cmd(QuickAction.None,"吃喝恢复中，等待血条达到99%。",0);
                 }
                 initialRest=false;
