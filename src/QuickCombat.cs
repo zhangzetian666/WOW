@@ -24,6 +24,7 @@ namespace WoWProbe
         readonly string openingKeys,loopKeys;int loopIndex;
         bool openingPending;uint openingCast;
         bool meleeConfirmed;uint meleeBaseline;
+        int contactHealth=255;
         readonly int restBelow;readonly ushort drinkKey;
         readonly bool permitFullBags;
         public bool HasActiveWork {get{return token!=0||resting;}}
@@ -127,6 +128,11 @@ namespace WoWProbe
                 if(!o.TargetCanAttack)return Stop("目标不再可攻击。");
                 if(o.InCombat&&o.PowerType==3&&o.Health<45&&now>=nextDefensive)
                 {nextDefensive=now+120000;return Cmd(QuickAction.Defensive,"血量低于45%，尝试9闪避；继续当前战斗。",57);}
+                if(o.MeleeEventsKnown&&o.MeleeHitToken==token&&o.MeleeHits!=meleeBaseline)meleeConfirmed=true;
+                // Some clients register combat-log events without delivering them.
+                // This is a separate defensive contact fallback, not a claimed player swing.
+                if(!meleeConfirmed&&o.InCombat&&o.TargetVictimKnown&&o.TargetTargetsPlayer&&o.Health<contactHealth&&o.Health<=100&&contactHealth<=100)
+                {meleeConfirmed=true;combatCastAt=now;var contact=Cmd(QuickAction.None,"普攻事件未返回；当前怪物正在攻击本人且已观察到实际掉血，启用技能设置中的按键。",0);contact.Report=true;return contact;}
                 if(o.CastEventsKnown&&o.CastSuccess!=combatCasts){combatCasts=o.CastSuccess;combatCastAt=now;combatEscapes=0;}
                 if(escapePhase!=0)
                 {
@@ -172,7 +178,7 @@ namespace WoWProbe
                 return Cmd(QuickAction.None,"等待下一拍技能。",0);
             }
             if(ShouldAcquire(o,now))
-            {if(route!=null)route.Interrupt(o);token=o.TargetToken;lockedTargetName=o.TargetName;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;meleeConfirmed=false;meleeBaseline=o.MeleeHits;openingPending=false;opening=loopIndex=deadFrames=escapes=escapePhase=combatEscapes=0;escapeCombat=false;combatCastAt=now;combatCasts=o.CastSuccess;patrolPending=searchTurning=false;blockedWalks=searchEscapes=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName,0);}
+            {if(route!=null)route.Interrupt(o);token=o.TargetToken;lockedTargetName=o.TargetName;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;meleeConfirmed=false;contactHealth=o.Health;meleeBaseline=o.MeleeHits;openingPending=false;opening=loopIndex=deadFrames=escapes=escapePhase=combatEscapes=0;escapeCombat=false;combatCastAt=now;combatCasts=o.CastSuccess;patrolPending=searchTurning=false;blockedWalks=searchEscapes=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName,0);}
             if(route!=null&&!o.InCombat)
             {
                 if((route.SearchingNearby||!route.Returning)&&now>=nextScan){nextScan=now+1200;return Cmd(QuickAction.Scan,"移动中扫描附近怪物；附近无目标再前往巡航点。",9);}

@@ -132,6 +132,7 @@ namespace WoWProbe
                     QuickRoutePlan.Save(prefix+"-patrol.json",plan);
                     if(anchor.BagFull&&!plan.Vendor.Enabled)throw new InvalidOperationException("背包已满，请先填写并启用售卖NPC坐标。");
                     if(!anchor.ChatOpenKnown||anchor.ChatOpen)throw new InvalidOperationException("请先关闭聊天输入框，并确认新版插件已加载。");
+                    if(!anchor.MeleeEventsKnown)throw new InvalidOperationException("游戏尚未加载普攻命中检测。请在游戏输入 /reload 后重试，避免只普攻不放技能。");
                     if(skinning&&(!anchor.SkinBindingKnown||!anchor.SkinBindingCorrect))throw new InvalidOperationException("请把当前剥皮技能放在7号技能栏，并确认按键为7；或取消勾选剥皮。");
                     if(!vendorFirst&&!repairFirst&&!anchor.PlayerDead&&!anchor.PlayerGhost&&anchor.FoodCount<1)throw new InvalidOperationException("未确认食物键=有库存，请核对插件、栏位和食物数量后再开始。");
                     RouteDocument recoveryRoute=null;
@@ -336,6 +337,7 @@ namespace WoWProbe
             Console.WriteLine("TargetExists=" + o.TargetExists + " TargetName=" + o.TargetName + " Reaction="+o.TargetReaction+" TargetPositionKnown=" + o.TargetPositionKnown +
                 " Target=(" + o.TargetX.ToString("F5") + "," + o.TargetY.ToString("F5") + ") TargetDead=" + o.TargetDead + " TargetCanAttack=" + o.TargetCanAttack);
             Console.WriteLine("RangeKnown=" + o.RangeKnown + " TargetInRange=" + o.TargetInRange + " IncomingEvents: LootOpened=" + o.LootOpened + " CastSuccess=" + o.CastSuccess);
+            Console.WriteLine("MeleeEventsKnown="+o.MeleeEventsKnown+" MeleeHitToken="+o.MeleeHitToken+" MeleeHits="+o.MeleeHits);
             Console.WriteLine("ActionsKnown=" + o.ActionsKnown + " KnownMask=" + o.KnownActionsMask + " ReadyMask=" + o.ReadyActionsMask + " UsableMask=" + o.UsableActionsMask +
                 " CastingKnown=" + o.CastingKnown + " LootKnown=" + o.LootKnown + " SkinKnown=" + o.SkinKnown);
             Console.WriteLine("TargetIdentityKnown=" + o.TargetIdentityKnown + " NameHashKnown=" + o.NameHashKnown + " AttackabilityKnown=" + o.AttackabilityKnown +
