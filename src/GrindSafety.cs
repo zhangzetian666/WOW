@@ -49,6 +49,7 @@ namespace WoWProbe
     }
     public static class GrindRecoveryPolicy
     {
+        public static bool TransientObservation(string message){return message=="CLI observations are unavailable, unknown or stale."||message=="屏幕状态已超时。";}
         public static bool IsHealer(FarmObservation o)
         {return o!=null&&o.Fresh&&o.KnownCore&&o.PlayerGhost&&o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken!=0&&o.NameHashKnown&&o.TargetNameHash==TargetCatalog.HashName("灵魂医者")&&!o.TargetIsPlayer&&o.AttackabilityKnown&&!o.TargetCanAttack;}
         public static bool ShouldRevive(string status,string reason,FarmObservation o)

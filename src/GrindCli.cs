@@ -160,6 +160,8 @@ namespace WoWProbe
                     long recoveryLoadingUntil=-1,observationLostAt=-1;
                     while((clock.ElapsedMilliseconds<end||vendorTrip!=null||recovery!=null)&&!cancelled())
                     {
+                        try
+                        {
                         if(recovery!=null&&clock.ElapsedMilliseconds<recoveryLoadingUntil)
                         {
                             if(backend.IsEmergencyPressed()||!backend.IsTargetForeground())throw new InvalidOperationException("复活过渡期间急停或失焦。");
@@ -171,8 +173,7 @@ namespace WoWProbe
                         catch(InvalidOperationException ex)
                         {
                             if(backend.IsEmergencyPressed()||!backend.IsTargetForeground()||safety.Faulted||(ex.Message!="CLI observations are unavailable, unknown or stale."&&ex.Message!="屏幕状态已超时。"))throw;
-                            searchMotion.Stop();if(observationLostAt<0){observationLostAt=clock.ElapsedMilliseconds;write("游戏状态暂不可读，暂停输入并等待恢复（最多2秒）。");}
-                            if(!(recovery!=null&&clock.ElapsedMilliseconds<recoveryLoadingUntil)&&clock.ElapsedMilliseconds-observationLostAt>=2000)throw new InvalidOperationException("游戏状态连续2秒不可读，请检查游戏画面及插件状态。",ex);
+                            searchMotion.Stop();if(observationLostAt<0){observationLostAt=clock.ElapsedMilliseconds;write("游戏状态暂不可读，暂停输入并自动重读，恢复后继续。");}
                             input=guard();Thread.Sleep(80);continue;
                         }
                         if(observationLostAt>=0){observationLostAt=-1;write("游戏状态已恢复，继续核验当前动作。");}
@@ -297,6 +298,12 @@ namespace WoWProbe
                             CancelQuickMovement(backend);
                         }
                         input=guard();Thread.Sleep(40);
+                        }
+                        catch(InvalidOperationException ex)
+                        {
+                            if(!GrindRecoveryPolicy.TransientObservation(ex.Message)||safety.Faulted||backend.IsEmergencyPressed()||!backend.IsTargetForeground())throw;
+                            searchMotion.Stop();input=guard();if(observationLostAt<0){observationLostAt=clock.ElapsedMilliseconds;write("动作期间状态暂不可读，已释放按键；自动重读后继续。");}Thread.Sleep(80);
+                        }
                     }
                     write("已停止。本轮确认击杀："+(completedKills+engine.Kills)+"；拾取完成："+(completedLoots+engine.Loots)+"；剥皮成功："+(completedSkins+engine.Skins)+"。按键尝试不代表成功。");
                     shot("stop");
