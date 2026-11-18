@@ -52,7 +52,7 @@ namespace WoWProbe
             selected.RequireRoute();
             if(p.DistanceToRoute(selected.Points[0].X,selected.Points[0].Y)>p.CorridorWidth)throw new InvalidOperationException("NPC路线起点不在当前巡航路线附近，请重新录制。");
             var outbound=Empty(p);for(int i=0;i<=selectedIndex;i++)Add(outbound,selected.Points[i]);
-            return Return(p,outbound,start);
+            return StraightSegments(p,Return(p,outbound,start));
         }
         static void Add(RouteDocument r,Waypoint p){if(r.Points.Count==0||NavigationMath.Distance(r.Points[r.Points.Count-1].X-p.X,r.Points[r.Points.Count-1].Y-p.Y,1)>1e-8)r.Points.Add(p.Clone());}
         public static RouteDocument Empty(QuickRoutePlan p){return new RouteDocument{RouteId="recorded-service",Name="录制NPC往返",RouteType="vendor_return",MapId=p.Route.MapId,MapMode=p.Route.MapMode,Zone=p.Route.Zone};}
@@ -76,6 +76,13 @@ namespace WoWProbe
         }
         public static RouteDocument Return(QuickRoutePlan p,RouteDocument outbound,FarmObservation current)
         {var r=Empty(p);Add(r,new Waypoint{X=current.X,Y=current.Y,Tolerance=.0004});for(int i=outbound.Points.Count-1;i>=0;i--)Add(r,outbound.Points[i]);return r;}
+        public static RouteDocument TripReturn(QuickRoutePlan p,QuickVendorSettings service,RouteDocument outbound,FarmObservation current)
+        {
+            var first=service.Points[0];
+            foreach(var point in outbound.Points)if(Math.Abs(point.X-first.X)<1e-8&&Math.Abs(point.Y-first.Y)<1e-8)return Return(p,outbound,current);
+            var full=Empty(p);foreach(var point in service.Points)Add(full,point);
+            return Return(p,full,current);
+        }
         public static Navigator Navigate(QuickRoutePlan p,RouteDocument path,FarmObservation current,int next=0)
         {var r=Empty(p);Add(r,new Waypoint{X=current.X,Y=current.Y,Tolerance=.0004});for(int i=next;i<path.Points.Count;i++)Add(r,path.Points[i]);r=StraightSegments(p,r);if(r.Points.Count<2)return null;return new Navigator(r,p.Calibration,false,false,0,NavigationPurpose.VendorReturn,120000){ForwardPulseLimit=3000};}
         public static RouteDocument StraightSegments(QuickRoutePlan p,RouteDocument path)

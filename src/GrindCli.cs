@@ -155,7 +155,7 @@ namespace WoWProbe
                     input.Ensure();
                     long end=seconds<=0?long.MaxValue:clock.ElapsedMilliseconds+seconds*1000L;var deathRate=new QuickDeathRate();int reportedKills=0,reportedLoots=0,reportedSkins=0,frameSequence=-1,completedKills=0,completedLoots=0,completedSkins=0,recoveries=0;uint picturedToken=0,autoAttackToken=0;
                     QuickRecovery recovery=null;
-                    QuickVendorEngine vendorTrip=null;bool vendorDefending=false;
+                    QuickVendorEngine vendorTrip=null;bool vendorDefending=false,suppressFullBagSale=false;
                     long recoveryLoadingUntil=-1;
                     while((clock.ElapsedMilliseconds<end||vendorTrip!=null||recovery!=null)&&!cancelled())
                     {
@@ -208,7 +208,8 @@ namespace WoWProbe
                             input=guard();if(rc.Action==QuickRecoveryAction.Click){recoveryLoadingUntil=clock.ElapsedMilliseconds+8000;Thread.Sleep(80);}else Pause(80);continue;
                         }
                         bool needRepair=plan.Repair.Enabled&&(repairFirst||observed.GearKnown&&observed.GearRed);
-                        if(vendorTrip==null&&!observed.InCombat&&!observed.Casting&&!observed.Channeling&&(needRepair||plan.Vendor.Enabled&&(vendorFirst||observed.BagFull)))
+                        if(!observed.BagFull)suppressFullBagSale=false;
+                        if(vendorTrip==null&&!observed.InCombat&&!observed.Casting&&!observed.Channeling&&(needRepair||plan.Vendor.Enabled&&(vendorFirst||observed.BagFull&&!suppressFullBagSale)))
                         {
                             searchMotion.Stop();CancelQuickMovement(backend);routeFollower.Interrupt(observed);vendorTrip=new QuickVendorEngine(plan,ReadOperations(),needRepair);if(needRepair)repairFirst=false;else vendorFirst=false;completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;
                             engine=new QuickCombat(observed,interval,skinning,null,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),true);vendorDefending=observed.Health<plan.RestBelowPercent;write(needRepair?"装备损坏或手动修理：前往已配置修理NPC，实际修复后返回巡航。":"开始售卖行程：前往已配置NPC坐标，确认清包后返回巡航。");
@@ -221,7 +222,7 @@ namespace WoWProbe
                             {
                                 var vc=vendorTrip.Step(ReadOperations(),clock.ElapsedMilliseconds);
                                 if(vc.Action==QuickVendorAction.Stop)throw new InvalidOperationException(vc.Reason);
-                                if(vc.Action==QuickVendorAction.Complete){vendorTrip=null;routeFollower.Resume();routeFollower.BeginNearbySearch(observed,clock.ElapsedMilliseconds);engine=new QuickCombat(observed,interval,skinning,routeFollower,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey));write(vc.Reason);autoAttackToken=0;continue;}
+                                if(vc.Action==QuickVendorAction.Complete){suppressFullBagSale=observed.BagFull;vendorTrip=null;routeFollower.Resume();routeFollower.BeginNearbySearch(observed,clock.ElapsedMilliseconds);engine=new QuickCombat(observed,interval,skinning,routeFollower,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),suppressFullBagSale);write(vc.Reason);autoAttackToken=0;continue;}
                                 if(vc.Action==QuickVendorAction.None){Pause(60);continue;}
                                 write(vc.Reason);var activeVendor=vendorTrip;
                                 input=new GrindInputGuard(backend,()=>{var f=read();if(!activeVendor.Matches(vc,ReadOperations(),vc.Action==QuickVendorAction.Select))throw new InvalidOperationException("商人操作状态变化。");return f;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
@@ -261,7 +262,8 @@ namespace WoWProbe
                             }
                             else if(command.Action==QuickAction.Patrol)
                             {
-                                searchMotion.Start();Pause(40);
+                                if(command.PauseForward){searchMotion.Stop();Pulse(backend,command.Key,command.Hold);}
+                                else {searchMotion.Start();Pause(40);}
                             }
                             else if(command.Action==QuickAction.DetourTurn||command.MouseTurn)
                             {

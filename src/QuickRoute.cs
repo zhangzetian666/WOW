@@ -179,7 +179,7 @@ namespace WoWProbe
             if(escapePhase==2){if(!MouseLookInput.TurnObserved(escapeFacing,o.Facing))return now<escapeDeadline?C(QuickAction.None,"等待确认实际转向后再试走。",0,0):C(QuickAction.Stop,"脱困没有观察到角色转向，停止检查右键控制。",0,0);escapePhase=0;progressAt=now;return C(QuickAction.DetourForward,"巡航脱困：已确认换方向，短距离试走后继续原路线。",87,650);}
             if(now-progressAt>2500){if(++escapeAttempts>3)return C(QuickAction.Stop,"三次换向仍受阻，停止检查障碍或增加绕行路点。",0,0);escapePhase=1;progressAt=now;return C(QuickAction.BackOff,"前进无实际位移：先后退，再右键换方向绕开障碍。",83,250);}
             double tx=Returning?returnX:Plan.Route.Points[TargetIndex].X,ty=Returning?returnY:Plan.Route.Points[TargetIndex].Y;
-            double tolerance=Returning?Tolerance:Plan.Route.Points[TargetIndex].Tolerance;
+            double tolerance=ReturningFromService?serviceReturn.Points[serviceReturnIndex].Tolerance:Returning?Tolerance:Plan.Route.Points[TargetIndex].Tolerance;
             if(NavigationMath.Distance(tx-o.X,ty-o.Y,Plan.Calibration.AxisScale)<=tolerance)
             {
                 progressAt=targetAt=now;escapeAttempts=0;
@@ -198,7 +198,8 @@ namespace WoWProbe
             double bearing=Math.Atan2((tx-o.X)*calibration.AxisScale,-(ty-o.Y));
             double facing=NavigationMath.Normalize(calibration.FacingSign*o.Facing+calibration.FacingOffset),delta=NavigationMath.Normalize(bearing-facing);
             string label=(ReturningFromService?"沿录制NPC路线原路返回":Joining?"前往最近巡航点接入路线":Returning?"返回打怪前的路线位置":"沿指定路线前往路点"+(TargetIndex+1))+"，已完成"+Laps+"圈。";
-            if(Math.Abs(delta)>.12){var turn=C(QuickAction.Turn,label,(ushort)(delta>0?39:37),Math.Max(40,Math.Min(120,(int)(Math.Abs(delta)/calibration.TurnRadiansPerSecond*1000))));turn.PauseForward=Math.Abs(delta)>.7||NavigationMath.Distance(tx-o.X,ty-o.Y,calibration.AxisScale)<.003&&Math.Abs(delta)>.2;return turn;}
+            if(Math.Abs(delta)>.12){var turn=C(QuickAction.Turn,label,(ushort)(delta>0?39:37),Math.Max(40,Math.Min(120,(int)(Math.Abs(delta)/calibration.TurnRadiansPerSecond*1000))));turn.PauseForward=ReturningFromService||Math.Abs(delta)>.7||NavigationMath.Distance(tx-o.X,ty-o.Y,calibration.AxisScale)<.003&&Math.Abs(delta)>.2;return turn;}
+            if(ReturningFromService){var forward=C(QuickAction.Patrol,label,87,Math.Max(60,Math.Min(3000,(int)((NavigationMath.Distance(tx-o.X,ty-o.Y,calibration.AxisScale)-tolerance*.5)/calibration.ForwardUnitsPerSecond*1000))));forward.PauseForward=true;return forward;}
             return C(QuickAction.Patrol,label,87,1000);
         }
         QuickCommand C(QuickAction a,string text,ushort key,int hold){return new QuickCommand{Action=a,Reason=text,Key=key,Hold=hold,RouteMovement=true,RouteContext=this};}
