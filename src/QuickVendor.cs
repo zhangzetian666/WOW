@@ -35,10 +35,10 @@ namespace WoWProbe
         public bool NoSaleObserved {get{return noSaleObserved;}}
         bool closeAfterCombat;
         readonly bool repair;bool repairIssued;bool sharedService,saleRequired;
-        public QuickVendorEngine(QuickRoutePlan plan,OperationObservation start,bool repair=false)
+        public QuickVendorEngine(QuickRoutePlan plan,OperationObservation start,bool repair=false,bool fromStart=false)
         {
             if(plan==null)throw new ArgumentNullException("plan");plan.Validate(true);var service=repair?plan.Repair:plan.Vendor;if(!service.Enabled)throw new InvalidOperationException(repair?"请先启用并填写修理NPC坐标。":"请先启用并填写售卖NPC坐标。");if(start==null||!start.Fresh||start.Farm==null||!start.Farm.Fresh)throw new InvalidOperationException("商人及背包状态不可读，请确认配套插件已加载。");
-            this.plan=plan.Clone();this.repair=repair;settings=service.Clone();settings.RequireRoute();var f=start.Farm;if(!plan.MapMatches(f)||f.InCombat||f.PlayerDead||f.PlayerGhost)throw new InvalidOperationException("商人行程须在当前地图存活脱战时开始。");outbound=QuickServicePaths.Outbound(this.plan,settings,f);nav=QuickServicePaths.Navigate(this.plan,outbound,f);phase=nav==null?Phase.Select:Phase.Outbound;
+            this.plan=plan.Clone();this.repair=repair;settings=service.Clone();settings.RequireRoute();var f=start.Farm;if(!plan.MapMatches(f)||f.InCombat||f.PlayerDead||f.PlayerGhost)throw new InvalidOperationException("商人行程须在当前地图存活脱战时开始。");outbound=QuickServicePaths.Outbound(this.plan,settings,f,!fromStart);nav=QuickServicePaths.Navigate(this.plan,outbound,f);phase=nav==null?Phase.Select:Phase.Outbound;
             sharedService=plan.Vendor.Enabled&&plan.Repair.Enabled&&plan.Vendor.X==plan.Repair.X&&plan.Vendor.Y==plan.Repair.Y;saleRequired=!repair||f.BagFull;
             double length=0;for(int i=1;i<outbound.Points.Count;i++)length+=NavigationMath.Distance(outbound.Points[i].X-outbound.Points[i-1].X,outbound.Points[i].Y-outbound.Points[i-1].Y,plan.Calibration.AxisScale);tripDeadline=Math.Max(360000,Math.Min(7200000,(long)(length/plan.Calibration.ForwardUnitsPerSecond*4000)+120000));
         }

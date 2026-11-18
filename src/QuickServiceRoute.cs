@@ -11,7 +11,6 @@ namespace WoWProbe
         public QuickServiceRecording(QuickRoutePlan plan,FarmObservation start,long now,bool ghost=false)
         {
             plan.Validate(false);this.plan=plan.Clone();this.ghost=ghost;Check(start);
-            if(!ghost&&!plan.Contains(start.X,start.Y))throw new InvalidOperationException("请先走到打怪巡航路线附近，再开始录制NPC路线。");
             Add(start);lastGood=lastTime=now;sequence=start.Sequence;
         }
         void Check(FarmObservation o)
@@ -51,21 +50,20 @@ namespace WoWProbe
             }
             if(selected==null)return null;
             selected.RequireRoute();
-            if(p.DistanceToRoute(selected.Points[0].X,selected.Points[0].Y)>p.CorridorWidth)throw new InvalidOperationException("NPC路线起点不在当前巡航路线附近，请重新录制。");
             var outbound=Empty(p);for(int i=0;i<=selectedIndex;i++)Add(outbound,selected.Points[i]);
             return StraightSegments(p,Return(p,outbound,start));
         }
         static void Add(RouteDocument r,Waypoint p){if(r.Points.Count==0||NavigationMath.Distance(r.Points[r.Points.Count-1].X-p.X,r.Points[r.Points.Count-1].Y-p.Y,1)>1e-8)r.Points.Add(p.Clone());}
         public static RouteDocument Empty(QuickRoutePlan p){return new RouteDocument{RouteId="recorded-service",Name="录制NPC往返",RouteType="vendor_return",MapId=p.Route.MapId,MapMode=p.Route.MapMode,Zone=p.Route.Zone};}
-        public static RouteDocument Outbound(QuickRoutePlan p,QuickVendorSettings service,FarmObservation start)
+        public static RouteDocument Outbound(QuickRoutePlan p,QuickVendorSettings service,FarmObservation start,bool resume=true)
         {
             service.RequireRoute();if(!p.MapMatches(start))throw new InvalidOperationException("NPC路线地图不一致。");
             var r=Empty(p);Add(r,new Waypoint{X=start.X,Y=start.Y,Tolerance=.0004});
-            if(NavigationMath.Distance(start.X-service.X,start.Y-service.Y,p.Calibration.AxisScale)<=.0015)return r;
+            if(resume&&NavigationMath.Distance(start.X-service.X,start.Y-service.Y,p.Calibration.AxisScale)<=.0015)return r;
             double nearbyDistance;int nearby=NearbyServicePoint(p,service,start,out nearbyDistance);
-            if(nearby>0&&(nearbyDistance<=.0015||!p.Contains(start.X,start.Y)&&nearbyDistance<p.DistanceToRoute(start.X,start.Y))){for(int i=nearby;i<service.Points.Count;i++)Add(r,service.Points[i]);return r;}
-            var a=service.Points[0];if(p.DistanceToRoute(a.X,a.Y)>p.CorridorWidth)throw new InvalidOperationException("NPC路线起点不在当前巡航路线附近，请重新从巡航路线录制。");
-            if(p.DistanceToRoute(start.X,start.Y)>p.CombatRadius)throw new InvalidOperationException("当前位置离巡航路线过远，不能直接接入NPC路线。");
+            if(resume&&nearby>0&&(nearbyDistance<=.0015||!p.Contains(start.X,start.Y)&&nearbyDistance<p.DistanceToRoute(start.X,start.Y))){for(int i=nearby;i<service.Points.Count;i++)Add(r,service.Points[i]);return r;}
+            var a=service.Points[0];
+            if(p.DistanceToRoute(a.X,a.Y)>p.CorridorWidth||p.DistanceToRoute(start.X,start.Y)>p.CombatRadius){foreach(var point in service.Points)Add(r,point);return r;}
             double sx,sy,ax,ay;int se,ae;p.Project(start.X,start.Y,out sx,out sy,out se);p.Project(a.X,a.Y,out ax,out ay,out ae);
             Add(r,new Waypoint{X=sx,Y=sy,Tolerance=.0004});
             var farm=p.Route.Points;var lengths=new double[farm.Count];for(int i=1;i<farm.Count;i++)lengths[i]=lengths[i-1]+NavigationMath.Distance(farm[i].X-farm[i-1].X,farm[i].Y-farm[i-1].Y,p.Calibration.AxisScale);

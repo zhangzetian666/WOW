@@ -212,7 +212,7 @@ namespace WoWProbe
                         if(!observed.BagFull)suppressFullBagSale=false;
                         if(vendorTrip==null&&!observed.InCombat&&!observed.Casting&&!observed.Channeling&&(needRepair||plan.Vendor.Enabled&&(vendorFirst||observed.BagFull&&!suppressFullBagSale)))
                         {
-                            searchMotion.Stop();CancelQuickMovement(backend);routeFollower.Interrupt(observed);vendorTrip=new QuickVendorEngine(plan,ReadOperations(),needRepair);if(needRepair)repairFirst=false;else vendorFirst=false;completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;
+                            searchMotion.Stop();CancelQuickMovement(backend);routeFollower.Interrupt(observed);vendorTrip=new QuickVendorEngine(plan,ReadOperations(),needRepair,!vendorFirst&&!repairFirst);if(needRepair)repairFirst=false;else vendorFirst=false;completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;
                             engine=new QuickCombat(observed,interval,skinning,null,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),true);vendorDefending=observed.Health<plan.RestBelowPercent;write(needRepair?"装备损坏或手动修理：前往已配置修理NPC，实际修复后返回巡航。":"开始售卖行程：前往已配置NPC坐标，确认清包后返回巡航。");
                         }
                         if(vendorTrip!=null)

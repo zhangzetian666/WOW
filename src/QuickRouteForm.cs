@@ -80,7 +80,7 @@ namespace WoWProbe
         {
             var page=new TabPage(repair?"自动修理":"自动售卖");var panel=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoScroll=true,Padding=new Padding(8)};page.Controls.Add(panel);panel.Controls.Add(repair?repairEnabled:vendorEnabled);
             var row=Row();row.AutoSize=true;L(row,"NPC终点X");var x=repair?repairX:vendorX;var y=repair?repairY:vendorY;x.Enabled=y.Enabled=false;row.Controls.Add(x);L(row,"Y");row.Controls.Add(y);L(row,"NPC名称（可选）");row.Controls.Add(repair?repairName:vendorName);panel.Controls.Add(row);panel.Controls.Add(repair?repairRoute:vendorRoute);
-            panel.Controls.Add(new Label{AutoSize=true,MaximumSize=new Size(760,0),Text="售卖和维修共用NPC路线，录制一次即可，结束时自动同步两页。\n从巡航附近开始，绕过障碍，走到NPC旁结束。\n到NPC旁按F打开商店，等待客户端自动售卖和修理完成，沿原路返回。"+(repair?"\n读到装备实际耐久为0后触发修理，确认耐久恢复满。":"\n包满脱战后触发售卖，仍需客户端已有自动清包功能，以实际空位增加确认。")});return page;
+            panel.Controls.Add(new Label{AutoSize=true,MaximumSize=new Size(760,0),Text="售卖和维修共用NPC路线，录制一次即可，结束时自动同步两页。\n可从当前地图任意位置开始，绕过障碍走到NPC旁结束。包满后先前往录制起点，再沿整条路线去NPC。\n到NPC旁按F打开商店，等待客户端自动售卖和修理完成，沿原路返回。"+(repair?"\n读到装备实际耐久为0后触发修理，确认耐久恢复满。":"\n包满脱战后触发售卖，仍需客户端已有自动清包功能，以实际空位增加确认。")});return page;
         }
         public void EnableAutoVendor(){vendorEnabled.Checked=true;}
         public void EnableAutoRepair(){repairEnabled.Checked=true;}

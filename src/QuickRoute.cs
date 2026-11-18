@@ -187,7 +187,7 @@ namespace WoWProbe
                 {
                     serviceReturnIndex++;
                     if(serviceReturnIndex<serviceReturn.Points.Count){returnX=serviceReturn.Points[serviceReturnIndex].X;returnY=serviceReturn.Points[serviceReturnIndex].Y;return C(QuickAction.None,"沿录制NPC路线逆序返回打怪区域。",0,0);}
-                    serviceReturn=null;Joining=false;int end;Plan.Project(o.X,o.Y,out returnX,out returnY,out end);TargetIndex=end;Returning=true;
+                    serviceReturn=null;JoinNearest(o);
                     return C(QuickAction.None,"已沿NPC路线返回起点，接入打怪巡航。",0,0);
                 }
                 if(Returning){Returning=Joining=false;defenseRadius=0;}
