@@ -71,10 +71,16 @@ namespace WoWProbe
             {
                 bool knownGraveyard=route!=null&&NavigationMath.Distance(f.X-route.Points[0].X,f.Y-route.Points[0].Y,calibration.AxisScale)<=.012;
                 bool strict=route!=null&&route.RouteId=="recorded-ghost";
-                if(strict&&!knownGraveyard)return Stop("当前墓地与录制的跑尸路线起点不匹配，请重新录制；不直线穿越障碍。");
-                if(!knownGraveyard&&!actualCorpseRouting)return Stop("当前墓地不在已配置跑尸路线起点附近。");
+                if(!strict&&!knownGraveyard&&!actualCorpseRouting)return Stop("当前墓地不在已配置跑尸路线起点附近。");
                 var work=route==null?new RouteDocument{RouteId="observed-corpse",Name="实际死亡点跑尸",RouteType="corpse_run",MapId=map,MapMode=mode,Zone=zone}:route.Clone();
-                if(actualCorpseRouting)
+                if(strict)
+                {
+                    int nearest=0;double best=Double.PositiveInfinity;
+                    for(int i=0;i<work.Points.Count;i++){var p=work.Points[i];double d=NavigationMath.Distance(f.X-p.X,f.Y-p.Y,calibration.AxisScale);if(d<best){best=d;nearest=i;}}
+                    if(nearest>0)work.Points.RemoveRange(0,nearest);
+                    if(best>.0001)work.Points.Insert(0,new Waypoint{X=f.X,Y=f.Y,Tolerance=.001});
+                }
+                if(actualCorpseRouting&&!strict)
                 {
                     if(knownGraveyard){if(!strict){int nearest=0;double best=Double.PositiveInfinity;for(int i=0;i<work.Points.Count;i++){var p=work.Points[i];double d=NavigationMath.Distance(corpseX-p.X,corpseY-p.Y,calibration.AxisScale);if(d<best){best=d;nearest=i;}}if(nearest<work.Points.Count-1)work.Points.RemoveRange(nearest+1,work.Points.Count-nearest-1);}}
                     else{work.Points.Clear();work.Points.Add(new Waypoint{X=f.X,Y=f.Y,Tolerance=.001});}

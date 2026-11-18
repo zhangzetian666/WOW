@@ -5,13 +5,13 @@ namespace WoWProbe
     // Recording reads coordinates only; it never injects movement or changes focus.
     public sealed class QuickServiceRecording
     {
-        readonly QuickRoutePlan plan;readonly bool ghost;long lastTime=-1,lastGood;int sequence=-1;
+        readonly QuickRoutePlan plan;readonly bool ghost;long lastTime=-1,lastGood,lastPoint;double sampleX,sampleY;int sequence=-1;
         readonly List<Waypoint> points=new List<Waypoint>();
         public int Count {get{return points.Count;}}
         public QuickServiceRecording(QuickRoutePlan plan,FarmObservation start,long now,bool ghost=false)
         {
             plan.Validate(false);this.plan=plan.Clone();this.ghost=ghost;Check(start);
-            Add(start);lastGood=lastTime=now;sequence=start.Sequence;
+            Add(start);lastPoint=lastGood=lastTime=now;sampleX=start.X;sampleY=start.Y;sequence=start.Sequence;
         }
         void Check(FarmObservation o)
         {if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||(ghost?o.PlayerDead&&!o.PlayerGhost:o.PlayerDead||o.PlayerGhost)||!plan.MapMatches(o)||!NavigationMath.InRange(o.X,0,1)||!NavigationMath.InRange(o.Y,0,1))throw new InvalidOperationException(ghost?"跑尸录制需要存活或灵魂状态、同一地图和有效坐标。":"录制坐标失效、死亡或地图变化；请回到最后录点后重试，不能跨过未记录路段。");}
@@ -20,9 +20,11 @@ namespace WoWProbe
         {
             if(now<0||now<lastTime)throw new InvalidOperationException("录制时钟异常。");lastTime=now;Check(o);
             var p=points[points.Count-1];double distance=NavigationMath.Distance(o.X-p.X,o.Y-p.Y,plan.Calibration.AxisScale);
-            if(distance>Math.Max(.004,(now-lastGood)/1000.0*plan.Calibration.ForwardUnitsPerSecond*2+.001)||now-lastGood>3000&&distance>.001)throw new InvalidOperationException("坐标采样中断或发生跳跃，请回到最后录点；未保存跨越障碍的直线。");
-            if(!endpoint&&sequence==o.Sequence)return false;sequence=o.Sequence;lastGood=now;
-            if(distance<(endpoint?1e-8:.00035))return false;Add(o);return true;
+            double sampleDistance=ghost?NavigationMath.Distance(o.X-sampleX,o.Y-sampleY,plan.Calibration.AxisScale):distance;
+            if(sampleDistance>Math.Max(.004,(now-lastGood)/1000.0*plan.Calibration.ForwardUnitsPerSecond*2+.001)||now-lastGood>3000&&sampleDistance>.001)throw new InvalidOperationException("坐标采样中断或发生跳跃，请回到最后录点；未保存跨越障碍的直线。");
+            if(!endpoint&&sequence==o.Sequence)return false;sequence=o.Sequence;lastGood=now;sampleX=o.X;sampleY=o.Y;
+            if(ghost&&!endpoint&&now-lastPoint<6000)return false;
+            if(distance<(endpoint?1e-8:.00035))return false;Add(o);lastPoint=now;return true;
         }
         public List<Waypoint> Snapshot(){var c=new List<Waypoint>();foreach(var p in points)c.Add(p.Clone());return c;}
         public QuickVendorSettings Finish(FarmObservation o,long now,QuickVendorSettings settings)
