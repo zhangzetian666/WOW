@@ -23,6 +23,7 @@ namespace WoWProbe
             Route.Validate();Calibration.Validate();
             if(Vendor==null)throw new FormatException("商人设置无效。");Vendor.Validate();
             if(Repair==null)throw new FormatException("修理NPC设置无效。");Repair.Validate();
+            if(live){if(Vendor.Enabled)Vendor.RequireRoute();if(Repair.Enabled)Repair.RequireRoute();}
             ValidateSkills();
             if(Route.RouteType!="farm"||!Route.Loop)throw new FormatException("请选择打怪用途的闭合循环路线。");
             if(!NavigationMath.InRange(CorridorWidth,.0005,.02))throw new FormatException("路线偏离范围必须为0.05至2个坐标点。");
@@ -90,8 +91,7 @@ namespace WoWProbe
         static QuickRoutePlan Load(string path,bool recording)
         {
             var root=RouteJson.Object(RouteFiles.Load(path));RouteJson.Keys(root,"SchemaVersion,Route,Calibration,CorridorWidth,CombatRadius,OpeningKeys,LoopKeys,SkillIntervalMs,RestBelowPercent,DrinkKey,Vendor,Repair","CombatRadius,OpeningKeys,LoopKeys,SkillIntervalMs,RestBelowPercent,DrinkKey,Vendor,Repair");
-            if(root.ContainsKey("Vendor"))RouteJson.Keys(RouteJson.Object(root["Vendor"]),"Enabled,X,Y,Name",null);
-            if(root.ContainsKey("Repair"))RouteJson.Keys(RouteJson.Object(root["Repair"]),"Enabled,X,Y,Name",null);
+            foreach(string field in new[]{"Vendor","Repair"})if(root.ContainsKey(field)){var s=RouteJson.Object(root[field]);RouteJson.Keys(s,"Enabled,X,Y,Name,Points,RouteComplete","Points,RouteComplete");if(s.ContainsKey("Points")){var ps=s["Points"] as System.Collections.Generic.List<object>;if(ps==null)throw new FormatException("NPC路线列表无效。");foreach(var point in ps)RouteJson.Keys(RouteJson.Object(point),"X,Y,Tolerance,WaitMilliseconds,Action",null);}}
             var r=RouteJson.Object(root["Route"]);RouteJson.Keys(r,"SchemaVersion,RouteId,Name,RouteType,Zone,MapId,MapMode,AllowReverse,Loop,Points",null);
             var c=RouteJson.Object(root["Calibration"]);RouteJson.Keys(c,"AxisScale,FacingSign,FacingOffset,TurnRadiansPerSecond,ForwardUnitsPerSecond,Confirmed,MapId,MapMode,Zone",null);
             var points=r["Points"] as System.Collections.Generic.List<object>;if(points==null)throw new FormatException("缺少路点列表。");foreach(var point in points)RouteJson.Keys(RouteJson.Object(point),"X,Y,Tolerance,WaitMilliseconds,Action",null);
@@ -108,6 +108,8 @@ namespace WoWProbe
         public bool Joining {get;private set;}
         public bool SearchingNearby {get;private set;}
         double nearbyX,nearbyY;long nearbyUntil=-1;
+        RouteDocument serviceReturn;int serviceReturnIndex;
+        public bool ReturningFromService {get{return serviceReturn!=null;}}
         double returnX,returnY,progressX,progressY,defenseRadius;long last=-1,progressAt=-1,targetAt=-1;int sequence=-1;bool suspended;
         int escapePhase,escapeAttempts;double escapeFacing;long escapeDeadline;
         public QuickRouteFollower(QuickRoutePlan plan,FarmObservation start)
@@ -117,6 +119,8 @@ namespace WoWProbe
             nearbyX=start.X;nearbyY=start.Y;SearchingNearby=true;
             if(start.PlayerDead||start.PlayerGhost){returnX=Plan.Route.Points[0].X;returnY=Plan.Route.Points[0].Y;TargetIndex=1;Returning=true;return;}
             if(!NavigationMath.InRange(start.X,0,1)||!NavigationMath.InRange(start.Y,0,1))throw new InvalidOperationException("当前角色位置不可读。");
+            serviceReturn=QuickServicePaths.StartReturn(Plan,start);
+            if(serviceReturn!=null){serviceReturnIndex=1;returnX=serviceReturn.Points[1].X;returnY=serviceReturn.Points[1].Y;TargetIndex=1;Returning=Joining=true;SearchingNearby=false;return;}
             if(!Plan.Contains(start.X,start.Y))
             {
                 int nearest=0;double distance=Double.PositiveInfinity;
@@ -130,9 +134,10 @@ namespace WoWProbe
         public bool OnRoute(FarmObservation o){return o!=null&&Plan.MapMatches(o)&&Plan.Contains(o.X,o.Y);}
         bool InNearbyArea(FarmObservation o){return o!=null&&Plan.MapMatches(o)&&NavigationMath.InRange(o.X,0,1)&&NavigationMath.InRange(o.Y,0,1)&&NavigationMath.Distance(o.X-nearbyX,o.Y-nearbyY,Plan.Calibration.AxisScale)<=Plan.CombatRadius;}
         public double PursuitDistance(FarmObservation o){double d=Plan.DistanceToRoute(o.X,o.Y);return SearchingNearby||suspended?Math.Min(d,NavigationMath.Distance(o.X-nearbyX,o.Y-nearbyY,Plan.Calibration.AxisScale)):d;}
-        public void BeginNearbySearch(FarmObservation o,long now){nearbyX=o.X;nearbyY=o.Y;SearchingNearby=true;nearbyUntil=now+2500;}
+        public void BeginNearbySearch(FarmObservation o,long now){if(ReturningFromService)return;nearbyX=o.X;nearbyY=o.Y;SearchingNearby=true;nearbyUntil=now+2500;}
         public void TickNearbySearch(FarmObservation o,long now,bool idle)
         {
+            if(ReturningFromService)return;
             if(idle&&!o.InCombat&&!CanOperate(o)&&Plan.MapMatches(o)&&NavigationMath.InRange(o.X,0,1)&&NavigationMath.InRange(o.Y,0,1))JoinNearest(o);
             if(!SearchingNearby||!idle||o.InCombat)return;
             if(nearbyUntil<0)nearbyUntil=now+2500;
@@ -154,7 +159,7 @@ namespace WoWProbe
         public bool TargetAllowed(FarmObservation o)
         {return o!=null&&Plan.MapMatches(o)&&(o.InCombat&&CanOperate(o)||(InCombatArea(o)||InNearbyArea(o)&&(SearchingNearby||suspended))&&(!o.TargetPositionKnown||Plan.WithinCombatArea(o.TargetX,o.TargetY)||NavigationMath.Distance(o.TargetX-nearbyX,o.TargetY-nearbyY,Plan.Calibration.AxisScale)<=Plan.CombatRadius));}
         public bool MayAcquire(FarmObservation o)
-        {return TargetAllowed(o)&&(o.InCombat||SearchingNearby||OnRoute(o)&&!Returning&&!suspended);}
+        {return TargetAllowed(o)&&(o.InCombat||!ReturningFromService&&(SearchingNearby||OnRoute(o)&&!Returning&&!suspended));}
         public void Interrupt(FarmObservation o)
         {
             escapePhase=0;if(!suspended){if(!Returning)Plan.ProjectSegment(o.X,o.Y,TargetIndex,out returnX,out returnY);suspended=true;}
@@ -178,6 +183,13 @@ namespace WoWProbe
             if(NavigationMath.Distance(tx-o.X,ty-o.Y,Plan.Calibration.AxisScale)<=tolerance)
             {
                 progressAt=targetAt=now;escapeAttempts=0;
+                if(ReturningFromService)
+                {
+                    serviceReturnIndex++;
+                    if(serviceReturnIndex<serviceReturn.Points.Count){returnX=serviceReturn.Points[serviceReturnIndex].X;returnY=serviceReturn.Points[serviceReturnIndex].Y;return C(QuickAction.None,"沿录制NPC路线逆序返回打怪区域。",0,0);}
+                    serviceReturn=null;Joining=false;int end;Plan.Project(o.X,o.Y,out returnX,out returnY,out end);TargetIndex=end;Returning=true;
+                    return C(QuickAction.None,"已沿NPC路线返回起点，接入打怪巡航。",0,0);
+                }
                 if(Returning){Returning=Joining=false;defenseRadius=0;}
                 else {TargetIndex++;if(TargetIndex>=Plan.Route.Points.Count){TargetIndex=1;Laps++;}}
                 tx=Plan.Route.Points[TargetIndex].X;ty=Plan.Route.Points[TargetIndex].Y;
@@ -185,7 +197,7 @@ namespace WoWProbe
             var calibration=Plan.Calibration;
             double bearing=Math.Atan2((tx-o.X)*calibration.AxisScale,-(ty-o.Y));
             double facing=NavigationMath.Normalize(calibration.FacingSign*o.Facing+calibration.FacingOffset),delta=NavigationMath.Normalize(bearing-facing);
-            string label=(Joining?"前往最近巡航点接入路线":Returning?"返回打怪前的路线位置":"沿指定路线前往路点"+(TargetIndex+1))+"，已完成"+Laps+"圈。";
+            string label=(ReturningFromService?"沿录制NPC路线原路返回":Joining?"前往最近巡航点接入路线":Returning?"返回打怪前的路线位置":"沿指定路线前往路点"+(TargetIndex+1))+"，已完成"+Laps+"圈。";
             if(Math.Abs(delta)>.12){var turn=C(QuickAction.Turn,label,(ushort)(delta>0?39:37),Math.Max(40,Math.Min(120,(int)(Math.Abs(delta)/calibration.TurnRadiansPerSecond*1000))));turn.PauseForward=Math.Abs(delta)>.7||NavigationMath.Distance(tx-o.X,ty-o.Y,calibration.AxisScale)<.003&&Math.Abs(delta)>.2;return turn;}
             return C(QuickAction.Patrol,label,87,1000);
         }

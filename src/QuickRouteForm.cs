@@ -21,18 +21,23 @@ namespace WoWProbe
         readonly Label info=new Label{AutoSize=true};
         readonly Func<FarmObservation> readCurrent;
         readonly string recordingPath;
+        readonly TabControl tabs=new TabControl{Dock=DockStyle.Fill};
+        readonly QuickServiceRoutePanel vendorRoute,repairRoute;
+        public event Action ServiceRecordingChanged;
+        public bool RecordingServiceRoute {get{return vendorRoute!=null&&vendorRoute.IsRecording||repairRoute!=null&&repairRoute.IsRecording;}}
         public QuickRouteEditor()
             :this(null,Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-patrol-recording.json")){}
         public QuickRouteEditor(Func<FarmObservation> reader,string path)
         {
             readCurrent=reader;recordingPath=path;
             Dock=DockStyle.Fill;
-            var tabs=new TabControl{Dock=DockStyle.Fill};Controls.Add(tabs);
+            vendorRoute=CreateServicePanel(false);repairRoute=CreateServicePanel(true);
+            Controls.Add(tabs);
             var routeTab=new TabPage("固定巡航点");var settingsTab=new TabPage("本机地图与移动参数");tabs.TabPages.Add(routeTab);tabs.TabPages.Add(settingsTab);
             var skillTab=new TabPage("技能设置");tabs.TabPages.Add(skillTab);var skillPanel=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(10)};skillTab.Controls.Add(skillPanel);
-            var vendorTab=new TabPage("自动售卖");tabs.TabPages.Add(vendorTab);var vp=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(10)};vendorTab.Controls.Add(vp);vp.Controls.Add(vendorEnabled);var vr=Row();vr.AutoSize=true;L(vr,"NPC坐标X");vr.Controls.Add(vendorX);L(vr,"Y");vr.Controls.Add(vendorY);L(vr,"名称（可选）");vr.Controls.Add(vendorName);vp.Controls.Add(vr);vp.Controls.Add(B("保存当前位置为商人位置",()=>{var o=Current();if(mapId.Text!=o.MapId.ToString()||zone.Text!=o.Zone)throw new InvalidOperationException("商人与巡航地图必须相同。");vendorX.Value=(decimal)o.X*100;vendorY.Value=(decimal)o.Y*100;if(o.TargetExists&&o.TargetIdentityKnown&&!o.TargetIsPlayer&&o.AttackabilityKnown&&!o.TargetCanAttack&&!o.TargetDead)vendorName.Text=o.TargetName;vendorEnabled.Checked=true;QuickRoutePlan.SaveRecording(recordingPath,ReadEditor());}));vp.Controls.Add(new Label{AutoSize=true,MaximumSize=new Size(780,0),Text="输入当前地图0–100的商人坐标，或走到商人旁保存当前位置。\n包满后先结束战斗，再去商人；打开“我想看看你的货物”，等待你已有的自动售卖腾出空位，再返回巡航。\n名称可留空，通过附近友方NPC选择；同处有多个NPC时填写名称更准确。\n请确认客户端自动售卖规则已配置；脚本不会自行右键出售背包物品。"});
+            tabs.TabPages.Add(ServiceTab(false));
             var restTab=new TabPage("恢复设置");tabs.TabPages.Add(restTab);var restPanel=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(10)};restTab.Controls.Add(restPanel);var restRow=Row();restRow.AutoSize=true;L(restRow,"脱战血量/适用法力低于（%）");restRow.Controls.Add(restBelow);L(restRow,"饮水键（法力职业填写）");restRow.Controls.Add(drinkKey);restPanel.Controls.Add(restRow);restPanel.Controls.Add(new Label{AutoSize=true,MaximumSize=new Size(780,0),Text="自动吃喝已启用。把食物放在主动作条第12格（=键）。\n脱战低于阈值就吃喝，恢复至99%后再寻怪；启动、复活后先恢复满。\n盗贼使用能量，只吃食物补血，不会按饮水键。法力职业请把饮水物品放在上方填写的键。\n吃喝期间受到攻击优先反击，脱战后重新恢复。食物耗尽或60秒仍未恢复会停止并提示。"});
-            var repairTab=new TabPage("自动修理");tabs.TabPages.Add(repairTab);var rp=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(10)};repairTab.Controls.Add(rp);rp.Controls.Add(repairEnabled);var rr=Row();rr.AutoSize=true;L(rr,"修理NPC坐标X");rr.Controls.Add(repairX);L(rr,"Y");rr.Controls.Add(repairY);L(rr,"名称（可选）");rr.Controls.Add(repairName);rp.Controls.Add(rr);rp.Controls.Add(B("保存当前位置为修理位置",()=>{var o=Current();if(mapId.Text!=o.MapId.ToString()||zone.Text!=o.Zone)throw new InvalidOperationException("修理点与巡航地图必须相同。");repairX.Value=(decimal)o.X*100;repairY.Value=(decimal)o.Y*100;if(o.TargetExists&&o.TargetIdentityKnown&&!o.TargetIsPlayer&&o.AttackabilityKnown&&!o.TargetCanAttack&&!o.TargetDead)repairName.Text=o.TargetName;repairEnabled.Checked=true;QuickRoutePlan.SaveRecording(recordingPath,ReadEditor());}));rp.Controls.Add(new Label{AutoSize=true,MaximumSize=new Size(780,0),Text="走到能修理的NPC旁，点击保存当前位置，或手填0–100坐标。\n读到实际装备耐久为0时触发，先脱战，再前往NPC并点击真实“全部修理”按钮。\n确认装备耐久恢复满后返回巡航；金币不足或商人不能修理会提示。"});
+            tabs.TabPages.Add(ServiceTab(true));
             var sk1=Row();sk1.AutoSize=true;L(sk1,"每只怪开场一次（可留空）");sk1.Controls.Add(openingKeys);skillPanel.Controls.Add(sk1);var sk2=Row();sk2.AutoSize=true;L(sk2,"之后重复循环");sk2.Controls.Add(loopKeys);L(sk2,"技能间隔（秒）");sk2.Controls.Add(skillSeconds);skillPanel.Controls.Add(sk2);skillPanel.Controls.Add(new Label{AutoSize=true,Text="例如循环填242223，间隔填0.75，就每0.75秒尝试下一键并循环。\n开场填242223、循环填2，则每只怪先打242223，之后持续2。\n支持0–9、-、=键；新怪重新从开场开始。发送尝试不等于技能施放成功。"});
             var root=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=4,ColumnCount=1};root.RowStyles.Add(new RowStyle(SizeType.Absolute,34));root.RowStyles.Add(new RowStyle(SizeType.Absolute,35));root.RowStyles.Add(new RowStyle(SizeType.Percent,100));root.RowStyles.Add(new RowStyle(SizeType.Absolute,32));routeTab.Controls.Add(root);
             var names=Row();root.Controls.Add(names,0,0);L(names,"名称");names.Controls.Add(routeName);L(names,"允许偏离（坐标点）");names.Controls.Add(corridor);L(names,"到点误差");names.Controls.Add(tolerance);
@@ -54,10 +59,28 @@ namespace WoWProbe
         static FlowLayoutPanel Row(){return new FlowLayoutPanel{AutoSize=false,Height=32,Dock=DockStyle.Top,WrapContents=false};}
         static void L(Control parent,string s){parent.Controls.Add(new Label{Text=s,AutoSize=true,Margin=new Padding(5,7,3,0)});}
         static Button B(string s,Action run){var b=new Button{Text=s,AutoSize=true,Margin=new Padding(2)};b.Click+=delegate{try{run();}catch(Exception e){MessageBox.Show(e.Message,"未执行",MessageBoxButtons.OK,MessageBoxIcon.Information);}};return b;}
+        QuickVendorSettings ServiceSettings(bool repair)
+        {var s=new QuickVendorSettings{Enabled=(repair?repairEnabled:vendorEnabled).Checked,X=(double)(repair?repairX:vendorX).Value/100,Y=(double)(repair?repairY:vendorY).Value/100,Name=(repair?repairName:vendorName).Text.Trim()};(repair?repairRoute:vendorRoute).ApplyTo(s);return s;}
+        void ApplyService(bool repair,QuickVendorSettings s)
+        {(repair?repairEnabled:vendorEnabled).Checked=s.Enabled;(repair?repairX:vendorX).Value=(decimal)s.X*100;(repair?repairY:vendorY).Value=(decimal)s.Y*100;(repair?repairName:vendorName).Text=s.Name;(repair?repairRoute:vendorRoute).Bind(s);}
+        QuickServiceRoutePanel CreateServicePanel(bool repair)
+        {return new QuickServiceRoutePanel(Current,()=>readCurrent!=null?readCurrent():GrindCli.ReadTelemetry(),ReadEditor,()=>ServiceSettings(repair),s=>ApplyService(repair,s),()=>QuickRoutePlan.SaveRecording(recordingPath,ReadEditor()),UpdateRecordingState,()=>repair?vendorRoute!=null&&vendorRoute.IsRecording:repairRoute!=null&&repairRoute.IsRecording,readCurrent==null);}
+        void UpdateRecordingState()
+        {
+            bool active=RecordingServiceRoute;foreach(TabPage page in tabs.TabPages)page.Enabled=!active||page.Text=="自动售卖"&&vendorRoute.IsRecording||page.Text=="自动修理"&&repairRoute.IsRecording;
+            vendorEnabled.Enabled=repairEnabled.Enabled=!active;
+            if(!active)Preview();if(ServiceRecordingChanged!=null)ServiceRecordingChanged();
+        }
+        TabPage ServiceTab(bool repair)
+        {
+            var page=new TabPage(repair?"自动修理":"自动售卖");var panel=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoScroll=true,Padding=new Padding(8)};page.Controls.Add(panel);panel.Controls.Add(repair?repairEnabled:vendorEnabled);
+            var row=Row();row.AutoSize=true;L(row,"NPC终点X");var x=repair?repairX:vendorX;var y=repair?repairY:vendorY;x.Enabled=y.Enabled=false;row.Controls.Add(x);L(row,"Y");row.Controls.Add(y);L(row,"NPC名称（可选）");row.Controls.Add(repair?repairName:vendorName);panel.Controls.Add(row);panel.Controls.Add(repair?repairRoute:vendorRoute);
+            panel.Controls.Add(new Label{AutoSize=true,MaximumSize=new Size(760,0),Text="从打怪巡航路线附近开始录制，手动绕过石头、树木等障碍，走到NPC旁结束。\n自动按整段路线前往，完成后沿去程逆序返回，再恢复巡航。"+(repair?"\n读到装备实际耐久为0后触发修理，确认耐久恢复满。":"\n包满脱战后触发售卖，仍需客户端已有自动清包功能，以实际空位增加确认。")});return page;
+        }
         public void EnableAutoVendor(){vendorEnabled.Checked=true;}
         public void EnableAutoRepair(){repairEnabled.Checked=true;}
         public QuickRoutePlan ReadPlan(bool live)
-        {var p=ReadEditor();p.Validate(live);return p;}
+        {if(RecordingServiceRoute)throw new InvalidOperationException("请先结束NPC路线录制，再开始打怪或执行售卖修理。");var p=ReadEditor();p.Validate(live);return p;}
         QuickRoutePlan ReadEditor()
         {
             grid.EndEdit();uint id;if(!UInt32.TryParse(mapId.Text,out id)||id==0)throw new FormatException("请先读取或输入地图ID。");
@@ -69,10 +92,12 @@ namespace WoWProbe
                 r.Points.Add(new Waypoint{X=x/100,Y=y/100,Tolerance=(double)tolerance.Value/100});
             }
             var p=new QuickRoutePlan{Route=r,CorridorWidth=(double)corridor.Value/100,CombatRadius=(double)chase.Value/100,OpeningKeys=QuickCombat.CleanKeys(openingKeys.Text,true),LoopKeys=QuickCombat.CleanKeys(loopKeys.Text,false),SkillIntervalMs=(int)(skillSeconds.Value*1000),RestBelowPercent=(int)restBelow.Value,DrinkKey=drinkKey.Text,Calibration=new NavigationCalibration{MapId=id,MapMode=r.MapMode,Zone=r.Zone,AxisScale=(double)axis.Value,FacingSign=sign.SelectedIndex==0?-1:1,FacingOffset=(double)offset.Value,TurnRadiansPerSecond=(double)turn.Value,ForwardUnitsPerSecond=(double)speed.Value,Confirmed=confirmed.Checked}};
-            p.Vendor=new QuickVendorSettings{Enabled=vendorEnabled.Checked,X=(double)vendorX.Value/100,Y=(double)vendorY.Value/100,Name=vendorName.Text.Trim()};p.Repair=new QuickVendorSettings{Enabled=repairEnabled.Checked,X=(double)repairX.Value/100,Y=(double)repairY.Value/100,Name=repairName.Text.Trim()};return p;
+            p.Vendor=ServiceSettings(false);p.Repair=ServiceSettings(true);return p;
         }
         public void Bind(QuickRoutePlan p)
         {
+            if(RecordingServiceRoute)throw new InvalidOperationException("请先结束录制，再载入其他方案。");
+            vendorRoute.Bind(p.Vendor);repairRoute.Bind(p.Repair);
             routeName.Text=p.Route.Name;mapId.Text=p.Route.MapId.ToString();mode.Value=p.Route.MapMode;zone.Text=p.Route.Zone;
             corridor.Value=(decimal)p.CorridorWidth*100;if(p.Route.Points.Count>0)tolerance.Value=(decimal)p.Route.Points[0].Tolerance*100;
             chase.Value=(decimal)p.CombatRadius*100;

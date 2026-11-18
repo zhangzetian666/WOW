@@ -24,6 +24,16 @@ class QuickRouteUiTests
                 var saved=QuickRoutePlan.LoadRecording(recording);if(saved.Route.Points.Count!=4||saved.Route.Points[1].X!=.52)throw new Exception("Repeated capture did not append A B C D.");
                 recorder.Bind(saved);typeof(QuickRouteEditor).GetMethod("CloseLoop",BindingFlags.Instance|BindingFlags.NonPublic).Invoke(recorder,null);
                 if(recorder.ReadPlan(false).Route.Points.Count!=5||QuickRoutePlan.LoadRecording(recording).Route.Points.Count!=5)throw new Exception("Closure was not persisted as ABCDA.");
+                var flags=BindingFlags.Instance|BindingFlags.NonPublic;
+                var service=(QuickServiceRoutePanel)typeof(QuickRouteEditor).GetField("vendorRoute",flags).GetValue(recorder);
+                typeof(QuickServiceRoutePanel).GetMethod("StartRecording",flags).Invoke(service,null);
+                if(!recorder.RecordingServiceRoute||QuickRoutePlan.LoadRecording(recording).Vendor.RouteComplete)throw new Exception("Recording did not keep an incomplete draft.");
+                observation.Sequence++;observation.Y+=.001;typeof(QuickServiceRoutePanel).GetMethod("RecordSample",flags).Invoke(service,null);
+                observation.Sequence++;observation.X+=.001;typeof(QuickServiceRoutePanel).GetMethod("EndRecording",flags).Invoke(service,null);
+                var serviceSaved=QuickRoutePlan.LoadRecording(recording);if(recorder.RecordingServiceRoute||!serviceSaved.Vendor.RouteComplete||serviceSaved.Vendor.Points.Count!=3||!serviceSaved.Vendor.Enabled)throw new Exception("Recorded NPC route was not persisted on finish.");
+                var repairService=(QuickServiceRoutePanel)typeof(QuickRouteEditor).GetField("repairRoute",flags).GetValue(recorder);
+                typeof(QuickServiceRoutePanel).GetMethod("StartRecording",flags).Invoke(repairService,null);typeof(QuickServiceRoutePanel).GetMethod("CancelRecording",flags).Invoke(repairService,null);
+                if(recorder.RecordingServiceRoute||recorder.ReadPlan(false).Repair.Points.Count!=0||recorder.ReadPlan(false).Vendor.Points.Count!=3)throw new Exception("Cancel affected the independent NPC route.");
                 before=File.ReadAllText(recording);observation.Fresh=false;rejected=false;try{capture.Invoke(recorder,null);}catch(TargetInvocationException){rejected=true;}
                 if(!rejected||File.ReadAllText(recording)!=before)throw new Exception("Stale capture modified recording.");
                 observation.Fresh=true;observation.MapId=43;rejected=false;try{capture.Invoke(recorder,null);}catch(TargetInvocationException){rejected=true;}

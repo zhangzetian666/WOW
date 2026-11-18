@@ -21,6 +21,7 @@ namespace WoWProbe
         readonly HashSet<uint> inspectedCorpses=new HashSet<uint>();
         string lockedTargetName;
         readonly string openingKeys,loopKeys;int loopIndex;
+        bool openingPending;uint openingCast;
         readonly int restBelow;readonly ushort drinkKey;
         readonly bool permitFullBags;
         public bool HasActiveWork {get{return token!=0||resting;}}
@@ -154,16 +155,21 @@ namespace WoWProbe
                 if(!o.InCombat&&now-started>=45000)return Stop("单怪45秒未确认击杀，停止并检查朝向、距离和伤害。");
                 if(now>=nextFace)
                 {nextFace=now+1500;return Cmd(QuickAction.Face,"F：让游戏面向并接近锁定怪物。",0x46);}
+                if(openingPending&&o.CastEventsKnown&&o.CastSuccess!=openingCast){opening++;openingPending=false;}
+                if(!o.RangeKnown||!o.TargetInRange)return Cmd(QuickAction.None,"继续接近目标，等待确认技能射程；保留开场技能。",0);
                 if(now>=nextSkill)
                 {
                     nextSkill=now+interval;
-                    char digit=opening<openingKeys.Length?openingKeys[opening++]:loopKeys[(loopIndex++)%loopKeys.Length];ushort key=(ushort)(digit=='='?187:digit=='-'?189:digit);
+                    char digit;
+                    if(opening<openingKeys.Length){digit=openingKeys[opening];if(o.CastEventsKnown){openingPending=true;openingCast=o.CastSuccess;}else opening++;}
+                    else digit=loopKeys[(loopIndex++)%loopKeys.Length];
+                    ushort key=(ushort)(digit=='='?187:digit=='-'?189:digit);
                     return Cmd(QuickAction.Skill,"尝试技能键 "+(char)key+"，不冒充施法成功。",key);
                 }
                 return Cmd(QuickAction.None,"等待下一拍技能。",0);
             }
             if(ShouldAcquire(o,now))
-            {if(route!=null)route.Interrupt(o);token=o.TargetToken;lockedTargetName=o.TargetName;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;opening=loopIndex=deadFrames=escapes=escapePhase=combatEscapes=0;escapeCombat=false;combatCastAt=now;combatCasts=o.CastSuccess;patrolPending=searchTurning=false;blockedWalks=searchEscapes=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName,0);}
+            {if(route!=null)route.Interrupt(o);token=o.TargetToken;lockedTargetName=o.TargetName;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;openingPending=false;opening=loopIndex=deadFrames=escapes=escapePhase=combatEscapes=0;escapeCombat=false;combatCastAt=now;combatCasts=o.CastSuccess;patrolPending=searchTurning=false;blockedWalks=searchEscapes=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName,0);}
             if(route!=null&&!o.InCombat)
             {
                 if((route.SearchingNearby||!route.Returning)&&now>=nextScan){nextScan=now+1200;return Cmd(QuickAction.Scan,"移动中扫描附近怪物；附近无目标再前往巡航点。",9);}
@@ -246,6 +252,7 @@ namespace WoWProbe
             if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||o.PlayerDead||o.PlayerGhost)return false;
             if(c.RouteContext!=null&&!c.RouteContext.CanOperate(o))return false;
             if(!ownedChat&&o.ChatOpenKnown&&o.ChatOpen)return false;
+            if(c.Action==QuickAction.Skill&&(!o.RangeKnown||!o.TargetInRange))return false;
             if(!o.InCombat&&Contested(o)&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill||c.Action==QuickAction.RouteProbe))return false;
             if(c.Action==QuickAction.InterruptSkin)return o.InCombat&&(o.Casting||o.Channeling);
             if(c.RouteMovement)return !o.InCombat&&!(CanAcquire(o)&&c.RouteContext.MayAcquire(o)&&o.TargetToken!=c.IgnoredTarget);

@@ -1,4 +1,4 @@
-﻿param([switch]$Package,[switch]$QuickCheck)
+param([switch]$Package,[switch]$QuickCheck)
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
@@ -15,7 +15,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Application compilation failed.' }
 if ($QuickCheck) {
     if ($Package) { throw 'QuickCheck does not produce a release package.' }
     $quickSources = @($sources | Where-Object { [System.IO.Path]::GetFileName($_) -notmatch '(^Program\.cs$|^Native\.cs$|^CampaignNative\.cs$|^GrindCli\.cs$|^FishingAudioNative\.cs$|^AssemblyInfo\.cs$|Form\.cs$)' })
-    foreach ($testName in @('RoutesTests','QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','MouseLookTests','QuickForwardMotionTests','QuickRouteTests','QuickVendorTests','GrindSafetyTests')) {
+    foreach ($testName in @('RoutesTests','QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','MouseLookTests','QuickForwardMotionTests','QuickRouteTests','QuickVendorTests','QuickServiceRouteTests','GrindSafetyTests')) {
         & $compiler @common /target:exe "/out:$bin\$testName.exe" @quickSources "$projectRoot\tests\$testName.cs"
         if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
         & "$bin\$testName.exe"
@@ -60,7 +60,7 @@ foreach ($testName in @('CampaignSettingsTests','RecoveryWorkflowTests','VendorW
     & "$bin\$testName.exe"
     if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
 }
-foreach ($testName in @('QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','VisualVitalsTests','MouseLookTests','QuickForwardMotionTests','QuickRouteTests','QuickVendorTests')) {
+foreach ($testName in @('QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','VisualVitalsTests','MouseLookTests','QuickForwardMotionTests','QuickRouteTests','QuickVendorTests','QuickServiceRouteTests')) {
     & $compiler @common /target:exe "/out:$bin\$testName.exe" @domainSources "$projectRoot\tests\$testName.cs"
     if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
     & "$bin\$testName.exe"
@@ -95,7 +95,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Fishing UI test compilation failed.' }
 Write-Output "BUILD_OK $bin\WoWProbe.exe"
 if ($Package) {
     $dist = Join-Path $projectRoot 'dist'
-    $releaseName = 'WoWProbe-Complete-0.8.3'
+    $releaseName = 'WoWProbe-Complete-0.8.5'
     $release = Join-Path $dist $releaseName
     New-Item -ItemType Directory -Path $release -Force | Out-Null
     Copy-Item -LiteralPath "$bin\WoWProbe.exe" -Destination $release -Force

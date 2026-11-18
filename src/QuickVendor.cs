@@ -1,12 +1,15 @@
 using System;
 using System.Drawing;
+using System.Collections.Generic;
 namespace WoWProbe
 {
     public sealed class QuickVendorSettings
     {
         public bool Enabled;public double X,Y;public string Name="";
-        public void Validate(){if(Name==null||Name.Length>128)throw new FormatException("商人名称过长。");foreach(char c in Name)if(Char.IsControl(c)||c=='/')throw new FormatException("商人名称不能含控制字符或斜线。");if(!NavigationMath.InRange(X,0,1)||!NavigationMath.InRange(Y,0,1)||Enabled&&X==0&&Y==0)throw new FormatException("请填写商人X、Y坐标（0–100）。");}
-        public QuickVendorSettings Clone(){return (QuickVendorSettings)MemberwiseClone();}
+        public List<Waypoint> Points=new List<Waypoint>();public bool RouteComplete;
+        public void Validate(){if(Name==null||Name.Length>128)throw new FormatException("商人名称过长。");foreach(char c in Name)if(Char.IsControl(c)||c=='/')throw new FormatException("商人名称不能含控制字符或斜线。");if(!NavigationMath.InRange(X,0,1)||!NavigationMath.InRange(Y,0,1)||Enabled&&X==0&&Y==0)throw new FormatException("请录制NPC路线及终点。");if(Points==null||Points.Count>4990)throw new FormatException("NPC路线点数无效。");for(int i=0;i<Points.Count;i++){var p=Points[i];if(p==null||!NavigationMath.InRange(p.X,0,1)||!NavigationMath.InRange(p.Y,0,1)||!NavigationMath.InRange(p.Tolerance,.0001,.002)||p.WaitMilliseconds!=0||p.Action!="wait")throw new FormatException("NPC路线坐标无效。");if(i>0&&p.X==Points[i-1].X&&p.Y==Points[i-1].Y)throw new FormatException("NPC路线相邻点不能重复。");}if(RouteComplete&&(Points.Count<2||Math.Abs(Points[Points.Count-1].X-X)>1e-8||Math.Abs(Points[Points.Count-1].Y-Y)>1e-8))throw new FormatException("NPC路线须至少两点，终点应与NPC位置一致。");}
+        public void RequireRoute(){Validate();if(!RouteComplete||Points.Count<2)throw new InvalidOperationException("请先从巡航路线附近开始录制，走到NPC旁后结束录制；旧单坐标不能直接作为NPC路线。");}
+        public QuickVendorSettings Clone(){var c=(QuickVendorSettings)MemberwiseClone();c.Points=new List<Waypoint>();foreach(var p in Points)c.Points.Add(p.Clone());return c;}
     }
     public enum QuickVendorAction {None,Key,Select,Goods,Repair,Complete,Stop}
     public sealed class QuickVendorCommand
@@ -16,11 +19,16 @@ namespace WoWProbe
     public sealed class QuickVendorEngine
     {
         enum Phase {Outbound,Select,Open,WaitSale,Close,Return,Done}
-        readonly QuickRoutePlan plan;readonly QuickVendorSettings settings;readonly double startX,startY;Navigator nav;Phase phase;
+        readonly QuickRoutePlan plan;readonly QuickVendorSettings settings;readonly RouteDocument outbound;readonly long tripDeadline;Navigator nav;Phase phase;
         readonly RouteKeyBindings movement=new RouteKeyBindings{TurnLeft=37,TurnRight=39};
         readonly System.Collections.Generic.HashSet<uint> rejected=new System.Collections.Generic.HashSet<uint>();
         public void ResumeAfterCombat(OperationObservation o,long now)
-        {bool done=merchantVerified&&(repair?o.Farm.GearKnown&&o.Farm.Durability>=10000:o.FreeSlotsKnown&&o.InventoryEventsKnown&&o.InventoryRevision!=revision&&o.FreeSlots>free&&!o.Farm.BagFull);nav=Travel(o.Farm.X,o.Farm.Y,done?startX:settings.X,done?startY:settings.Y);phase=done?Phase.Return:nav==null?Phase.Select:Phase.Outbound;stateAt=now;sequence=-1;token=hash=0;if(done&&o.MerchantOpen){phase=Phase.Close;closed=o.MerchantClosed;closeAfterCombat=true;}if(!done){repairIssued=false;merchantVerified=false;saleAt=-1;}}
+        {
+            if(o==null||!o.Fresh||o.Farm==null||!plan.MapMatches(o.Farm))throw new InvalidOperationException("NPC路线恢复状态无效。");
+            if((phase==Phase.Outbound||phase==Phase.Return)&&nav!=null){nav=QuickServicePaths.Navigate(plan,nav.WorkingRoute,o.Farm,nav.TargetIndex);stateAt=now;sequence=-1;return;}
+            bool done=merchantVerified&&(repair?o.Farm.GearKnown&&o.Farm.Durability>=10000:o.FreeSlotsKnown&&o.InventoryEventsKnown&&o.InventoryRevision!=revision&&o.FreeSlots>free&&!o.Farm.BagFull);
+            nav=done?ReturnTravel(o.Farm):QuickServicePaths.Navigate(plan,outbound,o.Farm,outbound.Points.Count-1);phase=done?Phase.Return:nav==null?Phase.Select:Phase.Outbound;stateAt=now;sequence=-1;token=hash=0;if(done&&o.MerchantOpen){phase=Phase.Close;closed=o.MerchantClosed;closeAfterCombat=true;}if(!done){repairIssued=false;merchantVerified=false;saleAt=-1;}
+        }
         long started=-1,stateAt,nextSelect,saleAt=-1;int sequence=-1,attempts;uint token,hash,revision,opened,closed;int free;
         bool merchantVerified;
         bool closeAfterCombat;
@@ -28,13 +36,10 @@ namespace WoWProbe
         public QuickVendorEngine(QuickRoutePlan plan,OperationObservation start,bool repair=false)
         {
             if(plan==null)throw new ArgumentNullException("plan");plan.Validate(true);var service=repair?plan.Repair:plan.Vendor;if(!service.Enabled)throw new InvalidOperationException(repair?"请先启用并填写修理NPC坐标。":"请先启用并填写售卖NPC坐标。");if(start==null||!start.Fresh||start.Farm==null||!start.Farm.Fresh)throw new InvalidOperationException("商人及背包状态不可读，请确认配套插件已加载。");
-            this.plan=plan.Clone();this.repair=repair;settings=service.Clone();var f=start.Farm;if(!plan.MapMatches(f)||f.InCombat||f.PlayerDead||f.PlayerGhost)throw new InvalidOperationException("商人行程须在当前地图存活脱战时开始。");startX=f.X;startY=f.Y;nav=Travel(startX,startY,settings.X,settings.Y);phase=nav==null?Phase.Select:Phase.Outbound;
+            this.plan=plan.Clone();this.repair=repair;settings=service.Clone();settings.RequireRoute();var f=start.Farm;if(!plan.MapMatches(f)||f.InCombat||f.PlayerDead||f.PlayerGhost)throw new InvalidOperationException("商人行程须在当前地图存活脱战时开始。");outbound=QuickServicePaths.Outbound(this.plan,settings,f);nav=QuickServicePaths.Navigate(this.plan,outbound,f);phase=nav==null?Phase.Select:Phase.Outbound;
+            double length=0;for(int i=1;i<outbound.Points.Count;i++)length+=NavigationMath.Distance(outbound.Points[i].X-outbound.Points[i-1].X,outbound.Points[i].Y-outbound.Points[i-1].Y,plan.Calibration.AxisScale);tripDeadline=Math.Max(360000,Math.Min(7200000,(long)(length/plan.Calibration.ForwardUnitsPerSecond*4000)+120000));
         }
-        Navigator Travel(double x,double y,double tx,double ty)
-        {
-            if(NavigationMath.Distance(tx-x,ty-y,plan.Calibration.AxisScale)<=.0015)return null;
-            var r=new RouteDocument{RouteId="quick-vendor",Name="商人往返",RouteType="vendor_return",MapId=plan.Route.MapId,MapMode=plan.Route.MapMode,Zone=plan.Route.Zone};r.Points.Add(new Waypoint{X=x,Y=y,Tolerance=.001});r.Points.Add(new Waypoint{X=tx,Y=ty,Tolerance=.0015});return new Navigator(r,plan.Calibration,false,false,0,NavigationPurpose.VendorReturn,120000);
-        }
+        Navigator ReturnTravel(FarmObservation f){return QuickServicePaths.Navigate(plan,QuickServicePaths.Return(plan,outbound,f),f);}
         QuickVendorCommand C(QuickVendorAction a,string reason){return new QuickVendorCommand{Action=a,Reason=reason,Token=token,Hash=hash};}
         bool Npc(FarmObservation f){return f.TargetExists&&f.TargetIdentityKnown&&f.TargetToken!=0&&!rejected.Contains(f.TargetToken)&&f.NameHashKnown&&f.AttackabilityKnown&&!f.TargetCanAttack&&!f.TargetIsPlayer&&f.TargetDeadKnown&&!f.TargetDead&&(settings.Name.Length==0||f.TargetNameHash==TargetCatalog.HashName(settings.Name));}
         public bool Matches(QuickVendorCommand c,OperationObservation o,bool ownedChat)
@@ -51,7 +56,7 @@ namespace WoWProbe
         public QuickVendorCommand Step(OperationObservation o,long now)
         {
             if(started<0){started=stateAt=now;}
-            if(now<started||now-started>360000)return C(QuickVendorAction.Stop,"六分钟内未完成商人往返，停止检查路线及NPC。");
+            if(now<started||now-started>tripDeadline)return C(QuickVendorAction.Stop,"录制NPC路线往返超时，停止检查路线及NPC。");
             if(o==null||!o.Fresh||o.Farm==null||!o.Farm.Fresh||!o.Farm.KnownCore||o.Farm.ReadFailures!=0||!plan.MapMatches(o.Farm)||o.Farm.PlayerDead||o.Farm.PlayerGhost)return C(QuickVendorAction.Stop,"商人行程状态或地图失效。");
             if(!o.CursorKnown||!o.CursorEmpty||!o.ConfirmationKnown||o.ConfirmationVisible)return C(QuickVendorAction.Stop,"鼠标持有物品、确认弹窗或状态未知，暂停商人操作。");
             if(o.Farm.InCombat)return C(QuickVendorAction.None,"先处理攻击者，暂缓售卖行程。");
@@ -61,7 +66,7 @@ namespace WoWProbe
             if(phase==Phase.Outbound||phase==Phase.Return)
             {
                 if(nav==null){phase=phase==Phase.Outbound?Phase.Select:Phase.Done;stateAt=now;}
-                else{var n=nav.Step(new NavigationSample{Fresh=f.Fresh,KnownCore=f.KnownCore,ReadFailures=f.ReadFailures,X=f.X,Y=f.Y,Facing=f.Facing,MapId=f.MapId,MapMode=f.MapMode,Zone=f.Zone,Sequence=f.Sequence,BagFull=f.BagFull},now);if(n.Action==NavigationAction.Stop)return C(QuickVendorAction.Stop,"商人行程受阻："+n.Reason);if(n.Action==NavigationAction.Completed){nav=null;phase=phase==Phase.Outbound?Phase.Select:Phase.Done;stateAt=now;}else if(n.Action!=NavigationAction.None){var c=C(QuickVendorAction.Key,phase==Phase.Outbound?"前往售卖NPC坐标。":"售卖结束，返回巡航中断位置。");c.Key=movement.For(n.Action);c.Hold=n.HoldMilliseconds;return c;}else return C(QuickVendorAction.None,n.Reason);}
+                else{var n=nav.Step(new NavigationSample{Fresh=f.Fresh,KnownCore=f.KnownCore,ReadFailures=f.ReadFailures,X=f.X,Y=f.Y,Facing=f.Facing,MapId=f.MapId,MapMode=f.MapMode,Zone=f.Zone,Sequence=f.Sequence,BagFull=f.BagFull},now);if(n.Action==NavigationAction.Stop)return C(QuickVendorAction.Stop,"商人行程受阻："+n.Reason);if(n.Action==NavigationAction.Completed){nav=null;phase=phase==Phase.Outbound?Phase.Select:Phase.Done;stateAt=now;}else if(n.Action!=NavigationAction.None){var c=C(QuickVendorAction.Key,phase==Phase.Outbound?"沿已录制路线前往NPC，第"+(n.TargetIndex+1)+"个路点。":"沿去程逆序返回，第"+(n.TargetIndex+1)+"个路点。");c.Key=movement.For(n.Action);c.Hold=n.HoldMilliseconds;return c;}else return C(QuickVendorAction.None,n.Reason);}
             }
             if(phase==Phase.Select)
             {
@@ -89,7 +94,7 @@ namespace WoWProbe
                 if(now-stateAt>20000)return C(QuickVendorAction.Stop,"打开货物界面后未确认空位增加，请核对客户端自动售卖设置。");
                 return C(QuickVendorAction.None,"等待自动售卖产生真实背包空位变化。");
             }
-            if(phase==Phase.Close){if(o.MerchantOpen||o.MerchantClosed==closed)return now-stateAt>5000?C(QuickVendorAction.Stop,"未确认商店关闭。"):C(QuickVendorAction.None,"等待商店关闭。");nav=Travel(f.X,f.Y,startX,startY);phase=Phase.Return;stateAt=now;return C(QuickVendorAction.None,"沿来路返回巡航中断位置。");}
+            if(phase==Phase.Close){if(o.MerchantOpen||o.MerchantClosed==closed)return now-stateAt>5000?C(QuickVendorAction.Stop,"未确认商店关闭。"):C(QuickVendorAction.None,"等待商店关闭。");nav=ReturnTravel(f);phase=Phase.Return;stateAt=now;return C(QuickVendorAction.None,"沿已走去程逆序返回巡航中断位置。");}
             return phase==Phase.Done?C(QuickVendorAction.Complete,repair?"装备已修复并返回，继续巡航。":"自动售卖往返完成，继续巡航。"):C(QuickVendorAction.None,"等待商人行程。");
         }
     }
