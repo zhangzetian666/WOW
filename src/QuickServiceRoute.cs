@@ -36,20 +36,22 @@ namespace WoWProbe
     }
     public static class QuickServicePaths
     {
+        static int NearbyServicePoint(QuickRoutePlan p,QuickVendorSettings s,FarmObservation o,out double distance)
+        {distance=Double.PositiveInfinity;int index=-1;for(int i=0;i<s.Points.Count;i++){var w=s.Points[i];double d=NavigationMath.Distance(o.X-w.X,o.Y-w.Y,p.Calibration.AxisScale);if(d<distance){distance=d;index=i;}}return distance<=.0015?index:-1;}
         public static RouteDocument StartReturn(QuickRoutePlan p,FarmObservation start)
         {
             if(!p.MapMatches(start)||start.PlayerDead||start.PlayerGhost)return null;
-            QuickVendorSettings selected=null;double best=Double.PositiveInfinity;
+            QuickVendorSettings selected=null;double best=Double.PositiveInfinity;int selectedIndex=-1;
             foreach(var s in new[]{p.Vendor,p.Repair})
             {
                 if(s==null||!s.RouteComplete||s.Points==null||s.Points.Count<2)continue;
-                var end=s.Points[s.Points.Count-1];double d=NavigationMath.Distance(start.X-end.X,start.Y-end.Y,p.Calibration.AxisScale);
-                if(d<=.0015&&d<best){selected=s;best=d;}
+                double d;int index=NearbyServicePoint(p,s,start,out d);
+                if(index>0&&d<best){selected=s;selectedIndex=index;best=d;}
             }
             if(selected==null)return null;
             selected.RequireRoute();
             if(p.DistanceToRoute(selected.Points[0].X,selected.Points[0].Y)>p.CorridorWidth)throw new InvalidOperationException("NPC路线起点不在当前巡航路线附近，请重新录制。");
-            var outbound=Empty(p);foreach(var point in selected.Points)Add(outbound,point);
+            var outbound=Empty(p);for(int i=0;i<=selectedIndex;i++)Add(outbound,selected.Points[i]);
             return Return(p,outbound,start);
         }
         static void Add(RouteDocument r,Waypoint p){if(r.Points.Count==0||NavigationMath.Distance(r.Points[r.Points.Count-1].X-p.X,r.Points[r.Points.Count-1].Y-p.Y,1)>1e-8)r.Points.Add(p.Clone());}
@@ -59,6 +61,8 @@ namespace WoWProbe
             service.RequireRoute();if(!p.MapMatches(start))throw new InvalidOperationException("NPC路线地图不一致。");
             var r=Empty(p);Add(r,new Waypoint{X=start.X,Y=start.Y,Tolerance=.0004});
             if(NavigationMath.Distance(start.X-service.X,start.Y-service.Y,p.Calibration.AxisScale)<=.0015)return r;
+            double nearbyDistance;int nearby=NearbyServicePoint(p,service,start,out nearbyDistance);
+            if(nearby>0){for(int i=nearby;i<service.Points.Count;i++)Add(r,service.Points[i]);return r;}
             var a=service.Points[0];if(p.DistanceToRoute(a.X,a.Y)>p.CorridorWidth)throw new InvalidOperationException("NPC路线起点不在当前巡航路线附近，请重新从巡航路线录制。");
             if(p.DistanceToRoute(start.X,start.Y)>p.CombatRadius)throw new InvalidOperationException("当前位置离巡航路线过远，不能直接接入NPC路线。");
             double sx,sy,ax,ay;int se,ae;p.Project(start.X,start.Y,out sx,out sy,out se);p.Project(a.X,a.Y,out ax,out ay,out ae);
@@ -73,6 +77,23 @@ namespace WoWProbe
         public static RouteDocument Return(QuickRoutePlan p,RouteDocument outbound,FarmObservation current)
         {var r=Empty(p);Add(r,new Waypoint{X=current.X,Y=current.Y,Tolerance=.0004});for(int i=outbound.Points.Count-1;i>=0;i--)Add(r,outbound.Points[i]);return r;}
         public static Navigator Navigate(QuickRoutePlan p,RouteDocument path,FarmObservation current,int next=0)
-        {var r=Empty(p);Add(r,new Waypoint{X=current.X,Y=current.Y,Tolerance=.0004});for(int i=next;i<path.Points.Count;i++)Add(r,path.Points[i]);if(r.Points.Count<2)return null;return new Navigator(r,p.Calibration,false,false,0,NavigationPurpose.VendorReturn,120000);}
+        {var r=Empty(p);Add(r,new Waypoint{X=current.X,Y=current.Y,Tolerance=.0004});for(int i=next;i<path.Points.Count;i++)Add(r,path.Points[i]);r=StraightSegments(p,r);if(r.Points.Count<2)return null;return new Navigator(r,p.Calibration,false,false,0,NavigationPurpose.VendorReturn,120000){ForwardPulseLimit=3000};}
+        public static RouteDocument StraightSegments(QuickRoutePlan p,RouteDocument path)
+        {
+            var r=Empty(p);if(path.Points.Count==0)return r;Add(r,path.Points[0]);int first=0;
+            while(first<path.Points.Count-1)
+            {
+                int last=first+1;var a=path.Points[first];
+                for(int candidate=last+1;candidate<path.Points.Count;candidate++)
+                {
+                    var b=path.Points[candidate];double dx=(b.X-a.X)*p.Calibration.AxisScale,dy=b.Y-a.Y,length=dx*dx+dy*dy;
+                    if(length<1e-12||length>.000576)break;bool straight=true;double previous=0;
+                    for(int j=first+1;j<candidate;j++){var w=path.Points[j];double x=(w.X-a.X)*p.Calibration.AxisScale,y=w.Y-a.Y,t=(x*dx+y*dy)/length;if(t<previous||t>1||Math.Abs(x*dy-y*dx)/Math.Sqrt(length)>.00005){straight=false;break;}previous=t;}
+                    if(!straight)break;last=candidate;
+                }
+                Add(r,path.Points[last]);first=last;
+            }
+            return r;
+        }
     }
 }

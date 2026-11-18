@@ -52,6 +52,7 @@ namespace WoWProbe
     }
     public sealed class Navigator
     {
+        public int ForwardPulseLimit=200;
         private readonly RouteDocument route;
         private readonly NavigationCalibration calibration;
         private readonly bool loop;
@@ -160,7 +161,7 @@ namespace WoWProbe
                 return Command(delta > 0 ? NavigationAction.TurnRight : NavigationAction.TurnLeft,
                     NavigationMath.Pulse(Math.Abs(delta) / calibration.TurnRadiansPerSecond * 1000, 60, 250),
                     retreating ? "Turning toward the previous verified waypoint." : "Correcting calibrated heading.");
-            int hold = NavigationMath.Pulse((distance - target.Tolerance * 0.5) / calibration.ForwardUnitsPerSecond * 1000, 60, 200);
+            int hold = NavigationMath.Pulse((distance - target.Tolerance * 0.5) / calibration.ForwardUnitsPerSecond * 1000, 60, Math.Max(60,Math.Min(3000,ForwardPulseLimit)));
             if (!hasForwardAnchor) { hasForwardAnchor = true; anchorX = sample.X; anchorY = sample.Y; }
             pendingForwardMs = hold; pendingIssued = nowMs;
             return Command(NavigationAction.Forward, hold, retreating ? "Returning to the previous verified waypoint." : "Approaching waypoint with a bounded forward pulse.");

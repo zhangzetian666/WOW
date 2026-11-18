@@ -811,6 +811,17 @@ test("durability and repair button cost are passive and distinguish broken from 
     p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[90],1);eq(word(p,90),10000)
     env.MerchantRepairAllButton:Hide();p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[93],2),false)
 end)
+test("only player swing damage against selected target becomes melee evidence",function()
+    local env=environment();env.UnitGUID=function(unit)return unit=="player" and "Player-1" or "Creature-1" end
+    local wp=load(env)
+    wp.OnEvent(nil,"COMBAT_LOG_EVENT_UNFILTERED",0,"SWING_DAMAGE",false,"Player-other","",0,0,"Creature-1")
+    eq(wp.meleeHits,nil)
+    wp.OnEvent(nil,"COMBAT_LOG_EVENT_UNFILTERED",0,"SWING_MISSED",false,"Player-1","",0,0,"Creature-1")
+    eq(wp.meleeHits,nil)
+    wp.OnEvent(nil,"COMBAT_LOG_EVENT_UNFILTERED",0,"SWING_DAMAGE",false,"Player-1","",0,0,"Creature-1")
+    eq(wp.meleeHits,1);eq(wp.meleeHitToken,wp.HashUTF8("Creature-1"))
+    local p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[110],1);eq(dword(p,114),1)
+end)
 for _, t in ipairs(tests) do
     local ok, message = pcall(t[2])
     if ok then passed = passed + 1; print("PASS " .. t[1])

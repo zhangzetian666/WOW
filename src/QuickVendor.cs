@@ -26,17 +26,18 @@ namespace WoWProbe
         {
             if(o==null||!o.Fresh||o.Farm==null||!plan.MapMatches(o.Farm))throw new InvalidOperationException("NPC路线恢复状态无效。");
             if((phase==Phase.Outbound||phase==Phase.Return)&&nav!=null){nav=QuickServicePaths.Navigate(plan,nav.WorkingRoute,o.Farm,nav.TargetIndex);stateAt=now;sequence=-1;return;}
-            bool done=merchantVerified&&(repair?o.Farm.GearKnown&&o.Farm.Durability>=10000:o.FreeSlotsKnown&&o.InventoryEventsKnown&&o.InventoryRevision!=revision&&o.FreeSlots>free&&!o.Farm.BagFull);
+            bool done=merchantVerified&&(sharedService?o.Farm.GearKnown&&o.Farm.Durability>=10000&&(!saleRequired||o.FreeSlotsKnown&&o.InventoryEventsKnown&&o.InventoryRevision!=revision&&o.FreeSlots>free&&!o.Farm.BagFull):repair?o.Farm.GearKnown&&o.Farm.Durability>=10000:o.FreeSlotsKnown&&o.InventoryEventsKnown&&o.InventoryRevision!=revision&&o.FreeSlots>free&&!o.Farm.BagFull);
             nav=done?ReturnTravel(o.Farm):QuickServicePaths.Navigate(plan,outbound,o.Farm,outbound.Points.Count-1);phase=done?Phase.Return:nav==null?Phase.Select:Phase.Outbound;stateAt=now;sequence=-1;token=hash=0;if(done&&o.MerchantOpen){phase=Phase.Close;closed=o.MerchantClosed;closeAfterCombat=true;}if(!done){repairIssued=false;merchantVerified=false;saleAt=-1;}
         }
         long started=-1,stateAt,nextSelect,saleAt=-1;int sequence=-1,attempts;uint token,hash,revision,opened,closed;int free;
         bool merchantVerified;
         bool closeAfterCombat;
-        readonly bool repair;bool repairIssued;
+        readonly bool repair;bool repairIssued;bool sharedService,saleRequired;
         public QuickVendorEngine(QuickRoutePlan plan,OperationObservation start,bool repair=false)
         {
             if(plan==null)throw new ArgumentNullException("plan");plan.Validate(true);var service=repair?plan.Repair:plan.Vendor;if(!service.Enabled)throw new InvalidOperationException(repair?"请先启用并填写修理NPC坐标。":"请先启用并填写售卖NPC坐标。");if(start==null||!start.Fresh||start.Farm==null||!start.Farm.Fresh)throw new InvalidOperationException("商人及背包状态不可读，请确认配套插件已加载。");
             this.plan=plan.Clone();this.repair=repair;settings=service.Clone();settings.RequireRoute();var f=start.Farm;if(!plan.MapMatches(f)||f.InCombat||f.PlayerDead||f.PlayerGhost)throw new InvalidOperationException("商人行程须在当前地图存活脱战时开始。");outbound=QuickServicePaths.Outbound(this.plan,settings,f);nav=QuickServicePaths.Navigate(this.plan,outbound,f);phase=nav==null?Phase.Select:Phase.Outbound;
+            sharedService=plan.Vendor.Enabled&&plan.Repair.Enabled&&plan.Vendor.X==plan.Repair.X&&plan.Vendor.Y==plan.Repair.Y;saleRequired=!repair||f.BagFull;
             double length=0;for(int i=1;i<outbound.Points.Count;i++)length+=NavigationMath.Distance(outbound.Points[i].X-outbound.Points[i-1].X,outbound.Points[i].Y-outbound.Points[i-1].Y,plan.Calibration.AxisScale);tripDeadline=Math.Max(360000,Math.Min(7200000,(long)(length/plan.Calibration.ForwardUnitsPerSecond*4000)+120000));
         }
         Navigator ReturnTravel(FarmObservation f){return QuickServicePaths.Navigate(plan,QuickServicePaths.Return(plan,outbound,f),f);}
@@ -84,6 +85,13 @@ namespace WoWProbe
             if(phase==Phase.WaitSale)
             {
                 if(!o.MerchantOpen||o.MerchantTargetToken!=token||o.MerchantNameHash!=hash)return C(QuickVendorAction.Stop,"售卖过程中商店关闭或身份改变。");
+                if(sharedService)
+                {
+                    bool sold=!saleRequired||o.InventoryEventsKnown&&o.InventoryRevision!=revision&&o.FreeSlotsKnown&&o.FreeSlots>free&&!f.BagFull;
+                    bool repaired=f.GearKnown&&f.Durability>=10000;
+                    if(sold&&repaired){if(saleAt<0)saleAt=now;if(now-saleAt>=500){phase=Phase.Close;closed=o.MerchantClosed;stateAt=now;var close=C(QuickVendorAction.Key,"已确认售卖及修理完成，关闭商店后原路返回。");close.Key=27;return close;}}
+                    return now-stateAt>20000?C(QuickVendorAction.Stop,"未确认自动售卖和修理全部完成，请检查客户端设置、可售物品及金币。"):C(QuickVendorAction.None,"商店已打开，等待客户端自动售卖及修理完成。");
+                }
                 if(repair)
                 {
                     if(f.GearKnown&&f.Durability>=10000){phase=Phase.Close;closed=o.MerchantClosed;stateAt=now;var close=C(QuickVendorAction.Key,"已确认装备耐久恢复满，关闭商店并返回巡航。");close.Key=27;return close;}

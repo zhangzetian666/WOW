@@ -33,7 +33,7 @@ class QuickRouteUiTests
                 var serviceSaved=QuickRoutePlan.LoadRecording(recording);if(recorder.RecordingServiceRoute||!serviceSaved.Vendor.RouteComplete||serviceSaved.Vendor.Points.Count!=3||!serviceSaved.Vendor.Enabled)throw new Exception("Recorded NPC route was not persisted on finish.");
                 var repairService=(QuickServiceRoutePanel)typeof(QuickRouteEditor).GetField("repairRoute",flags).GetValue(recorder);
                 typeof(QuickServiceRoutePanel).GetMethod("StartRecording",flags).Invoke(repairService,null);typeof(QuickServiceRoutePanel).GetMethod("CancelRecording",flags).Invoke(repairService,null);
-                if(recorder.RecordingServiceRoute||recorder.ReadPlan(false).Repair.Points.Count!=0||recorder.ReadPlan(false).Vendor.Points.Count!=3)throw new Exception("Cancel affected the independent NPC route.");
+                if(recorder.RecordingServiceRoute||recorder.ReadPlan(false).Repair.Points.Count!=3||recorder.ReadPlan(false).Vendor.Points.Count!=3)throw new Exception("Cancel failed to preserve the shared NPC route.");
                 before=File.ReadAllText(recording);observation.Fresh=false;rejected=false;try{capture.Invoke(recorder,null);}catch(TargetInvocationException){rejected=true;}
                 if(!rejected||File.ReadAllText(recording)!=before)throw new Exception("Stale capture modified recording.");
                 observation.Fresh=true;observation.MapId=43;rejected=false;try{capture.Invoke(recorder,null);}catch(TargetInvocationException){rejected=true;}

@@ -20,6 +20,8 @@ namespace WoWProbe
         public uint LootOpened { get; private set; }
         public uint LootClosed { get; private set; }
         public uint CastSuccess { get; private set; }
+        public uint MeleeHitToken {get;private set;}public uint MeleeHits {get;private set;}
+        public bool MeleeEventsKnown {get;private set;}
         public uint CastFailed { get; private set; }
         public uint SkinSuccess { get; private set; }
         public uint DeathToken { get; private set; }
@@ -50,7 +52,8 @@ namespace WoWProbe
             if(b[0]!=87 || b[1]!=67 || b[2]!=51 || b[3]!=1) throw Invalid("Unsupported WC3 signature or version.");
             int a=0,s=0;for(int i=0;i<126;i++){a=(a+b[i])%255;s=(s+a)%255;}
             if(b[126]!=a || b[127]!=s)throw Invalid("WC3 Fletcher16 checksum mismatch.");
-            for(int i=109;i<126;i++)if(b[i]!=0)throw Invalid("WC3 reserved bytes must be zero.");
+            for(int i=118;i<126;i++)if(b[i]!=0)throw Invalid("WC3 reserved bytes must be zero.");
+            if(b[109]>1||b[109]==0&&(U32(b,110)!=0||U32(b,114)!=0)||(U32(b,110)==0)!=(U32(b,114)==0))throw Invalid("WC3 melee evidence is inconsistent.");
             int durability=U16(b,90),repair=b[92],rx=U16(b,93),ry=U16(b,95),rw=U16(b,97),rh=U16(b,99);
             if((b[89]!=0&&b[89]!=1&&b[89]!=3)||b[89]==0&&durability!=0||durability>10000||b[89]==3&&durability!=0)throw Invalid("WC3 durability evidence is inconsistent.");
             if((repair&~31)!=0||(repair&2)!=0&&(repair&1)==0||(repair&4)!=0&&(repair&3)!=3||((repair&2)!=0?(rw==0||rh==0||rw>512||rh>512||rx+rw>65535||ry+rh>65535):(rx!=0||ry!=0||rw!=0||rh!=0))||(repair&8)==0&&U32(b,101)!=0||(repair&16)==0&&U32(b,105)!=0)throw Invalid("WC3 repair button or cost evidence is inconsistent.");
@@ -82,6 +85,7 @@ namespace WoWProbe
             if((k&1)!=0 ? pw==0 || ph==0 || pw>512 || ph>512 || px+pw>65535 || py+ph>65535 : px!=0 || py!=0 || pw!=0 || ph!=0)
                 throw Invalid("WC3 portrait capability disagrees with client pixel rectangle.");
             return new CombatPacket { Sequence=U16(b,4),Capabilities=c,Flags=f,RangeSlot=b[16],KnownActionsMask=known,
+                MeleeEventsKnown=b[109]==1,MeleeHitToken=U32(b,110),MeleeHits=U32(b,114),
                 ReadyActionsMask=ready,UsableActionsMask=usable,ExtraKnownFlags=k,TargetToken=token,TargetNameHash=name,
                 CastEndMilliseconds=end,LootOpened=opened,LootClosed=closed,CastSuccess=success,CastFailed=failed,SkinSuccess=skin,DeathToken=deathToken,TargetDeaths=deaths,ChatOpenKnown=(b[65]&1)!=0,ChatOpen=(b[65]&2)!=0,KillCreditsKnown=b[74]==1,KillCreditNameHash=creditName,KillCredits=credits,SkinBindingKnown=(b[75]&1)!=0,SkinBindingCorrect=(b[75]&2)!=0,FoodCount=b[76]==1?U16(b,77):-1,
                 TargetX=x==65535?Double.NaN:x/65534.0,TargetY=y==65535?Double.NaN:y/65534.0,
@@ -101,6 +105,7 @@ namespace WoWProbe
     /// <summary>Passive observation shared by the state machine and simulator; no native input dependencies.</summary>
     public sealed class FarmObservation
     {
+        public bool MeleeEventsKnown;public uint MeleeHitToken,MeleeHits;
         public int Sequence,ReadFailures,Health=255,Power=255,PowerType=255,TargetHealth=255,MapMode,RangeSlot,
             KnownActionsMask,ReadyActionsMask,UsableActionsMask,FoodCount=-1,TargetReaction=255;
         public uint MapId,TargetToken,TargetNameHash,LootOpened,LootClosed,CastSuccess,CastFailed,SkinSuccess,DeathToken,TargetDeaths,KillCreditNameHash,KillCredits;
@@ -137,6 +142,7 @@ namespace WoWProbe
             o.ActionsKnown=(c&128)!=0;o.KnownActionsMask=extra.KnownActionsMask;o.ReadyActionsMask=extra.ReadyActionsMask;o.UsableActionsMask=extra.UsableActionsMask;
             o.LootEventsKnown=(k&8)!=0;o.CastEventsKnown=(k&16)!=0;o.SkinSuccessKnown=(k&2)!=0;
             o.LootOpened=extra.LootOpened;o.LootClosed=extra.LootClosed;o.CastSuccess=extra.CastSuccess;o.CastFailed=extra.CastFailed;o.SkinSuccess=extra.SkinSuccess;
+            o.MeleeEventsKnown=extra.MeleeEventsKnown;o.MeleeHitToken=extra.MeleeHitToken;o.MeleeHits=extra.MeleeHits;
             o.DeathEventsKnown=(k&32)!=0;o.DeathToken=extra.DeathToken;o.TargetDeaths=extra.TargetDeaths;
             o.ChatOpenKnown=extra.ChatOpenKnown;o.ChatOpen=extra.ChatOpen;
             o.KillCreditsKnown=extra.KillCreditsKnown;o.KillCreditNameHash=extra.KillCreditNameHash;o.KillCredits=extra.KillCredits;

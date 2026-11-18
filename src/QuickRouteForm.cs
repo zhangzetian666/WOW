@@ -1,4 +1,4 @@
-﻿using System;
+using System;
 using System.Drawing;
 using System.Globalization;
 using System.IO;
@@ -64,7 +64,7 @@ namespace WoWProbe
         void ApplyService(bool repair,QuickVendorSettings s)
         {(repair?repairEnabled:vendorEnabled).Checked=s.Enabled;(repair?repairX:vendorX).Value=(decimal)s.X*100;(repair?repairY:vendorY).Value=(decimal)s.Y*100;(repair?repairName:vendorName).Text=s.Name;(repair?repairRoute:vendorRoute).Bind(s);}
         QuickServiceRoutePanel CreateServicePanel(bool repair)
-        {return new QuickServiceRoutePanel(Current,()=>readCurrent!=null?readCurrent():GrindCli.ReadTelemetry(),ReadEditor,()=>ServiceSettings(repair),s=>ApplyService(repair,s),()=>QuickRoutePlan.SaveRecording(recordingPath,ReadEditor()),UpdateRecordingState,()=>repair?vendorRoute!=null&&vendorRoute.IsRecording:repairRoute!=null&&repairRoute.IsRecording,readCurrent==null);}
+        {return new QuickServiceRoutePanel(Current,()=>readCurrent!=null?readCurrent():GrindCli.ReadTelemetry(),ReadEditor,()=>ServiceSettings(repair),s=>{ApplyService(repair,s);if(s.RouteComplete)ApplyService(!repair,s.Clone());},()=>QuickRoutePlan.SaveRecording(recordingPath,ReadEditor()),UpdateRecordingState,()=>repair?vendorRoute!=null&&vendorRoute.IsRecording:repairRoute!=null&&repairRoute.IsRecording,readCurrent==null);}
         void UpdateRecordingState()
         {
             bool active=RecordingServiceRoute;foreach(TabPage page in tabs.TabPages)page.Enabled=!active||page.Text=="自动售卖"&&vendorRoute.IsRecording||page.Text=="自动修理"&&repairRoute.IsRecording;
@@ -75,7 +75,7 @@ namespace WoWProbe
         {
             var page=new TabPage(repair?"自动修理":"自动售卖");var panel=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,AutoScroll=true,Padding=new Padding(8)};page.Controls.Add(panel);panel.Controls.Add(repair?repairEnabled:vendorEnabled);
             var row=Row();row.AutoSize=true;L(row,"NPC终点X");var x=repair?repairX:vendorX;var y=repair?repairY:vendorY;x.Enabled=y.Enabled=false;row.Controls.Add(x);L(row,"Y");row.Controls.Add(y);L(row,"NPC名称（可选）");row.Controls.Add(repair?repairName:vendorName);panel.Controls.Add(row);panel.Controls.Add(repair?repairRoute:vendorRoute);
-            panel.Controls.Add(new Label{AutoSize=true,MaximumSize=new Size(760,0),Text="从打怪巡航路线附近开始录制，手动绕过石头、树木等障碍，走到NPC旁结束。\n自动按整段路线前往，完成后沿去程逆序返回，再恢复巡航。"+(repair?"\n读到装备实际耐久为0后触发修理，确认耐久恢复满。":"\n包满脱战后触发售卖，仍需客户端已有自动清包功能，以实际空位增加确认。")});return page;
+            panel.Controls.Add(new Label{AutoSize=true,MaximumSize=new Size(760,0),Text="售卖和维修共用NPC路线，录制一次即可，结束时自动同步两页。\n从巡航附近开始，绕过障碍，走到NPC旁结束。\n到NPC旁按F打开商店，等待客户端自动售卖和修理完成，沿原路返回。"+(repair?"\n读到装备实际耐久为0后触发修理，确认耐久恢复满。":"\n包满脱战后触发售卖，仍需客户端已有自动清包功能，以实际空位增加确认。")});return page;
         }
         public void EnableAutoVendor(){vendorEnabled.Checked=true;}
         public void EnableAutoRepair(){repairEnabled.Checked=true;}
@@ -92,7 +92,10 @@ namespace WoWProbe
                 r.Points.Add(new Waypoint{X=x/100,Y=y/100,Tolerance=(double)tolerance.Value/100});
             }
             var p=new QuickRoutePlan{Route=r,CorridorWidth=(double)corridor.Value/100,CombatRadius=(double)chase.Value/100,OpeningKeys=QuickCombat.CleanKeys(openingKeys.Text,true),LoopKeys=QuickCombat.CleanKeys(loopKeys.Text,false),SkillIntervalMs=(int)(skillSeconds.Value*1000),RestBelowPercent=(int)restBelow.Value,DrinkKey=drinkKey.Text,Calibration=new NavigationCalibration{MapId=id,MapMode=r.MapMode,Zone=r.Zone,AxisScale=(double)axis.Value,FacingSign=sign.SelectedIndex==0?-1:1,FacingOffset=(double)offset.Value,TurnRadiansPerSecond=(double)turn.Value,ForwardUnitsPerSecond=(double)speed.Value,Confirmed=confirmed.Checked}};
-            p.Vendor=ServiceSettings(false);p.Repair=ServiceSettings(true);return p;
+            p.Vendor=ServiceSettings(false);p.Repair=ServiceSettings(true);
+            if(p.Vendor.RouteComplete&&!p.Repair.RouteComplete){p.Repair=p.Vendor.Clone();}
+            else if(p.Repair.RouteComplete&&!p.Vendor.RouteComplete){p.Vendor=p.Repair.Clone();}
+            return p;
         }
         public void Bind(QuickRoutePlan p)
         {

@@ -21,11 +21,11 @@ namespace WoWProbe
         public QuickGrindForm(bool autoStart,bool passivePreview=false)
         {
             this.passivePreview=passivePreview;
-            Text="固定路线自动打怪 · NPC路线录制版 0.8.5";Size=new Size(1080,820);MinimumSize=new Size(960,700);Font=new Font("Microsoft YaHei UI",10);StartPosition=FormStartPosition.CenterScreen;
+            Text="固定路线自动打怪 · NPC路线录制版 0.8.7";Size=new Size(1080,820);MinimumSize=new Size(960,700);Font=new Font("Microsoft YaHei UI",10);StartPosition=FormStartPosition.CenterScreen;
             if(passivePreview){StartPosition=FormStartPosition.Manual;Location=new Point(-20000,-20000);}
             var layout=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=4,ColumnCount=1,Padding=new Padding(12)};
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute,70));layout.RowStyles.Add(new RowStyle(SizeType.Percent,70));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,44));layout.RowStyles.Add(new RowStyle(SizeType.Percent,30));Controls.Add(layout);
-            layout.Controls.Add(new Label{Text="售卖和修理各自支持开始/结束录制整段路线；包满售卖、装备红了修理，沿去程逆序返回。\n先找附近怪物，无怪再走巡航点；脱战后拾取剥皮和吃喝，受到攻击优先反击。\n持续运行，不限10分钟。死亡点自动记录，幽魂回尸体旁复活后恢复；保持游戏前台，F12急停。",Dock=DockStyle.Fill},0,0);
+            layout.Controls.Add(new Label{Text="售卖和修理共用一条录制路线；包满售卖、装备红了修理，沿去程逆序返回。\n先找附近怪物，无怪再走巡航点；脱战后拾取剥皮和吃喝，受到攻击优先反击。\n持续运行，不限10分钟。死亡点自动记录，幽魂回尸体旁复活后恢复；保持游戏前台，F12急停。",Dock=DockStyle.Fill},0,0);
             layout.Controls.Add(routeEditor,0,1);
             var row=new FlowLayoutPanel{Dock=DockStyle.Fill};row.Controls.Add(start);row.Controls.Add(stop);row.Controls.Add(vendor);row.Controls.Add(repair);row.Controls.Add(cadence);row.Controls.Add(skinning);layout.Controls.Add(row,0,2);layout.Controls.Add(log,0,3);
             start.Click+=delegate{BeginRun();};vendor.Click+=delegate{BeginRun(true);};repair.Click+=delegate{BeginRun(false,true);};stop.Click+=delegate{cancelled=true;};

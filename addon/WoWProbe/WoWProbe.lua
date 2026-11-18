@@ -658,6 +658,9 @@ function P.BuildCombatPacket(core)
     end
     if type(P.ReadDurability)=="function" then local ok,flags,value=pcall(P.ReadDurability);if ok then put(89,flags or 0);u16(90,value or 0) end end
     if type(P.ReadRepairState)=="function" then local ok,flags,rect,cost,money=pcall(P.ReadRepairState);if ok then put(92,flags or 0);if rect then for i=1,4 do u16(91+i*2,rect[i]) end end;u32(101,cost or 0);u32(105,money or 0) end end
+    if P.eventRegistration and P.eventRegistration.COMBAT_LOG_EVENT_UNFILTERED then
+        put(109,1);u32(110,P.meleeHitToken or 0);u32(114,P.meleeHits or 0)
+    end
     put(6,caps);put(7,flags);put(56,extra)
     local a,b=0,0;for i=1,126 do a=(a+p[i])%255;b=(b+a)%255 end;put(126,a);put(127,b)
     WoWProbeDB.lastCombatPacket={sequence=p[5]+p[6]*256,capabilities=caps,flags=flags,extraKnown=extra,
@@ -845,7 +848,7 @@ local function printLine(text)
 end
 function P.ResetDiagnostics()
     local visible = type(WoWProbeDB) == "table" and WoWProbeDB.visible ~= false
-    WoWProbeDB = { schema = 1, addonVersion = "0.5.5", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
+    WoWProbeDB = { schema = 1, addonVersion = "0.5.6", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
     readClient(); captureBindings(); captureAPIs(); if P.panel then P.ScalePanel() end
 end
 function P.Command(command)
@@ -983,7 +986,7 @@ function P.Initialize()
     WoWProbeDB = old; WoWProbeDB.visible = visible
     if integer(old.rangeSlot,4) and old.rangeSlot>=1 then P.rangeSlot=old.rangeSlot end
     WoWProbeDB.previousSession = previous
-    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.5"
+    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.6"
     WoWProbeDB.errors, WoWProbeDB.bindings, WoWProbeDB.capabilities = {}, {}, {}
     readClient(); captureBindings(); captureAPIs()
     local ok, reason = pcall(createPanel)
@@ -1018,6 +1021,16 @@ function P.OnEvent(_, event, ...)
         return
     end
     if not P.initialized then return end
+    if event=="COMBAT_LOG_EVENT_UNFILTERED" then
+        local function recordSwing(_,kind,_,source,_,_,_,destination)
+            if kind~="SWING_DAMAGE" or source~=UnitGUID("player") or destination~=UnitGUID("target") then return end
+            local token=P.HashUTF8(destination)
+            if not token or token==0 then return end
+            P.meleeHitToken=token;P.meleeHits=((P.meleeHits or 0)+1)%U32
+            if P.meleeHits==0 then P.meleeHits=1 end
+        end
+        if type(CombatLogGetCurrentEventInfo)=="function" then recordSwing(CombatLogGetCurrentEventInfo()) else recordSwing(...) end
+    end
     if event=="CHAT_MSG_COMBAT_XP_GAIN" then P.RecordKillCredit((...)) end
     if event=="UNIT_FLAGS" or event=="UNIT_HEALTH" then
         local unit=(...)
@@ -1074,4 +1087,9 @@ for _, event in ipairs({"ADDON_LOADED", "PLAYER_ENTERING_WORLD", "PLAYER_LOGOUT"
     local ok, reason = pcall(driver.RegisterEvent, driver, event)
     P.eventRegistration = P.eventRegistration or {}; P.eventRegistration[event] = ok
     if not ok then P.registrationErrors = P.registrationErrors or {}; P.registrationErrors[event] = tostring(reason) end
+end
+do
+    local ok,reason=pcall(driver.RegisterEvent,driver,"COMBAT_LOG_EVENT_UNFILTERED")
+    P.eventRegistration.COMBAT_LOG_EVENT_UNFILTERED=ok
+    if not ok then P.registrationErrors=P.registrationErrors or {};P.registrationErrors.COMBAT_LOG_EVENT_UNFILTERED=tostring(reason) end
 end
