@@ -79,9 +79,11 @@ class QuickRouteUiTests
             {
                 var flags=BindingFlags.Instance|BindingFlags.NonPublic;var create=typeof(QuickRouteEditor).GetMethod("NewRoute",flags);
                 create.Invoke(editor,null);var first=QuickRoutePlan.LoadRecording(newFile);if(first.Route.Points.Count!=1)throw new Exception("New route did not start at A.");
+                first.Vendor=new QuickVendorSettings{Enabled=true,RouteComplete=true,X=.51,Y=.5};first.Vendor.Points.Add(new Waypoint{X=.5,Y=.5,Tolerance=.0004});first.Vendor.Points.Add(new Waypoint{X=.51,Y=.5,Tolerance=.0004});first.Repair=first.Vendor.Clone();editor.Bind(first);create.Invoke(editor,null);
+                var retained=QuickRoutePlan.LoadRecording(newFile);if(!retained.Vendor.Enabled||retained.Vendor.Points.Count!=2||retained.Repair.Points.Count!=2)throw new Exception("Same map new patrol discarded merchant route.");
                 position.MapId=43;position.Zone="OTHER";position.X=.6;create.Invoke(editor,null);
                 var next=QuickRoutePlan.LoadRecording(newFile);var archives=Directory.GetFiles(Path.Combine(Path.GetDirectoryName(newFile),"patrol-routes"),"*.json");
-                if(next.Route.MapId!=43||next.Route.Points.Count!=1||next.Route.Points[0].X!=.6||archives.Length!=1||QuickRoutePlan.LoadRecording(archives[0]).Route.MapId!=42)throw new Exception("New route did not preserve old route and bind new map.");
+                if(next.Route.MapId!=43||next.Route.Points.Count!=1||next.Route.Points[0].X!=.6||archives.Length!=2||next.Vendor.Points.Count!=0||QuickRoutePlan.LoadRecording(archives[0]).Route.MapId!=42)throw new Exception("New route did not preserve old route and bind new map.");
             }
             Console.WriteLine("Fixed route UI: recording, imports, new-route creation with old-route archive, and preview checks passed. No game input.");return 0;
         }

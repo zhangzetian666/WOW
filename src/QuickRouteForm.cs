@@ -46,7 +46,7 @@ namespace WoWProbe
             var sk1=Row();sk1.AutoSize=true;L(sk1,"每只怪开场一次（可留空）");sk1.Controls.Add(openingKeys);skillPanel.Controls.Add(sk1);var sk2=Row();sk2.AutoSize=true;L(sk2,"之后重复循环");sk2.Controls.Add(loopKeys);L(sk2,"技能间隔（秒）");sk2.Controls.Add(skillSeconds);skillPanel.Controls.Add(sk2);skillPanel.Controls.Add(new Label{AutoSize=true,Text="例如循环填242223，间隔填0.75，就每0.75秒尝试下一键并循环。\n开场填242223、循环填2，则每只怪先打242223，之后持续2。\n支持0–9、-、=键；新怪重新从开场开始。发送尝试不等于技能施放成功。"});
             var root=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=4,ColumnCount=1};root.RowStyles.Add(new RowStyle(SizeType.Absolute,34));root.RowStyles.Add(new RowStyle(SizeType.Absolute,35));root.RowStyles.Add(new RowStyle(SizeType.Percent,100));root.RowStyles.Add(new RowStyle(SizeType.Absolute,32));routeTab.Controls.Add(root);
             var names=Row();root.Controls.Add(names,0,0);L(names,"名称");names.Controls.Add(routeName);L(names,"允许偏离（坐标点）");names.Controls.Add(corridor);L(names,"到点误差");names.Controls.Add(tolerance);
-            var buttons=Row();root.Controls.Add(buttons,0,1);buttons.AutoScroll=true;buttons.WrapContents=false;buttons.Controls.Add(B("新建巡航路线",NewRoute));buttons.Controls.Add(B("保存当前巡航点",CapturePoint));buttons.Controls.Add(B("闭合到起点",CloseLoop));buttons.Controls.Add(B("删除所选点",Delete));buttons.Controls.Add(B("载入方案",LoadPlanFile));buttons.Controls.Add(B("保存方案",Save));
+            var buttons=Row();root.Controls.Add(buttons,0,1);buttons.AutoScroll=true;buttons.WrapContents=false;buttons.Controls.Add(B("新建巡航路线",NewRoute));buttons.Controls.Add(B("已有巡航路线",LoadSavedRoute));buttons.Controls.Add(B("保存当前巡航点",CapturePoint));buttons.Controls.Add(B("闭合到起点",CloseLoop));buttons.Controls.Add(B("删除所选点",Delete));buttons.Controls.Add(B("载入方案",LoadPlanFile));buttons.Controls.Add(B("保存方案",Save));
             var center=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=1,ColumnCount=2};center.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,48));center.ColumnStyles.Add(new ColumnStyle(SizeType.Percent,52));root.Controls.Add(center,0,2);
             grid.Dock=DockStyle.Fill;grid.RowHeadersVisible=false;grid.AllowUserToAddRows=true;grid.AllowUserToDeleteRows=true;grid.AutoSizeColumnsMode=DataGridViewAutoSizeColumnsMode.Fill;grid.BackgroundColor=Color.White;
             grid.Columns.Add("Point","点");grid.Columns[0].ReadOnly=true;grid.Columns[0].FillWeight=40;grid.Columns.Add("X","X（0–100）");grid.Columns.Add("Y","Y（0–100）");center.Controls.Add(grid,0,0);center.Controls.Add(canvas,1,0);
@@ -147,12 +147,13 @@ namespace WoWProbe
                 QuickRoutePlan.SaveRecording(archived,p);
             }
             else p=new QuickRoutePlan();
+            bool sameMap=p.MapMatches(o);
             p.Route=new RouteDocument{RouteId="manual-farm",Name="新巡航路线 "+DateTime.Now.ToString("MM-dd HH:mm"),RouteType="farm",Loop=true,MapId=o.MapId,MapMode=o.MapMode,Zone=o.Zone};
             p.Calibration.MapId=o.MapId;p.Calibration.MapMode=o.MapMode;p.Calibration.Zone=o.Zone;p.Calibration.Confirmed=false;
-            p.Vendor=new QuickVendorSettings();p.Repair=new QuickVendorSettings();
+            if(!sameMap){p.Vendor=new QuickVendorSettings();p.Repair=new QuickVendorSettings();}
             p.Route.Points.Add(new Waypoint{X=Math.Round(o.X*100,3)/100,Y=Math.Round(o.Y*100,3)/100,Tolerance=(double)tolerance.Value/100});
             QuickRoutePlan.SaveRecording(recordingPath,p);Bind(p);
-            info.Text="已新建路线并保存当前位置为A。继续走到B、C保存，最后闭合到起点。"+(archived.Length>0?"旧路线已存入patrol-routes，可载入恢复。":"");
+            info.Text="已新建路线并保存当前位置为A。继续走到B、C保存，最后闭合到起点。"+(archived.Length>0?"旧路线已保留，可点“已有巡航路线”切换。":"");
         }
         void CapturePoint()
         {
@@ -163,6 +164,7 @@ namespace WoWProbe
         }
         void CloseLoop(){grid.EndEdit();if(grid.Rows.Count<3)throw new InvalidOperationException("请先输入至少两个不同点。");var a=grid.Rows[0];var b=grid.Rows[grid.Rows.Count-2];if(Convert.ToString(a.Cells[1].Value)!=Convert.ToString(b.Cells[1].Value)||Convert.ToString(a.Cells[2].Value)!=Convert.ToString(b.Cells[2].Value))grid.Rows.Add("A",a.Cells[1].Value,a.Cells[2].Value);var p=ReadPlan(false);QuickRoutePlan.SaveRecording(recordingPath,p);Preview();}
         void Delete(){foreach(DataGridViewRow r in grid.SelectedRows)if(!r.IsNewRow)grid.Rows.Remove(r);QuickRoutePlan.SaveRecording(recordingPath,ReadEditor());Preview();}
+        void LoadSavedRoute(){string directory=Path.Combine(Path.GetDirectoryName(recordingPath),"patrol-routes");Directory.CreateDirectory(directory);using(var d=new OpenFileDialog{Filter="已保存巡航路线|*.json",InitialDirectory=directory})if(d.ShowDialog()==DialogResult.OK){var p=QuickRoutePlan.Import(d.FileName);Bind(p);QuickRoutePlan.SaveRecording(recordingPath,p);}}
         void LoadPlanFile(){using(var d=new OpenFileDialog{Filter="巡航方案、旧路线或录点草稿|*.json"})if(d.ShowDialog()==DialogResult.OK){var p=QuickRoutePlan.Import(d.FileName);Bind(p);QuickRoutePlan.SaveRecording(recordingPath,p);}}
         void Save(){var p=ReadPlan(false);using(var d=new SaveFileDialog{Filter="巡航方案|*.json",FileName="我的巡航路线.json"})if(d.ShowDialog()==DialogResult.OK)QuickRoutePlan.Save(d.FileName,p);}
         void ImportRoute(){LoadPlanFile();}
