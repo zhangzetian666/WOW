@@ -123,12 +123,14 @@ namespace WoWProbe
                 if(route!=null&&o.InCombat&&!route.TargetAllowed(o))return Stop("战斗目标已离开配置的追怪范围，停止继续追击。");
                 if(!o.TargetExists||!o.TargetIdentityKnown||o.TargetToken!=token)
                 {
+                    if(o.InCombat&&o.TargetExists&&o.TargetDeadKnown&&o.TargetDead)
+                    {token=0;missingTarget=-1;nextScan=now+300;return Cmd(QuickAction.Scan,"战斗中切到了其他尸体，立即重新选择攻击者，不计击杀。",9);}
                     if(!o.InCombat&&o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken==lastKilled&&o.TargetDeadKnown&&o.TargetDead&&o.CastSuccess==progressCasts&&corpseReselections<3)
                     {token=0;corpseReselections++;nextScan=now+400;return Cmd(QuickAction.None,"交互切回刚确认的尸体，重新选怪；不增加击杀。",0);}
                     if(missingTarget<0)missingTarget=now;
                     if(!o.TargetExists&&!reacquired){reacquired=true;return Cmd(QuickAction.Reacquire,"目标消失：重选上一目标核实死亡，不推定击杀。",0);}
                     if(now-missingTarget<2500)return Cmd(QuickAction.None,"目标变化，暂停输入等待死亡事件；不推定击杀。",0);
-                    if(++unconfirmedLosses>3)return Stop("连续四次丢失目标且无死亡证据，停止检查目标读取。");
+                    unconfirmedLosses++;
                     if(route!=null&&!o.InCombat)return AbandonChase(now,"目标丢失且未确认击杀，返回原路段继续寻怪。");
                     token=0;nextScan=now;return Cmd(QuickAction.None,"目标丢失未计击杀，重新核验附近怪物。",0);
                 }

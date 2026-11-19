@@ -166,7 +166,7 @@ namespace WoWProbe
                         {
                         if(recovery!=null&&clock.ElapsedMilliseconds<recoveryLoadingUntil)
                         {
-                            if(backend.IsEmergencyPressed()||!backend.IsTargetForeground())throw new InvalidOperationException("复活过渡期间急停或失焦。");
+                            if(backend.IsEmergencyPressed())throw new InvalidOperationException("复活过渡期间急停。");if(!backend.IsTargetForeground())throw new InvalidOperationException("复活过渡期间失焦。");
                             bool healthy=false;try{var transition=stream.Read();healthy=transition!=null&&transition.Fresh&&transition.KnownCore&&transition.ReadFailures==0;}catch(InvalidOperationException){}
                             if(!healthy){Thread.Sleep(80);continue;}input=guard();
                         }

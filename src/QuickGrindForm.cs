@@ -17,7 +17,7 @@ namespace WoWProbe
         readonly Label cadence=new Label{Text="技能与间隔见上方“技能设置”",AutoSize=true};
         readonly CheckBox skinning=new CheckBox{Text="击杀及路边尸体剥皮（7键）",AutoSize=true,Checked=true};
         readonly QuickRouteEditor routeEditor=new QuickRouteEditor();
-        readonly CheckBox autoResume=new CheckBox{Text="人为中断后，空闲自动继续",AutoSize=true,Checked=true};
+        readonly CheckBox autoResume=new CheckBox{Text="异常每30秒重试；人为中断空闲恢复",AutoSize=true,Checked=true};
         readonly NumericUpDown idleSeconds=new NumericUpDown{Minimum=5,Maximum=3600,Value=30,Width=70};
         readonly QuickIdleResume resume=new QuickIdleResume();
         readonly System.Windows.Forms.Timer resumeTimer=new System.Windows.Forms.Timer{Interval=1000};
@@ -29,7 +29,7 @@ namespace WoWProbe
         public QuickGrindForm(bool autoStart,bool passivePreview=false)
         {
             this.passivePreview=passivePreview;
-            Text="固定路线自动打怪 · NPC路线录制版 0.8.33";Size=new Size(1080,820);MinimumSize=new Size(960,700);Font=new Font("Microsoft YaHei UI",10);StartPosition=FormStartPosition.CenterScreen;
+            Text="固定路线自动打怪 · NPC路线录制版 0.8.34";Size=new Size(1080,820);MinimumSize=new Size(960,700);Font=new Font("Microsoft YaHei UI",10);StartPosition=FormStartPosition.CenterScreen;
             if(passivePreview){StartPosition=FormStartPosition.Manual;Location=new Point(-20000,-20000);}
             var layout=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=4,ColumnCount=1,Padding=new Padding(12)};
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute,70));layout.RowStyles.Add(new RowStyle(SizeType.Percent,70));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,88));layout.RowStyles.Add(new RowStyle(SizeType.Percent,30));Controls.Add(layout);
@@ -39,7 +39,7 @@ namespace WoWProbe
             row.Controls.Add(killTotal);row.Controls.Add(autoResume);row.Controls.Add(idleSeconds);row.Controls.Add(new Label{Text="秒后恢复；停止/F12取消自动恢复",AutoSize=true});
             start.Click+=delegate{BeginRun();};vendor.Click+=delegate{BeginRun(true);};repair.Click+=delegate{BeginRun(false,true);};stop.Click+=delegate{resume.Cancel();cancelled=true;stop.Enabled=false;};
             autoResume.CheckedChanged+=delegate{if(!autoResume.Checked){resume.Cancel();if(worker==null)stop.Enabled=false;}};
-            resumeTimer.Tick+=delegate{if(passivePreview||worker!=null||closeWhenStopped)return;if((Native.GetAsyncKeyState((int)Keys.F12)&0x8000)!=0){resume.Cancel();stop.Enabled=false;return;}if(autoResume.Checked&&!routeEditor.RecordingServiceRoute&&resume.Ready(resumeClock.ElapsedMilliseconds,Native.IdleMilliseconds(),(int)idleSeconds.Value)){resume.Cancel();Append("键鼠已空闲，重新识别游戏窗口并恢复运行。");BeginRun(resumeVendor,resumeRepair);}};
+            resumeTimer.Tick+=delegate{if(passivePreview||worker!=null||closeWhenStopped)return;if((Native.GetAsyncKeyState((int)Keys.F12)&0x8000)!=0){resume.Cancel();stop.Enabled=false;return;}if(autoResume.Checked&&!routeEditor.RecordingServiceRoute&&resume.Ready(resumeClock.ElapsedMilliseconds,Native.IdleMilliseconds(),(int)idleSeconds.Value)){resume.Cancel();Append("自动监测：重新识别游戏窗口；死亡/幽魂跑尸，存活恢复后打怪。");BeginRun(resumeVendor,resumeRepair);}};
             if(!passivePreview)resumeTimer.Start();FormClosed+=delegate{resumeTimer.Stop();resumeTimer.Dispose();};
             routeEditor.ServiceRecordingChanged+=delegate{if(worker==null||!worker.IsAlive)start.Enabled=vendor.Enabled=repair.Enabled=!routeEditor.RecordingServiceRoute;};
             FormClosing+=delegate(object sender,FormClosingEventArgs e){if(worker!=null&&worker.IsAlive){closeWhenStopped=true;cancelled=true;e.Cancel=true;Append("正在停止，释放按键后关闭窗口。");}};
@@ -51,8 +51,8 @@ namespace WoWProbe
             if(worker!=null&&worker.IsAlive)return;
             resume.Cancel();resumeVendor=vendorFirst;resumeRepair=repairFirst;
             QuickRoutePlan plan;try{if(vendorFirst)routeEditor.EnableAutoVendor();if(repairFirst)routeEditor.EnableAutoRepair();plan=routeEditor.ReadPlan(false);plan.Calibration.Confirmed=true;QuickRoutePlan.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-patrol.json"),plan);}catch(Exception e){Append("未开始："+e.Message);return;}
-            cancelled=false;start.Enabled=vendor.Enabled=repair.Enabled=cadence.Enabled=skinning.Enabled=routeEditor.Enabled=false;stop.Enabled=true;int interval=plan.SkillIntervalMs;bool useSkin=skinning.Checked;GrindCli.FocusGameWindow();
-            worker=new Thread(()=>{string failure=null;try{GrindCli.RunQuick(0,interval,()=>cancelled,Append,useSkin,plan,vendorFirst,repairFirst,killCounter);}catch(Exception ex){failure=ex.Message;Append("中断："+ex.Message);}finally{if(!IsDisposed)BeginInvoke((Action)(()=>{worker=null;start.Enabled=vendor.Enabled=repair.Enabled=cadence.Enabled=skinning.Enabled=routeEditor.Enabled=true;if(!cancelled&&!closeWhenStopped&&autoResume.Checked)resume.Interrupted(failure,resumeClock.ElapsedMilliseconds);stop.Enabled=resume.Pending;if(resume.Pending)Append("等待键鼠空闲"+idleSeconds.Value+"秒后自动恢复；点击停止可取消。");if(closeWhenStopped)Close();}));}});worker.IsBackground=true;worker.Start();
+            cancelled=false;start.Enabled=vendor.Enabled=repair.Enabled=cadence.Enabled=skinning.Enabled=routeEditor.Enabled=false;stop.Enabled=true;int interval=plan.SkillIntervalMs;bool useSkin=skinning.Checked;
+            worker=new Thread(()=>{string failure=null;try{GrindCli.FocusGameWindow();GrindCli.RunQuick(0,interval,()=>cancelled,Append,useSkin,plan,vendorFirst,repairFirst,killCounter);}catch(Exception ex){failure=ex.Message;Append("中断："+ex.Message);}finally{if(!IsDisposed)BeginInvoke((Action)(()=>{worker=null;start.Enabled=vendor.Enabled=repair.Enabled=cadence.Enabled=skinning.Enabled=routeEditor.Enabled=true;if(!cancelled&&!closeWhenStopped&&autoResume.Checked)resume.Interrupted(failure,resumeClock.ElapsedMilliseconds);stop.Enabled=resume.Pending;if(resume.Pending)Append("已进入自动监测，30秒后重试；人为操作中断需空闲"+idleSeconds.Value+"秒。停止/F12取消。");if(closeWhenStopped)Close();}));}});worker.IsBackground=true;worker.Start();
         }
     }
 }
