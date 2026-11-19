@@ -50,6 +50,9 @@ namespace WoWProbe
 
     public static class Native
     {
+        [StructLayout(LayoutKind.Sequential)] struct LASTINPUTINFO {public uint Size,Time;}
+        [DllImport("user32.dll")] static extern bool GetLastInputInfo(ref LASTINPUTINFO info);
+        public static long IdleMilliseconds(){var info=new LASTINPUTINFO{Size=(uint)Marshal.SizeOf(typeof(LASTINPUTINFO))};return GetLastInputInfo(ref info)?unchecked((uint)Environment.TickCount-info.Time):0;}
         [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr OpenProcess(uint access,bool inherit,uint id);
         [DllImport("advapi32.dll",SetLastError=true)] static extern bool OpenProcessToken(IntPtr process,uint access,out IntPtr token);
         [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetTokenInformation(IntPtr token,int kind,IntPtr buffer,int length,out int needed);

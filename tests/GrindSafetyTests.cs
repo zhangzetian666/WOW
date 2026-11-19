@@ -19,6 +19,7 @@ class GrindSafetyTests
     {long now=0;return new GrindInputGuard(b,read,()=>now,ms=>{now+=ms;if(wait!=null)wait(ms);},latch??new InputFailureLatch(),42,2,"TEST");}
     static int Main()
     {
+        Test("idle resume waits for both inactivity and interruption delay and preserves explicit stops",delegate{var r=new QuickIdleResume();r.Interrupted("Target window lost foreground during CLI operation.",100);Assert(!r.Ready(30099,60000,30));Assert(!r.Ready(30100,29999,30));Assert(r.Ready(30100,30000,30));r.Cancel();Assert(!r.Ready(60000,60000,30));r.Interrupted("Emergency stop during CLI operation.",0);Assert(!r.Ready(60000,60000,30));r.Interrupted("Input destination or emergency state changed during CLI checks.",0);Assert(!r.Pending);r.Interrupted("The user is already holding this CLI key.",0);Assert(r.Ready(30000,30000,30));r.Interrupted("map identity changed",0);Assert(!r.Pending);});
         Test("focus loss rejects the first auxiliary key",delegate{var b=new Backend{Foreground=false};var g=Guard(b,Observation,null);Reject(()=>g.Pulse(87,100));Assert(b.Downs==0&&b.Ups==0);});
         Test("F12 during calibration releases once and cannot restart",delegate{var b=new Backend();var g=Guard(b,Observation,ms=>b.Emergency=true);Reject(()=>g.Pulse(87,250));b.Emergency=false;Reject(()=>g.Pulse(87,100));Assert(b.Downs==1&&b.Ups==1);});
         Test("stale telemetry during a pulse releases owned input",delegate{var b=new Backend();var o=Observation();var g=Guard(b,()=>o,ms=>o.Fresh=false);Reject(()=>g.Pulse(87,250));Assert(b.Downs==1&&b.Ups==1);});
