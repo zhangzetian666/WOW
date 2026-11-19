@@ -50,6 +50,23 @@ namespace WoWProbe
 
     public static class Native
     {
+        [DllImport("kernel32.dll",SetLastError=true)] static extern IntPtr OpenProcess(uint access,bool inherit,uint id);
+        [DllImport("advapi32.dll",SetLastError=true)] static extern bool OpenProcessToken(IntPtr process,uint access,out IntPtr token);
+        [DllImport("advapi32.dll",SetLastError=true)] static extern bool GetTokenInformation(IntPtr token,int kind,IntPtr buffer,int length,out int needed);
+        [DllImport("advapi32.dll")] static extern IntPtr GetSidSubAuthorityCount(IntPtr sid);
+        [DllImport("advapi32.dll")] static extern IntPtr GetSidSubAuthority(IntPtr sid,uint index);
+        [DllImport("kernel32.dll")] static extern bool CloseHandle(IntPtr handle);
+        public static int IntegrityLevel(uint id)
+        {
+            IntPtr process=OpenProcess(0x1000,false,id),token=IntPtr.Zero,buffer=IntPtr.Zero;
+            try{if(process==IntPtr.Zero)return -1;if(!OpenProcessToken(process,8,out token))return -1;int needed;GetTokenInformation(token,25,IntPtr.Zero,0,out needed);if(needed<1)return -1;buffer=Marshal.AllocHGlobal(needed);if(!GetTokenInformation(token,25,buffer,needed,out needed))return -1;var sid=Marshal.ReadIntPtr(buffer);byte count=Marshal.ReadByte(GetSidSubAuthorityCount(sid));return count==0?-1:Marshal.ReadInt32(GetSidSubAuthority(sid,(uint)(count-1)));}
+            finally{if(buffer!=IntPtr.Zero)Marshal.FreeHGlobal(buffer);if(token!=IntPtr.Zero)CloseHandle(token);if(process!=IntPtr.Zero)CloseHandle(process);}
+        }
+        public static void RequireInputIntegrity(uint targetId)
+        {
+            int own=IntegrityLevel((uint)Process.GetCurrentProcess().Id),other=IntegrityLevel(targetId);
+            if(own>=0&&other>own)throw new InvalidOperationException("游戏以更高权限运行，按键可能无效。请关闭脚本后右键选择“以管理员身份运行”，再开始。");
+        }
         [StructLayout(LayoutKind.Sequential)] struct RECT { public int Left, Top, Right, Bottom; }
         [StructLayout(LayoutKind.Sequential)] struct POINT { public int X, Y; }
         [StructLayout(LayoutKind.Sequential)] struct KEYBDINPUT

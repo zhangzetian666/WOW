@@ -105,7 +105,7 @@ namespace WoWProbe
         internal static void RunQuick(int seconds, int interval, Func<bool> cancelled, Action<string> report,bool skinning=false,QuickRoutePlan plan=null,bool vendorFirst=false,bool repairFirst=false)
         {
             if(plan==null)throw new InvalidOperationException("请先手动配置固定打怪巡航路线，再点击开始。");plan.Validate(true);plan=plan.Clone();
-            WindowInfo window = OpenTelemetry();
+            WindowInfo window = OpenTelemetry();Native.RequireInputIntegrity(window.ProcessId);
             Action<string> nativeReport=report;var backend = new WindowsInputBackend(window, message=>nativeReport(message));
             FarmObservation anchor = Snapshot();
             var routeFollower=new QuickRouteFollower(plan,anchor);
