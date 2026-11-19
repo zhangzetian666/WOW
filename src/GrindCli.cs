@@ -102,8 +102,9 @@ namespace WoWProbe
             MouseLookInput.Run(dx,dy,ensure,held,()=>Native.SendMouseButton(true,false),()=>Native.SendMouseButton(true,true),Native.MoveMouseRelative,ms=>Pause(ms));
         }
 
-        internal static void RunQuick(int seconds, int interval, Func<bool> cancelled, Action<string> report,bool skinning=false,QuickRoutePlan plan=null,bool vendorFirst=false,bool repairFirst=false)
+        internal static void RunQuick(int seconds, int interval, Func<bool> cancelled, Action<string> report,bool skinning=false,QuickRoutePlan plan=null,bool vendorFirst=false,bool repairFirst=false,QuickKillCounter killCounter=null)
         {
+            if(killCounter==null)killCounter=new QuickKillCounter();killCounter.BeginRun();
             if(plan==null)throw new InvalidOperationException("请先手动配置固定打怪巡航路线，再点击开始。");plan.Validate(true);plan=plan.Clone();
             WindowInfo window = OpenTelemetry();Native.RequireInputIntegrity(window.ProcessId);
             Action<string> nativeReport=report;var backend = new WindowsInputBackend(window, message=>nativeReport(message));
@@ -237,7 +238,7 @@ namespace WoWProbe
                             }
                         }
                         QuickCommand command=engine.Step(observed,clock.ElapsedMilliseconds);
-                        if(completedKills+engine.Kills!=reportedKills){reportedKills=completedKills+engine.Kills;CancelQuickMovement(backend);write("已确认目标死亡，累计击杀="+reportedKills);shot("kill-"+reportedKills);}
+                        if(completedKills+engine.Kills!=reportedKills){reportedKills=completedKills+engine.Kills;killCounter.Record(reportedKills);CancelQuickMovement(backend);write("已确认目标死亡，窗口累计击杀="+killCounter.Total);shot("kill-"+reportedKills);}
                         if(completedLoots+engine.Loots!=reportedLoots){reportedLoots=completedLoots+engine.Loots;write("已确认拾取窗口完成，累计拾取="+reportedLoots);shot("loot-"+reportedLoots);}
                         if(completedSkins+engine.Skins!=reportedSkins){reportedSkins=completedSkins+engine.Skins;write("已确认剥皮成功，累计剥皮="+reportedSkins);shot("skin-"+reportedSkins);}
                         if(command.Action==QuickAction.Stop){searchMotion.Stop();write(command.Reason);break;}
@@ -245,7 +246,7 @@ namespace WoWProbe
                         bool keepMoving=!command.PauseForward&&(command.Action==QuickAction.Patrol||command.Action==QuickAction.RouteProbe||command.Action==QuickAction.Scan&&!observed.InCombat||command.Action==QuickAction.Turn&&!command.MouseTurn);
                         if(!keepMoving)searchMotion.Stop();
                         if(!QuickCombat.Matches(command,read())){searchMotion.Stop();CancelQuickMovement(backend);Pause(40);continue;}
-                        write(command.Reason+" 已确认击杀="+(completedKills+engine.Kills));
+                        write(command.Reason+" 窗口累计击杀="+killCounter.Total);
                         if(command.Action==QuickAction.Face&&autoAttackToken!=command.Token)
                         {
                             input=guard();
@@ -305,7 +306,7 @@ namespace WoWProbe
                             searchMotion.Stop();input=guard();if(observationLostAt<0){observationLostAt=clock.ElapsedMilliseconds;write("动作期间状态暂不可读，已释放按键；自动重读后继续。");}Thread.Sleep(80);
                         }
                     }
-                    write("已停止。本轮确认击杀："+(completedKills+engine.Kills)+"；拾取完成："+(completedLoots+engine.Loots)+"；剥皮成功："+(completedSkins+engine.Skins)+"。按键尝试不代表成功。");
+                    write("已停止。窗口累计击杀："+killCounter.Total+"；拾取完成："+(completedLoots+engine.Loots)+"；剥皮成功："+(completedSkins+engine.Skins)+"。按键尝试不代表成功。");
                     shot("stop");
                 }
                 catch(Exception ex){write("停止："+ex.Message);throw;}
