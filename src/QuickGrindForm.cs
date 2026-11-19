@@ -29,7 +29,7 @@ namespace WoWProbe
         public QuickGrindForm(bool autoStart,bool passivePreview=false)
         {
             this.passivePreview=passivePreview;
-            Text="固定路线自动打怪 · NPC路线录制版 0.8.29";Size=new Size(1080,820);MinimumSize=new Size(960,700);Font=new Font("Microsoft YaHei UI",10);StartPosition=FormStartPosition.CenterScreen;
+            Text="固定路线自动打怪 · NPC路线录制版 0.8.30";Size=new Size(1080,820);MinimumSize=new Size(960,700);Font=new Font("Microsoft YaHei UI",10);StartPosition=FormStartPosition.CenterScreen;
             if(passivePreview){StartPosition=FormStartPosition.Manual;Location=new Point(-20000,-20000);}
             var layout=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=4,ColumnCount=1,Padding=new Padding(12)};
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute,70));layout.RowStyles.Add(new RowStyle(SizeType.Percent,70));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,88));layout.RowStyles.Add(new RowStyle(SizeType.Percent,30));Controls.Add(layout);
@@ -43,7 +43,7 @@ namespace WoWProbe
             if(!passivePreview)resumeTimer.Start();FormClosed+=delegate{resumeTimer.Stop();resumeTimer.Dispose();};
             routeEditor.ServiceRecordingChanged+=delegate{if(worker==null||!worker.IsAlive)start.Enabled=vendor.Enabled=repair.Enabled=!routeEditor.RecordingServiceRoute;};
             FormClosing+=delegate(object sender,FormClosingEventArgs e){if(worker!=null&&worker.IsAlive){closeWhenStopped=true;cancelled=true;e.Cancel=true;Append("正在停止，释放按键后关闭窗口。");}};
-            Shown+=delegate{string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-patrol.json"),draft=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-patrol-recording.json");try{if(File.Exists(draft)&&( !File.Exists(path)||File.GetLastWriteTimeUtc(draft)>=File.GetLastWriteTimeUtc(path))){routeEditor.Bind(QuickRoutePlan.LoadRecording(draft));Append("已恢复上次录点草稿；可以继续保存当前巡航点，闭合后再开始。");}else if(File.Exists(path)){routeEditor.Bind(QuickRoutePlan.Load(path));Append("已载入本机上次巡航方案；核对移动参数后点击开始。");}else Append("走到A点点击“保存当前巡航点”，再走到B、C、D依次保存，最后闭合到起点。");}catch(Exception e){Append("方案未载入："+e.Message);}};
+            Shown+=delegate{string path=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-patrol.json"),draft=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-patrol-recording.json");try{if(File.Exists(draft)&&( !File.Exists(path)||File.GetLastWriteTimeUtc(draft)>=File.GetLastWriteTimeUtc(path))){routeEditor.Bind(QuickRoutePlan.LoadRecording(draft));Append("已恢复上次录点草稿；可以继续保存当前巡航点，闭合后再开始。");}else if(File.Exists(path)){routeEditor.Bind(QuickRoutePlan.Load(path));Append("已载入本机上次巡航方案；已准备按当前路线自动开始。");}else Append("走到A点点击“保存当前巡航点”，再走到B、C、D依次保存，最后闭合到起点。");}catch(Exception e){Append("方案未载入："+e.Message);return;}if(autoStart&&!passivePreview&&(File.Exists(path)||File.Exists(draft)))BeginInvoke((Action)(()=>{if(IsDisposed||closeWhenStopped||cancelled||(Native.GetAsyncKeyState((int)Keys.F12)&0x8000)!=0)return;Append("自动启动：读取已保存方案，倒计时后开始运行。");BeginRun();}));};
         }
         void Append(string message){if(IsDisposed||message.StartsWith("KeyDown")||message.StartsWith("KeyUp"))return;if(InvokeRequired){BeginInvoke((Action)(()=>Append(message)));return;}killTotal.Text="窗口累计击杀："+killCounter.Total;if(log.TextLength>70000)log.Text=log.Text.Substring(log.TextLength-40000);log.AppendText(DateTime.Now.ToString("HH:mm:ss")+" "+message+Environment.NewLine);}
         void BeginRun(bool vendorFirst=false,bool repairFirst=false)

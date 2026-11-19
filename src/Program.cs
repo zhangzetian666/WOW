@@ -18,11 +18,11 @@ namespace WoWProbe
             Native.SetProcessDPIAware();
             if(args.Length>0&&args[0]=="move"){try{return GrindCli.Move(args);}catch(Exception ex){Console.WriteLine(ex.Message);return 1;}}
             if(args.Length>0&&args[0]=="look"){try{return GrindCli.Look(args);}catch(Exception ex){Console.WriteLine(ex.Message);return 1;}}
-            if(args.Length>0&&(args[0]=="quick"||args[0]=="quick-start"))
+            if(args.Length==0||args[0]=="quick"||args[0]=="quick-start")
             {
                 Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
                 bool owner;using(var mutex=new Mutex(true,"WoWProbe-QuickCombat",out owner))
-                {if(!owner)return 1;try{Application.Run(new QuickGrindForm(args[0]=="quick-start"));}finally{mutex.ReleaseMutex();}}return 0;
+                {if(!owner)return 1;try{Application.Run(new QuickGrindForm(true));}finally{mutex.ReleaseMutex();}}return 0;
             }
             if (args.Length > 0 && args[0] == "grind") { try { return GrindCli.Run(args); } catch (Exception ex) { Console.WriteLine("grind failure: " + ex); return 1; } }
             if (args.Length > 0 && args[0] == "probe") { try { return GrindCli.Probe(args); } catch (Exception ex) { Console.WriteLine("probe failure: " + ex); return 1; } }
