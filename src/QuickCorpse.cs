@@ -81,7 +81,7 @@ namespace WoWProbe
                 if(!o.Skinnable)return Finish("该尸体不可剥皮，继续下一只。");
                 if(!o.SkinBindingKnown||!o.SkinBindingCorrect||!o.SkinSuccessKnown||!o.CastEventsKnown)return Finish("剥皮键7或剥皮成功事件未就绪，跳过剥皮。");
                 skinIssued=true;skinAt=now;skinBase=o.SkinSuccess;failedBase=o.CastFailed;
-                return C(QuickAction.Skin,"同一尸体已拾取完且可剥皮，按7剥皮一次。",55);
+                return C(QuickAction.Skin,"同一尸体已拾取完且可剥皮，直接按快捷键7剥皮，不输入聊天命令。",55);
             }
             if(!lootIssued){lootIssued=true;lootAt=now;return C(QuickAction.Loot,"对同一已死亡怪物按F拾取，等待窗口事件确认。",70);}
             if(now-lootAt>=5000)return Finish("拾取未确认，不执行剥皮；继续下一只。");

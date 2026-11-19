@@ -22,7 +22,7 @@ namespace WoWProbe
         readonly HashSet<uint> inspectedCorpses=new HashSet<uint>();
         string lockedTargetName;
         readonly string openingKeys,loopKeys;int loopIndex;
-        bool openingPending;uint openingCast;int sliceRecovery;uint sliceCast;
+        bool openingPending;uint openingCast;int sliceRecovery;uint sliceCast;char retryFinisher;
         bool meleeConfirmed;uint meleeBaseline;
         int contactHealth=255;
         long lastDefenseScan=-10000;
@@ -189,12 +189,12 @@ namespace WoWProbe
                     if(sliceRecovery==1){sliceRecovery=2;openingPending=false;}
                     bool rebuilding=sliceRecovery==2;
                     if(rebuilding){digit='2';sliceCast=o.CastSuccess;}
-                    else if(sliceRecovery==3){digit='4';if(opening<openingKeys.Length&&openingKeys[opening]=='4'){openingPending=o.CastEventsKnown;openingCast=o.CastSuccess;}}
+                    else if(sliceRecovery==3){digit=retryFinisher;if(opening<openingKeys.Length&&openingKeys[opening]==retryFinisher){openingPending=o.CastEventsKnown;openingCast=o.CastSuccess;}}
                     else if(opening<openingKeys.Length){digit=openingKeys[opening];if(o.CastEventsKnown){openingPending=true;openingCast=o.CastSuccess;}else opening++;}
                     else digit=loopKeys[(loopIndex++)%loopKeys.Length];
-                    if(digit=='4'&&o.CastEventsKnown){sliceRecovery=1;sliceCast=o.CastSuccess;}
+                    if((digit=='4'||digit=='5')&&o.CastEventsKnown){retryFinisher=digit;sliceRecovery=1;sliceCast=o.CastSuccess;}
                     ushort key=(ushort)(digit=='='?187:digit=='-'?189:digit);
-                    var skill=Cmd(QuickAction.Skill,rebuilding?"切割未确认成功，先补2邪恶攻击，确认成功后再试4。":"尝试技能键 "+(char)key+"，不冒充施法成功。",key);skill.MeleeConfirmed=meleeConfirmed;return skill;
+                    var skill=Cmd(QuickAction.Skill,rebuilding?(retryFinisher=='5'?"破甲未确认成功，先补2邪恶攻击，确认成功后再试5。":"切割未确认成功，先补2邪恶攻击，确认成功后再试4。"):"尝试技能键 "+(char)key+"，不冒充施法成功。",key);skill.MeleeConfirmed=meleeConfirmed;return skill;
                 }
                 return Cmd(QuickAction.None,"等待下一拍技能。",0);
             }
