@@ -13,10 +13,11 @@ namespace WoWProbe
         public double CombatRadius=.02;
         public string OpeningKeys="242223",LoopKeys="2";
         public int SkillIntervalMs=750;
+        public bool NoChatCombat;public string StartAttackKey="1",LastTargetKey="F8",StopAttackKey="F9";
         public int RestBelowPercent=80;public string DrinkKey="";
         public QuickVendorSettings Vendor=new QuickVendorSettings();
         public QuickVendorSettings Repair=new QuickVendorSettings();
-        public void ValidateSkills(){QuickCombat.CleanKeys(OpeningKeys,true);QuickCombat.CleanKeys(LoopKeys,false);QuickCombat.ConfiguredKey(DrinkKey);if(RestBelowPercent<30||RestBelowPercent>95)throw new FormatException("吃喝触发阈值须为30–95%。");if(SkillIntervalMs<100||SkillIntervalMs>5000)throw new FormatException("技能间隔须为0.10至5.00秒。");}
+        public void ValidateSkills(){if(NoChatCombat){var a=QuickCombatHotkeys.Key(StartAttackKey);var b=QuickCombatHotkeys.Key(LastTargetKey);var c=QuickCombatHotkeys.Key(StopAttackKey);if(a==b||a==c||b==c)throw new FormatException("开始攻击、上一个目标和停止攻击快捷键不能相同。");}QuickCombat.CleanKeys(OpeningKeys,true);QuickCombat.CleanKeys(LoopKeys,false);QuickCombat.ConfiguredKey(DrinkKey);if(RestBelowPercent<30||RestBelowPercent>95)throw new FormatException("吃喝触发阈值须为30–95%。");if(SkillIntervalMs<100||SkillIntervalMs>5000)throw new FormatException("技能间隔须为0.10至5.00秒。");}
         public void Validate(bool live)
         {
             if(SchemaVersion!=1||Route==null||Calibration==null)throw new FormatException("无效的巡航方案。");
@@ -35,7 +36,7 @@ namespace WoWProbe
             {if(i>0&&NavigationMath.Distance(Route.Points[i].X-Route.Points[i-1].X,Route.Points[i].Y-Route.Points[i-1].Y,Calibration.AxisScale)<1e-8)throw new FormatException("相邻路点不能重复。");if(Route.Points[i].Tolerance>CorridorWidth/2)throw new FormatException("路点到达误差须小于路线偏离范围的一半。");if(Route.Points[i].WaitMilliseconds!=0||Route.Points[i].Action=="interact")throw new FormatException("打怪巡航路点不支持等待或商人交互动作。");}
             if(live&&!Calibration.Confirmed)throw new InvalidOperationException("请先核对本机地图与移动参数。");
         }
-        public QuickRoutePlan Clone(){return new QuickRoutePlan{SchemaVersion=SchemaVersion,Route=Route.Clone(),Calibration=Calibration.Clone(),CorridorWidth=CorridorWidth,CombatRadius=CombatRadius,OpeningKeys=OpeningKeys,LoopKeys=LoopKeys,SkillIntervalMs=SkillIntervalMs,RestBelowPercent=RestBelowPercent,DrinkKey=DrinkKey,Vendor=Vendor.Clone(),Repair=Repair.Clone()};}
+        public QuickRoutePlan Clone(){return new QuickRoutePlan{SchemaVersion=SchemaVersion,NoChatCombat=NoChatCombat,StartAttackKey=StartAttackKey,LastTargetKey=LastTargetKey,StopAttackKey=StopAttackKey,Route=Route.Clone(),Calibration=Calibration.Clone(),CorridorWidth=CorridorWidth,CombatRadius=CombatRadius,OpeningKeys=OpeningKeys,LoopKeys=LoopKeys,SkillIntervalMs=SkillIntervalMs,RestBelowPercent=RestBelowPercent,DrinkKey=DrinkKey,Vendor=Vendor.Clone(),Repair=Repair.Clone()};}
         public bool MapMatches(FarmObservation o){return o!=null&&o.MapId==Route.MapId&&o.MapMode==Route.MapMode&&o.Zone==Route.Zone;}
         public double DistanceToRoute(double x,double y)
         {double px,py;int end;Project(x,y,out px,out py,out end);return NavigationMath.Distance(x-px,y-py,Calibration.AxisScale);}
@@ -90,7 +91,7 @@ namespace WoWProbe
         }
         static QuickRoutePlan Load(string path,bool recording)
         {
-            var root=RouteJson.Object(RouteFiles.Load(path));RouteJson.Keys(root,"SchemaVersion,Route,Calibration,CorridorWidth,CombatRadius,OpeningKeys,LoopKeys,SkillIntervalMs,RestBelowPercent,DrinkKey,Vendor,Repair","CombatRadius,OpeningKeys,LoopKeys,SkillIntervalMs,RestBelowPercent,DrinkKey,Vendor,Repair");
+            var root=RouteJson.Object(RouteFiles.Load(path));RouteJson.Keys(root,"SchemaVersion,Route,Calibration,CorridorWidth,CombatRadius,OpeningKeys,LoopKeys,SkillIntervalMs,RestBelowPercent,DrinkKey,Vendor,Repair,NoChatCombat,StartAttackKey,LastTargetKey,StopAttackKey","CombatRadius,OpeningKeys,LoopKeys,SkillIntervalMs,RestBelowPercent,DrinkKey,Vendor,Repair,NoChatCombat,StartAttackKey,LastTargetKey,StopAttackKey");
             foreach(string field in new[]{"Vendor","Repair"})if(root.ContainsKey(field)){var s=RouteJson.Object(root[field]);RouteJson.Keys(s,"Enabled,X,Y,Name,Points,RouteComplete","Points,RouteComplete");if(s.ContainsKey("Points")){var ps=s["Points"] as System.Collections.Generic.List<object>;if(ps==null)throw new FormatException("NPC路线列表无效。");foreach(var point in ps)RouteJson.Keys(RouteJson.Object(point),"X,Y,Tolerance,WaitMilliseconds,Action",null);}}
             var r=RouteJson.Object(root["Route"]);RouteJson.Keys(r,"SchemaVersion,RouteId,Name,RouteType,Zone,MapId,MapMode,AllowReverse,Loop,Points",null);
             var c=RouteJson.Object(root["Calibration"]);RouteJson.Keys(c,"AxisScale,FacingSign,FacingOffset,TurnRadiansPerSecond,ForwardUnitsPerSecond,Confirmed,MapId,MapMode,Zone",null);

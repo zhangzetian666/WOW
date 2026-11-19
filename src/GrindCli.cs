@@ -145,6 +145,7 @@ namespace WoWProbe
                     }
                     else write("跑尸按实际死亡点导航，不要求另行录制墓地路线。");
                     if(recoveryRoute!=null)write("已加载跑尸路线；沿已录路点返回，再接近本轮死亡点，不与灵魂医者交互。");
+                    write(plan.NoChatCombat?"战斗无聊天模式：开始攻击="+plan.StartAttackKey+"，上一个目标="+plan.LastTargetKey+"，停止攻击="+plan.StopAttackKey+"；拾取F、剥皮7。":"战斗命令模式；可在技能设置配置快捷键后启用无聊天模式。");
                     write(plan.Vendor.Enabled?"包满自动前往售卖NPC，确认空位恢复后返回；修理按独立设置执行。":"未启用售卖NPC；包满将停止，请在自动售卖页填写商人坐标。");
                     write("技能设置：开场="+plan.OpeningKeys+"，循环="+plan.LoopKeys+"，间隔="+interval+"ms。生命="+anchor.Health+"%（"+(anchor.VisualHealth?"原生血条画面":"API")+"）；启动先恢复满血，脱战低于"+plan.RestBelowPercent+"%吃喝。");
                     Activate(window.Handle);
@@ -250,20 +251,20 @@ namespace WoWProbe
                         if(command.Action==QuickAction.Face&&autoAttackToken!=command.Token)
                         {
                             input=guard();
-                            try{ChatChecked(backend,"/startattack",()=>{var unit=read();return GrindRecoveryPolicy.CanAttack(unit)&&unit.TargetToken==command.Token&&!QuickCombat.Contested(unit);});}
-                            catch(InvalidOperationException ex){if(ex.Message!="CLI chat target context changed."||safety.Faulted||backend.IsEmergencyPressed()||!backend.IsTargetForeground())throw;if(CloseInterruptedChat(backend,guard()))write("普攻命令期间目标变化，已关闭输入框，重新核验目标。");continue;}
+                            try{if(plan.NoChatCombat){input=new GrindInputGuard(backend,()=>{var unit=read();if(!GrindRecoveryPolicy.CanAttack(unit)||unit.TargetToken!=command.Token||QuickCombat.Contested(unit))throw new InvalidOperationException("CLI chat target context changed.");return unit;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);Pulse(backend,QuickCombatHotkeys.Key(plan.StartAttackKey),80);}else ChatChecked(backend,"/startattack",()=>{var unit=read();return GrindRecoveryPolicy.CanAttack(unit)&&unit.TargetToken==command.Token&&!QuickCombat.Contested(unit);});}
+                            catch(InvalidOperationException ex){if(ex.Message!="CLI chat target context changed."||safety.Faulted||backend.IsEmergencyPressed()||!backend.IsTargetForeground())throw;if(!plan.NoChatCombat&&CloseInterruptedChat(backend,guard()))write("普攻命令期间目标变化，已关闭输入框，重新核验目标。");continue;}
                             autoAttackToken=command.Token;write("已对核验目标开启普通攻击。");
                         }
-                        bool commandUsesChat=command.Action==QuickAction.CorpseSelect||command.Action==QuickAction.Reacquire||command.Action==QuickAction.ReturnToRoute||command.Action==QuickAction.Scan&&observed.InCombat;
+                        bool commandUsesChat=!plan.NoChatCombat&&(command.Action==QuickAction.CorpseSelect||command.Action==QuickAction.Reacquire||command.Action==QuickAction.ReturnToRoute||command.Action==QuickAction.Scan&&observed.InCombat);
                         input=new GrindInputGuard(backend,()=>{var o=read();if(!(commandUsesChat?QuickCombat.MatchesChatCommand(command,o):QuickCombat.Matches(command,o)))throw new InvalidOperationException("目标状态变化，停止当前按键。");return o;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
                         try
                         {
-                            if(command.Action==QuickAction.ReturnToRoute){CancelQuickMovement(backend);ChatChecked(backend,"/stopattack",()=>!read().InCombat);}
+                            if(command.Action==QuickAction.ReturnToRoute){CancelQuickMovement(backend);if(plan.NoChatCombat)Pulse(backend,QuickCombatHotkeys.ActionKey(command.Action,plan),80);else ChatChecked(backend,"/stopattack",()=>!read().InCombat);}
                             else if(command.Action==QuickAction.Reacquire||command.Action==QuickAction.CorpseSelect)
-                            {CancelQuickMovement(backend);if(command.Action==QuickAction.CorpseSelect&&!String.IsNullOrWhiteSpace(command.SelectName))ChatChecked(backend,"/targetexact "+command.SelectName,()=>!read().InCombat);else Chat(backend,"/targetlasttarget");}
+                            {CancelQuickMovement(backend);if(plan.NoChatCombat)Pulse(backend,QuickCombatHotkeys.ActionKey(command.Action,plan),80);else if(command.Action==QuickAction.CorpseSelect&&!String.IsNullOrWhiteSpace(command.SelectName))ChatChecked(backend,"/targetexact "+command.SelectName,()=>!read().InCombat);else Chat(backend,"/targetlasttarget");}
                             else if(command.Action==QuickAction.Scan)
                             {
-                                if(read().InCombat){searchMotion.Stop();Chat(backend,"/targetenemy");}
+                                if(read().InCombat){searchMotion.Stop();if(plan.NoChatCombat)Pulse(backend,9,80);else Chat(backend,"/targetenemy");}
                                 else Pulse(backend,command.Key,80);
                             }
                             else if(command.Action==QuickAction.Patrol)
