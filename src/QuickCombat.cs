@@ -22,7 +22,7 @@ namespace WoWProbe
         readonly HashSet<uint> inspectedCorpses=new HashSet<uint>();
         string lockedTargetName;
         readonly string openingKeys,loopKeys;int loopIndex;
-        bool openingPending;uint openingCast;
+        bool openingPending;uint openingCast;int sliceRecovery;uint sliceCast;
         bool meleeConfirmed;uint meleeBaseline;
         int contactHealth=255;
         long lastDefenseScan=-10000;
@@ -178,21 +178,28 @@ namespace WoWProbe
                 if(now>=nextFace)
                 {nextFace=now+1500;return Cmd(QuickAction.Face,"F：让游戏面向并接近锁定怪物。",0x46);}
                 if(o.MeleeEventsKnown&&o.MeleeHitToken==token&&o.MeleeHits!=meleeBaseline)meleeConfirmed=true;
+                if(sliceRecovery==2&&o.CastEventsKnown&&o.CastSuccess!=sliceCast){sliceRecovery=3;}
+                if(sliceRecovery==1&&o.CastEventsKnown&&o.CastSuccess!=sliceCast)sliceRecovery=0;
                 if(openingPending&&o.CastEventsKnown&&o.CastSuccess!=openingCast){opening++;openingPending=false;}
                 if(!meleeConfirmed&&(o.MeleeEventsKnown||!o.RangeKnown||!o.TargetInRange))return Cmd(QuickAction.None,"保持普通攻击并接近，等待本角色首次普攻击中当前怪物后开始技能。",0);
                 if(now>=nextSkill)
                 {
                     nextSkill=now+interval;
                     char digit;
-                    if(opening<openingKeys.Length){digit=openingKeys[opening];if(o.CastEventsKnown){openingPending=true;openingCast=o.CastSuccess;}else opening++;}
+                    if(sliceRecovery==1){sliceRecovery=2;openingPending=false;}
+                    bool rebuilding=sliceRecovery==2;
+                    if(rebuilding){digit='2';sliceCast=o.CastSuccess;}
+                    else if(sliceRecovery==3){digit='4';if(opening<openingKeys.Length&&openingKeys[opening]=='4'){openingPending=o.CastEventsKnown;openingCast=o.CastSuccess;}}
+                    else if(opening<openingKeys.Length){digit=openingKeys[opening];if(o.CastEventsKnown){openingPending=true;openingCast=o.CastSuccess;}else opening++;}
                     else digit=loopKeys[(loopIndex++)%loopKeys.Length];
+                    if(digit=='4'&&o.CastEventsKnown){sliceRecovery=1;sliceCast=o.CastSuccess;}
                     ushort key=(ushort)(digit=='='?187:digit=='-'?189:digit);
-                    var skill=Cmd(QuickAction.Skill,"尝试技能键 "+(char)key+"，不冒充施法成功。",key);skill.MeleeConfirmed=meleeConfirmed;return skill;
+                    var skill=Cmd(QuickAction.Skill,rebuilding?"切割未确认成功，先补2邪恶攻击，确认成功后再试4。":"尝试技能键 "+(char)key+"，不冒充施法成功。",key);skill.MeleeConfirmed=meleeConfirmed;return skill;
                 }
                 return Cmd(QuickAction.None,"等待下一拍技能。",0);
             }
             if(ShouldAcquire(o,now))
-            {if(route!=null)route.Interrupt(o);token=o.TargetToken;lockedTargetName=o.TargetName;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;meleeConfirmed=false;contactHealth=o.Health;meleeBaseline=o.MeleeHits;openingPending=false;opening=loopIndex=deadFrames=escapes=escapePhase=combatEscapes=0;escapeCombat=false;combatCastAt=now;combatCasts=o.CastSuccess;patrolPending=searchTurning=false;blockedWalks=searchEscapes=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName,0);}
+            {if(route!=null)route.Interrupt(o);token=o.TargetToken;lockedTargetName=o.TargetName;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;meleeConfirmed=false;contactHealth=o.Health;meleeBaseline=o.MeleeHits;openingPending=false;sliceRecovery=0;opening=loopIndex=deadFrames=escapes=escapePhase=combatEscapes=0;escapeCombat=false;combatCastAt=now;combatCasts=o.CastSuccess;patrolPending=searchTurning=false;blockedWalks=searchEscapes=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName,0);}
             if(route!=null&&!o.InCombat)
             {
                 if((route.SearchingNearby||!route.Returning)&&now>=nextScan){nextScan=now+1200;return Cmd(QuickAction.Scan,"移动中扫描附近怪物；附近无目标再前往巡航点。",9);}

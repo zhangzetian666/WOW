@@ -95,7 +95,7 @@ if ($LASTEXITCODE -ne 0) { throw 'Fishing UI test compilation failed.' }
 Write-Output "BUILD_OK $bin\WoWProbe.exe"
 if ($Package) {
     $dist = Join-Path $projectRoot 'dist'
-    $releaseName = 'WoWProbe-Complete-0.8.30'
+    $releaseName = 'WoWProbe-Complete-0.8.31'
     $release = Join-Path $dist $releaseName
     New-Item -ItemType Directory -Path $release -Force | Out-Null
     Copy-Item -LiteralPath "$bin\WoWProbe.exe" -Destination $release -Force
