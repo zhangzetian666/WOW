@@ -41,7 +41,7 @@ class GrindCliIntegrationTests
             typeof(GrindCli).GetField("input",Flags).SetValue(null,targetGuard);typeof(GrindCli).GetField("chatReader",Flags).SetValue(null,(Func<FarmObservation>)(()=>o));
             Reject(()=>Call("ChatChecked",null,"/stopattack",(Func<bool>)(()=>!o.InCombat),(Action<char>)(c=>text.Append(c))));Assert(o.ChatOpen&&text.Length==0);
             Call("CloseInterruptedChat",null,baseGuard());Assert(!o.ChatOpen&&o.InCombat&&b.Down==2&&b.Up==2);
-            o.ChatOpen=true;b.Emergency=true;Reject(()=>Call("CloseInterruptedChat",null,baseGuard()));Assert(o.ChatOpen&&b.Down==2);
+            o.ChatOpen=true;Call("CloseInterruptedChat",null,baseGuard());Assert(b.Down==2&&b.Up==2);b.Emergency=true;Reject(()=>Call("CloseInterruptedChat",null,baseGuard()));Assert(o.ChatOpen&&b.Down==2);
         });
         Console.WriteLine("Grind CLI integration tests: "+passed+" passed, "+failed+" failed. No native input backend was constructed.");return failed==0?0:1;
     }

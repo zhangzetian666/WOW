@@ -708,12 +708,13 @@ namespace WoWProbe
         { ChatChecked(backend, text, null); }
         static void CheckChatContext(Func<bool> context)
         { RequireInput().Ensure(); if(context!=null&&!context())throw new InvalidOperationException("CLI chat target context changed."); }
+        static bool chatNeedsCleanup;
         static bool CloseInterruptedChat(WindowsInputBackend backend,GrindInputGuard recovery)
         {
             // Target-specific guards latch after a changed target/combat state. Cleanup
             // needs the fresh base guard, which still enforces focus, map and F12.
-            input=recovery;var edit=ChatObservation();
-            if(edit.ChatOpenKnown&&edit.ChatOpen){Pulse(backend,27,60);Pause(250);return true;}return false;
+            input=recovery;recovery.Ensure();if(!chatNeedsCleanup)return false;var edit=ChatObservation();
+            if(edit.Fresh&&edit.KnownCore&&edit.ReadFailures==0&&edit.ChatOpenKnown&&edit.ChatOpen){chatNeedsCleanup=false;Pulse(backend,27,60);Pause(250);return true;}if(edit.ChatOpenKnown&&!edit.ChatOpen)chatNeedsCleanup=false;return false;
         }
         static void ChatChecked(WindowsInputBackend backend, string text, Func<bool> context,Action<char> sender=null)
         {
@@ -721,15 +722,15 @@ namespace WoWProbe
             {
                 CheckChatContext(context);
                 var before=ChatObservation();if(before.ChatOpenKnown&&before.ChatOpen)throw new InvalidOperationException("聊天输入框已经打开，拒绝重复打开。");
-                Pulse(backend, 0x0D, 150); Pause(300); // open the chat edit box
+                chatNeedsCleanup=true;Pulse(backend, 0x0D, 150); Pause(300); // open the chat edit box
                 var editing=ChatObservation();if(editing.ChatOpenKnown&&!editing.ChatOpen)throw new InvalidOperationException("聊天框未取得焦点，未发送命令文字。");
                 foreach(char ch in text){CheckChatContext(context);RequireInput().TypeText(ch.ToString(),c=>{if(sender!=null)sender(c);else Native.SendChar(c);});}
                 Pause(80);
                 CheckChatContext(context);
-                Pulse(backend, 0x0D, 150); Pause(300); // submit
+                chatNeedsCleanup=false;Pulse(backend, 0x0D, 150); Pause(300); // submit
                 var after=ChatObservation();if(after.ChatOpenKnown&&after.ChatOpen)throw new InvalidOperationException("聊天命令未关闭输入框，停止。");
             }
-            catch (Exception ex) { try{var edit=ChatObservation();if(edit.ChatOpenKnown&&edit.ChatOpen&&!backend.IsEmergencyPressed()&&backend.IsTargetForeground())Pulse(backend,27,80);}catch{}Log("聊天输入失败: " + ex.Message); throw; }
+            catch (Exception ex) { Log("聊天输入失败: " + ex.Message); throw; }
         }
 
         // Turn the character toward a world point using the live calibration mapping.
