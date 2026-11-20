@@ -726,7 +726,7 @@ namespace WoWProbe
                 var before=ChatObservation();if(before.ChatOpenKnown&&before.ChatOpen)throw new InvalidOperationException("聊天输入框已经打开，拒绝重复打开。");
                 chatNeedsCleanup=true;Pulse(backend, 0x0D, 150); Pause(300); // open the chat edit box
                 var editing=ChatObservation();if(editing.ChatOpenKnown&&!editing.ChatOpen)throw new InvalidOperationException("聊天框未取得焦点，未发送命令文字。");
-                foreach(char ch in text){CheckChatContext(context);RequireInput().TypeText(ch.ToString(),c=>{if(sender!=null)sender(c);else Native.SendChar(c);});}
+                foreach(char ch in text){CheckChatContext(context);RequireInput().TypeText(ch.ToString(),c=>{if(sender!=null)sender(c);else Native.SendUnicodeChar(c);});}
                 Pause(80);
                 CheckChatContext(context);
                 chatNeedsCleanup=false;Pulse(backend, 0x0D, 150); Pause(300); // submit
