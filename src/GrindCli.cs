@@ -286,10 +286,11 @@ namespace WoWProbe
                             {
                                 bool detour=command.Action==QuickAction.BackOff||command.Action==QuickAction.DetourTurn||command.Action==QuickAction.DetourForward;
                                 if(detour)CancelQuickMovement(backend);
-                                if((command.Action==QuickAction.Food||command.Action==QuickAction.Drink)&&!restMovementStopped){CancelQuickMovement(backend);restMovementStopped=true;}
+                                if((command.Action==QuickAction.Food||command.Action==QuickAction.Drink)&&!restMovementStopped){Pulse(backend,87,80);write("进食准备：停止移动，等待坐标连续稳定1秒。");QuickRestPreparation.Wait(read,Pause);restMovementStopped=true;}
                                 if(command.RouteMovement&&command.Action==QuickAction.Turn&&!command.PauseForward)searchMotion.Start();
                                 int hold=command.Hold>0?command.Hold:command.Action==QuickAction.Turn?260:command.Action==QuickAction.BackOff?300:command.Action==QuickAction.DetourTurn?220:command.Action==QuickAction.DetourForward?600:80;
                                 Pulse(backend,command.Key,hold);
+                                if(command.Action==QuickAction.Food||command.Action==QuickAction.Drink)engine.RestInputCompleted(clock.ElapsedMilliseconds);
                                 // F starts native approach/facing. Leave click-to-move active
                                 // between skills; subsequent observations enforce the chase leash.
                             }

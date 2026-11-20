@@ -28,6 +28,7 @@ namespace WoWProbe
         long lastDefenseScan=-10000;
         readonly int restBelow;readonly ushort drinkKey;
         readonly bool permitFullBags;readonly bool attackHostile;
+        public void RestInputCompleted(long now){if(resting)restHoldUntil=now+10000;}
         public bool IsResting {get{return resting;}}
         public bool HasActiveWork {get{return token!=0||resting;}}
         public static ushort ConfiguredKey(string text){string v=CleanKeys(text,true);if(v.Length>1)throw new FormatException("饮水键只能填一个按键，盗贼可留空。");return (ushort)(v.Length==0?0:v[0]=='='?187:v[0]=='-'?189:v[0]);}
