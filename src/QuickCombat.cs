@@ -6,7 +6,7 @@ namespace WoWProbe
     public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin }
     public sealed class QuickCommand
     {
-        public bool MeleeConfirmed;
+        public bool AttackHostile;public bool MeleeConfirmed;
         public QuickAction Action; public ushort Key; public uint Token,IgnoredTarget; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement,PauseForward,CombatRecovery;public QuickRouteFollower RouteContext;
     }
 
@@ -27,7 +27,7 @@ namespace WoWProbe
         int contactHealth=255;
         long lastDefenseScan=-10000;
         readonly int restBelow;readonly ushort drinkKey;
-        readonly bool permitFullBags;
+        readonly bool permitFullBags;readonly bool attackHostile;
         public bool HasActiveWork {get{return token!=0||resting;}}
         public static ushort ConfiguredKey(string text){string v=CleanKeys(text,true);if(v.Length>1)throw new FormatException("饮水键只能填一个按键，盗贼可留空。");return (ushort)(v.Length==0?0:v[0]=='='?187:v[0]=='-'?189:v[0]);}
         public static string CleanKeys(string keys,bool allowEmpty)
@@ -55,12 +55,12 @@ namespace WoWProbe
             if(initial==null||!initial.Fresh||!initial.KnownCore)throw new InvalidOperationException("需要连续有效的插件数据。");
             if(interval<100||interval>5000)throw new ArgumentOutOfRangeException("interval");
             this.openingKeys=CleanKeys(openingKeys,true);this.loopKeys=CleanKeys(loopKeys,false);
-            this.permitFullBags=permitFullBags;
+            this.permitFullBags=permitFullBags;this.attackHostile=route!=null&&route.Plan.AttackHostile;
             if(restBelow<30||restBelow>95)throw new ArgumentOutOfRangeException("restBelow");if(drinkKey!=0&&!((drinkKey>=48&&drinkKey<=57)||drinkKey==187||drinkKey==189))throw new ArgumentException("Invalid drink key.");this.restBelow=restBelow;this.drinkKey=drinkKey;
             map=initial.MapId;mode=initial.MapMode;zone=initial.Zone;x=initial.X;y=initial.Y;this.interval=interval;this.skinning=skinning;this.route=route;
         }
         QuickCommand Cmd(QuickAction a,string r,ushort k)
-        {return new QuickCommand{Action=a,Reason=r,Key=k,Token=token,RouteContext=route,CombatRecovery=escapeCombat&&(a==QuickAction.BackOff||a==QuickAction.DetourTurn||a==QuickAction.DetourForward)};}
+        {return new QuickCommand{AttackHostile=attackHostile,Action=a,Reason=r,Key=k,Token=token,RouteContext=route,CombatRecovery=escapeCombat&&(a==QuickAction.BackOff||a==QuickAction.DetourTurn||a==QuickAction.DetourForward)};}
         QuickCommand Stop(string reason){stopped=true;return Cmd(QuickAction.Stop,reason,0);}
         public QuickCommand Step(FarmObservation o,long now)
         {
@@ -205,7 +205,7 @@ namespace WoWProbe
             if(route!=null&&!o.InCombat)
             {
                 if((route.SearchingNearby||!route.Returning)&&now>=nextScan){nextScan=now+1200;return Cmd(QuickAction.Scan,"移动中扫描附近怪物；附近无目标再前往巡航点。",9);}
-                var movement=route.Step(o,now);movement.IgnoredTarget=now<skipUntil?skippedToken:0;return movement;
+                var movement=route.Step(o,now);movement.AttackHostile=attackHostile;movement.IgnoredTarget=now<skipUntil?skippedToken:0;return movement;
             }
             if(!o.InCombat&&searchTurning)
             {
@@ -244,8 +244,9 @@ namespace WoWProbe
         }
         public bool HasDeathEvidence(FarmObservation o,uint expected)
         {return expected!=0&&expected==token&&o!=null&&o.Fresh&&(o.DeathEventsKnown&&o.DeathToken==expected&&o.TargetDeaths!=deathBase||o.KillCreditsKnown&&lockedName!=0&&o.KillCreditNameHash==lockedName&&o.KillCredits!=creditBase);}
-        static bool CanAcquire(FarmObservation o)
-        {return GrindRecoveryPolicy.CanAttack(o)&&(o.InCombat&&(!o.TargetVictimKnown||o.TargetTargetsPlayer)||o.TargetReaction==4&&!Contested(o));}
+        bool CanAcquire(FarmObservation o){return CanAcquire(o,attackHostile);}
+        static bool CanAcquire(FarmObservation o,bool includeHostile)
+        {return GrindRecoveryPolicy.CanAttack(o)&&(o.InCombat&&(!o.TargetVictimKnown||o.TargetTargetsPlayer)||(o.TargetReaction==4||includeHostile&&o.TargetReaction>=1&&o.TargetReaction<=3)&&!Contested(o));}
         public static bool Contested(FarmObservation o){return o!=null&&!(o.InCombat&&(!o.TargetVictimKnown||o.TargetTargetsPlayer))&&(o.TargetClaimKnown&&o.TargetClaimedByOther||o.TargetCombatKnown&&o.TargetInCombat&&(!o.TargetVictimKnown||!o.TargetTargetsPlayer));}
         public bool ShouldAcquire(FarmObservation o,long now)
         {return CanAcquire(o)&&(o.InCombat||o.TargetToken!=skippedToken||now>=skipUntil)&&(route==null||route.MayAcquire(o));}
@@ -287,16 +288,16 @@ namespace WoWProbe
             if(c.Action==QuickAction.Skill&&!c.MeleeConfirmed&&(!o.RangeKnown||!o.TargetInRange))return false;
             if(!o.InCombat&&Contested(o)&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill||c.Action==QuickAction.RouteProbe))return false;
             if(c.Action==QuickAction.InterruptSkin)return o.InCombat&&(o.Casting||o.Channeling);
-            if(c.RouteMovement)return !o.InCombat&&!(CanAcquire(o)&&c.RouteContext.MayAcquire(o)&&o.TargetToken!=c.IgnoredTarget);
+            if(c.RouteMovement)return !o.InCombat&&!(CanAcquire(o,c.AttackHostile)&&c.RouteContext.MayAcquire(o)&&o.TargetToken!=c.IgnoredTarget);
             if(c.Action==QuickAction.ReturnToRoute)return c.RouteContext!=null&&c.RouteContext.Returning&&!o.InCombat;
-            if(c.Action==QuickAction.RouteProbe)return c.RouteContext!=null&&!c.RouteContext.Returning&&!o.InCombat&&CanAcquire(o)&&o.TargetToken==c.Token&&!o.TargetPositionKnown;
+            if(c.Action==QuickAction.RouteProbe)return c.RouteContext!=null&&!c.RouteContext.Returning&&!o.InCombat&&CanAcquire(o,c.AttackHostile)&&o.TargetToken==c.Token&&!o.TargetPositionKnown;
             if(c.RouteContext!=null&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill)&&!c.RouteContext.TargetAllowed(o))return false;
             if(c.Action==QuickAction.Scan)return true;
             if(c.Action==QuickAction.CorpseSelect)return !o.InCombat;
             if(c.Action==QuickAction.Reacquire)return !o.TargetExists||o.TargetIdentityKnown&&o.TargetToken==c.Token&&!o.TargetIsPlayer;
             if(!ownedChat&&o.ChatOpenKnown&&o.ChatOpen)return false;
-            if(c.Action==QuickAction.Patrol)return !o.InCombat&&!CanAcquire(o);
-            if(c.Action==QuickAction.Turn)return !o.InCombat&&!CanAcquire(o);
+            if(c.Action==QuickAction.Patrol)return !o.InCombat&&!CanAcquire(o,c.AttackHostile);
+            if(c.Action==QuickAction.Turn)return !o.InCombat&&!CanAcquire(o,c.AttackHostile);
             if(c.Action==QuickAction.Food||c.Action==QuickAction.Drink)return !o.InCombat;
             if(!o.TargetExists||!o.TargetIdentityKnown||c.Token==0||o.TargetToken!=c.Token||o.TargetIsPlayer||!o.AttackabilityKnown||!o.TargetDeadKnown)return false;
             if(c.Action==QuickAction.CorpseApproach)return o.TargetDead&&!o.InCombat&&(o.LootKnown&&o.Lootable||o.SkinKnown&&o.Skinnable);
