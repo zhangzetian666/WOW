@@ -156,7 +156,7 @@ namespace WoWProbe
                         write(i+"秒后开始，保持游戏前台，F12急停。");Thread.Sleep(1000);
                     }
                     input.Ensure();
-                    long end=seconds<=0?long.MaxValue:clock.ElapsedMilliseconds+seconds*1000L;var deathRate=new QuickDeathRate();int reportedKills=0,reportedLoots=0,reportedSkins=0,frameSequence=-1,completedKills=0,completedLoots=0,completedSkins=0,recoveries=0;uint picturedToken=0,autoAttackToken=0;
+                    long end=seconds<=0?long.MaxValue:clock.ElapsedMilliseconds+seconds*1000L;var deathRate=new QuickDeathRate();int reportedKills=0,reportedLoots=0,reportedSkins=0,frameSequence=-1,completedKills=0,completedLoots=0,completedSkins=0,recoveries=0;uint picturedToken=0,autoAttackToken=0;bool restMovementStopped=false;
                     QuickRecovery recovery=null;
                     QuickVendorEngine vendorTrip=null;bool vendorDefending=false,suppressFullBagSale=false;
                     long recoveryLoadingUntil=-1,observationLostAt=-1;
@@ -239,6 +239,8 @@ namespace WoWProbe
                             }
                         }
                         QuickCommand command=engine.Step(observed,clock.ElapsedMilliseconds);
+                        if(!engine.IsResting)restMovementStopped=false;
+                        else searchMotion.Stop();
                         if(completedKills+engine.Kills!=reportedKills){reportedKills=completedKills+engine.Kills;killCounter.Record(reportedKills);CancelQuickMovement(backend);write("已确认目标死亡，窗口累计击杀="+killCounter.Total);shot("kill-"+reportedKills);}
                         if(completedLoots+engine.Loots!=reportedLoots){reportedLoots=completedLoots+engine.Loots;write("已确认拾取窗口完成，累计拾取="+reportedLoots);shot("loot-"+reportedLoots);}
                         if(completedSkins+engine.Skins!=reportedSkins){reportedSkins=completedSkins+engine.Skins;write("已确认剥皮成功，累计剥皮="+reportedSkins);shot("skin-"+reportedSkins);}
@@ -283,7 +285,8 @@ namespace WoWProbe
                             else
                             {
                                 bool detour=command.Action==QuickAction.BackOff||command.Action==QuickAction.DetourTurn||command.Action==QuickAction.DetourForward;
-                                if(detour||command.Action==QuickAction.Food||command.Action==QuickAction.Drink)CancelQuickMovement(backend);
+                                if(detour)CancelQuickMovement(backend);
+                                if((command.Action==QuickAction.Food||command.Action==QuickAction.Drink)&&!restMovementStopped){CancelQuickMovement(backend);restMovementStopped=true;}
                                 if(command.RouteMovement&&command.Action==QuickAction.Turn&&!command.PauseForward)searchMotion.Start();
                                 int hold=command.Hold>0?command.Hold:command.Action==QuickAction.Turn?260:command.Action==QuickAction.BackOff?300:command.Action==QuickAction.DetourTurn?220:command.Action==QuickAction.DetourForward?600:80;
                                 Pulse(backend,command.Key,hold);
