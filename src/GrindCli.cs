@@ -214,16 +214,20 @@ namespace WoWProbe
                             {if((ex.Message!="复活动作状态变化。"&&ex.Message!="CLI observations are unavailable, unknown or stale."&&ex.Message!="屏幕状态已超时。")||rc.Action!=QuickRecoveryAction.Click||safety.Faulted||backend.IsEmergencyPressed()||!backend.IsTargetForeground())throw;write("复活点击状态变化："+ex.Message+"；重新读取按钮后再尝试。");}
                             input=guard();if(rc.Action==QuickRecoveryAction.Click){recoveryLoadingUntil=clock.ElapsedMilliseconds+8000;Thread.Sleep(80);}else Pause(80);continue;
                         }
-                        bool needRepair=plan.Repair.Enabled&&(repairFirst||observed.GearKnown&&observed.GearRed);
+                        bool brokenGear=observed.GearKnown&&observed.GearRed&&observed.Durability==0;
+                        if(brokenGear&&plan.Vendor.Enabled){plan.Repair=plan.Vendor.Clone();plan.Repair.Enabled=true;}
+                        bool needRepair=plan.Repair.Enabled&&(repairFirst||brokenGear);
                         if(!observed.BagFull)suppressFullBagSale=false;
-                        if(vendorTrip==null&&!observed.InCombat&&!observed.Casting&&!observed.Channeling&&(needRepair||plan.Vendor.Enabled&&(vendorFirst||observed.BagFull&&!suppressFullBagSale)))
+                        if(vendorTrip==null&&(!observed.InCombat||brokenGear)&&!observed.Casting&&!observed.Channeling&&(needRepair||plan.Vendor.Enabled&&(vendorFirst||observed.BagFull&&!suppressFullBagSale)))
                         {
-                            searchMotion.Stop();CancelQuickMovement(backend);routeFollower.Interrupt(observed);vendorTrip=new QuickVendorEngine(plan,ReadOperations(),needRepair,!vendorFirst&&!repairFirst);if(needRepair)repairFirst=false;else vendorFirst=false;completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;
-                            engine=new QuickCombat(observed,interval,skinning,null,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),true);vendorDefending=observed.Health<plan.RestBelowPercent;write(needRepair?"装备损坏或手动修理：前往已配置修理NPC，实际修复后返回巡航。":"开始售卖行程：前往已配置NPC坐标，确认清包后返回巡航。");
+                            searchMotion.Stop();CancelQuickMovement(backend);routeFollower.Interrupt(observed);vendorTrip=new QuickVendorEngine(plan,ReadOperations(),needRepair,!vendorFirst&&!repairFirst,brokenGear);if(brokenGear)autoAttackToken=uint.MaxValue;if(needRepair)repairFirst=false;else vendorFirst=false;completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;
+                            engine=new QuickCombat(observed,interval,skinning,null,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),true);vendorDefending=!vendorTrip.AvoidCombat&&observed.Health<plan.RestBelowPercent;write(needRepair?"装备损坏或手动修理：前往已配置修理NPC，实际修复后返回巡航。":"开始售卖行程：前往已配置NPC坐标，确认清包后返回巡航。");
                         }
                         if(vendorTrip!=null)
                         {
-                            if(observed.InCombat&&!vendorDefending){engine=new QuickCombat(observed,interval,skinning,null,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),true);vendorDefending=true;write("售卖途中受到攻击，优先处理攻击者。");}
+                            bool wasAvoiding=vendorTrip.AvoidCombat;vendorTrip.PrioritizeBrokenGear(observed);
+                            if(vendorTrip.AvoidCombat){vendorDefending=false;if(!wasAvoiding||autoAttackToken!=0){input=guard();if(plan.NoChatCombat)Pulse(backend,QuickCombatHotkeys.Key(plan.StopAttackKey),80);else ChatChecked(backend,"/stopattack",null);autoAttackToken=0;write("装备零耐久：停止缠斗，沿售卖路线持续前往NPC修理。");}}
+                            if(observed.InCombat&&!vendorDefending&&!vendorTrip.AvoidCombat){engine=new QuickCombat(observed,interval,skinning,null,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),true);vendorDefending=true;write("售卖途中受到攻击，优先处理攻击者。");}
                             if(vendorDefending&&!observed.InCombat&&!engine.HasActiveWork&&observed.Health>=plan.RestBelowPercent){completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;engine=new QuickCombat(observed,interval,skinning,null,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),true);vendorTrip.ResumeAfterCombat(ReadOperations(),clock.ElapsedMilliseconds);vendorDefending=false;}
                             if(!vendorDefending)
                             {

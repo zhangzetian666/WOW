@@ -36,11 +36,14 @@ namespace WoWProbe
         long inventoryQuietSince=-1;uint quietRevision;bool noSaleObserved;
         public bool NoSaleObserved {get{return noSaleObserved;}}
         bool closeAfterCombat;
+        bool emergencyRepair;
+        public bool AvoidCombat {get{return emergencyRepair&&phase!=Phase.Return&&phase!=Phase.Done;}}
+        public void PrioritizeBrokenGear(FarmObservation f){if(f!=null&&f.GearKnown&&f.GearRed&&f.Durability==0)emergencyRepair=true;}
         readonly bool repair;bool repairIssued;bool sharedService,saleRequired;
-        public QuickVendorEngine(QuickRoutePlan plan,OperationObservation start,bool repair=false,bool fromStart=false)
+        public QuickVendorEngine(QuickRoutePlan plan,OperationObservation start,bool repair=false,bool fromStart=false,bool emergencyRepair=false)
         {
             if(plan==null)throw new ArgumentNullException("plan");plan.Validate(true);var service=repair?plan.Repair:plan.Vendor;if(!service.Enabled)throw new InvalidOperationException(repair?"请先启用并填写修理NPC坐标。":"请先启用并填写售卖NPC坐标。");if(start==null||!start.Fresh||start.Farm==null||!start.Farm.Fresh)throw new InvalidOperationException("商人及背包状态不可读，请确认配套插件已加载。");
-            this.plan=plan.Clone();this.repair=repair;settings=service.Clone();settings.RequireRoute();var f=start.Farm;if(!plan.MapMatches(f)||f.InCombat||f.PlayerDead||f.PlayerGhost)throw new InvalidOperationException("商人行程须在当前地图存活脱战时开始。");outbound=QuickServicePaths.Outbound(this.plan,settings,f,!fromStart);nav=QuickServicePaths.Navigate(this.plan,outbound,f);phase=nav==null?Phase.Select:Phase.Outbound;
+            this.emergencyRepair=emergencyRepair&&start.Farm.GearKnown&&start.Farm.GearRed&&start.Farm.Durability==0;this.plan=plan.Clone();this.repair=repair;settings=service.Clone();settings.RequireRoute();var f=start.Farm;if(!plan.MapMatches(f)||f.InCombat&&!this.emergencyRepair||f.PlayerDead||f.PlayerGhost)throw new InvalidOperationException("商人行程须在当前地图存活脱战时开始。");outbound=QuickServicePaths.Outbound(this.plan,settings,f,!fromStart);nav=QuickServicePaths.Navigate(this.plan,outbound,f);phase=nav==null?Phase.Select:Phase.Outbound;
             sharedService=plan.Vendor.Enabled&&plan.Repair.Enabled&&plan.Vendor.X==plan.Repair.X&&plan.Vendor.Y==plan.Repair.Y;saleRequired=!repair||f.BagFull;
             double length=0;for(int i=1;i<outbound.Points.Count;i++)length+=NavigationMath.Distance(outbound.Points[i].X-outbound.Points[i-1].X,outbound.Points[i].Y-outbound.Points[i-1].Y,plan.Calibration.AxisScale);tripDeadline=Math.Max(360000,Math.Min(7200000,(long)(length/plan.Calibration.ForwardUnitsPerSecond*4000)+120000));
         }
@@ -49,7 +52,7 @@ namespace WoWProbe
         bool Npc(FarmObservation f){return f.TargetExists&&f.TargetIdentityKnown&&f.TargetToken!=0&&!rejected.Contains(f.TargetToken)&&f.NameHashKnown&&f.AttackabilityKnown&&!f.TargetCanAttack&&!f.TargetIsPlayer&&f.TargetDeadKnown&&!f.TargetDead&&(settings.Name.Length==0||f.TargetNameHash==TargetCatalog.HashName(settings.Name));}
         public bool Matches(QuickVendorCommand c,OperationObservation o,bool ownedChat)
         {
-            if(o==null||!o.Fresh||o.Farm==null||!o.Farm.Fresh||!o.Farm.KnownCore||o.Farm.ReadFailures!=0||!plan.MapMatches(o.Farm)||o.Farm.PlayerDead||o.Farm.PlayerGhost||o.Farm.InCombat)return false;
+            if(o==null||!o.Fresh||o.Farm==null||!o.Farm.Fresh||!o.Farm.KnownCore||o.Farm.ReadFailures!=0||!plan.MapMatches(o.Farm)||o.Farm.PlayerDead||o.Farm.PlayerGhost||o.Farm.InCombat&&!AvoidCombat)return false;
             if(!o.CursorKnown||!o.CursorEmpty||!o.ConfirmationKnown||o.ConfirmationVisible)return false;
             var f=o.Farm;if(!f.ChatOpenKnown||!ownedChat&&f.ChatOpen||!f.CastingKnown||f.Casting||f.Channeling)return false;
             if(c.Action==QuickVendorAction.Select)return true;
@@ -64,7 +67,7 @@ namespace WoWProbe
             if(now<started||now-started>tripDeadline)return C(QuickVendorAction.Stop,"录制NPC路线往返超时，停止检查路线及NPC。");
             if(o==null||!o.Fresh||o.Farm==null||!o.Farm.Fresh||!o.Farm.KnownCore||o.Farm.ReadFailures!=0||!plan.MapMatches(o.Farm)||o.Farm.PlayerDead||o.Farm.PlayerGhost)return C(QuickVendorAction.Stop,"商人行程状态或地图失效。");
             if(!o.CursorKnown||!o.CursorEmpty||!o.ConfirmationKnown||o.ConfirmationVisible)return C(QuickVendorAction.Stop,"鼠标持有物品、确认弹窗或状态未知，暂停商人操作。");
-            if(o.Farm.InCombat)return C(QuickVendorAction.None,"先处理攻击者，暂缓售卖行程。");
+            if(o.Farm.InCombat&&!AvoidCombat)return C(QuickVendorAction.None,"先处理攻击者，暂缓售卖行程。");
             if(sequence==o.Sequence)return C(QuickVendorAction.None,"等待商人状态更新。");sequence=o.Sequence;
             var f=o.Farm;
             if(detourPhase!=0&&(phase==Phase.Outbound||phase==Phase.Return))
