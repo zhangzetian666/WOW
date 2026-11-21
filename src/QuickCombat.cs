@@ -285,7 +285,7 @@ namespace WoWProbe
         }
         QuickCommand AdvanceCorpse(FarmObservation o,long now)
         {
-            var c=corpse.Step(o,now);Loots+=corpse.Loots-creditedLoots;Skins+=corpse.Skins-creditedSkins;creditedLoots=corpse.Loots;creditedSkins=corpse.Skins;
+            var c=corpse.Step(o,now,deferredCorpses.Count>0);Loots+=corpse.Loots-creditedLoots;Skins+=corpse.Skins-creditedSkins;creditedLoots=corpse.Loots;creditedSkins=corpse.Skins;
             if(corpse.Interrupted)
             {
                 if(deferredCorpses.Count>=8)return Stop("待处理尸体超过8具，停止检查持续攻击来源。");

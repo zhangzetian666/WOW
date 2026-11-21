@@ -30,7 +30,7 @@ namespace WoWProbe
             return C(QuickAction.None,"等待原尸体重新选中，不继续寻怪。",0);
         }
         QuickCommand Finish(string reason){Done=true;var c=C(QuickAction.None,reason,0);c.Report=true;return c;}
-        public QuickCommand Step(FarmObservation o,long now)
+        public QuickCommand Step(FarmObservation o,long now,bool combatPriority=false)
         {
             if(Done)return C(QuickAction.None,"尸体处理已结束。",0);
             if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||o.PlayerDead||o.PlayerGhost)return Finish("尸体状态失效，取消拾取/剥皮。");
@@ -39,7 +39,7 @@ namespace WoWProbe
                 settled=false;settledSince=-1;if(combatSince<0)combatSince=now;
                 bool attacker=o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken!=token&&!o.TargetIsPlayer&&o.TargetDeadKnown&&!o.TargetDead&&o.AttackabilityKnown&&o.TargetCanAttack;
                 bool damage=lastHealth>=0&&lastHealth<=100&&o.Health>=0&&o.Health<lastHealth;lastHealth=o.Health;
-                if(!lootIssued&&!skinIssued&&!approached&&!attacker&&!damage&&now-combatSince<2500)return C(QuickAction.None,"击杀后等待战斗标记清除，保留尸体，不继续巡航。",0);
+                if(!combatPriority&&!lootIssued&&!skinIssued&&!approached&&!attacker&&!damage&&now-combatSince<2500)return C(QuickAction.None,"击杀后等待战斗标记清除，保留尸体。",0);
                 Interrupted=true;return C(QuickAction.None,"确认新攻击或持续战斗，暂存尸体，先处理攻击者。",0);
             }
             combatSince=-1;lastHealth=o.Health;

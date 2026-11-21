@@ -271,7 +271,7 @@ namespace WoWProbe
                             {CancelQuickMovement(backend);if(plan.NoChatCombat)Pulse(backend,QuickCombatHotkeys.ActionKey(command.Action,plan),80);else if(command.Action==QuickAction.CorpseSelect&&!String.IsNullOrWhiteSpace(command.SelectName))ChatChecked(backend,"/targetexact "+command.SelectName,()=>!read().InCombat);else Chat(backend,"/targetlasttarget");}
                             else if(command.Action==QuickAction.Scan)
                             {
-                                if(read().InCombat){searchMotion.Stop();if(plan.NoChatCombat)Pulse(backend,9,80);else Chat(backend,"/targetenemy");}
+                                if(read().InCombat){searchMotion.Stop();Pulse(backend,9,80);}
                                 else Pulse(backend,command.Key,80);
                             }
                             else if(command.Action==QuickAction.Patrol)
