@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace WoWProbe
 {
-    public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin, Vanish }
+    public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin, Vanish, StealthEnter, StealthExit, StealthHold }
     public sealed class QuickCommand
     {
         public bool AttackHostile;public bool MeleeConfirmed;
@@ -28,9 +28,10 @@ namespace WoWProbe
         long lastDefenseScan=-10000;
         readonly int restBelow;readonly ushort drinkKey;
         readonly bool permitFullBags;readonly bool attackHostile;
-        public void RestInputCompleted(long now){if(resting)restHoldUntil=now+10000;}
+        public void RestInputCompleted(long now,bool ateFood=false){if(resting){restHoldUntil=now+10000;if(ateFood&&!foodStealth)enterStealthPending=true;}}
+        public bool IsStealthRecovery {get{return foodStealth||vanishHolding;}}
         public bool IsResting {get{return resting;}}
-        public bool HasActiveWork {get{return token!=0||resting;}}
+        public bool HasActiveWork {get{return token!=0||resting||vanishHolding;}}
         public static ushort ConfiguredKey(string text){string v=CleanKeys(text,true);if(v.Length>1)throw new FormatException("饮水键只能填一个按键，盗贼可留空。");return (ushort)(v.Length==0?0:v[0]=='='?187:v[0]=='-'?189:v[0]);}
         public static string CleanKeys(string keys,bool allowEmpty)
         {if(keys==null)throw new FormatException("技能序列不能为空值。");var b=new System.Text.StringBuilder();foreach(char c in keys){if(Char.IsWhiteSpace(c))continue;if(!(c>='0'&&c<='9')&&c!='-'&&c!='=')throw new FormatException("技能序列只支持0–9、-、=键，可用空格分隔。");b.Append(c);}if(b.Length>64||!allowEmpty&&b.Length==0)throw new FormatException("循环技能须为1至64个按键，开场可以留空。");return b.ToString();}
@@ -38,6 +39,7 @@ namespace WoWProbe
         readonly Stack<DeferredCorpse> deferredCorpses=new Stack<DeferredCorpse>();
         long last=-1, nextSkill, nextFace, nextScan, started, lootUntil;
         bool stopped, looted,initialRest=true,resting,food,drink,reacquired;
+        long corpseBlockedUntil;bool foodStealth,enterStealthPending,vanishHolding;
         bool urgentDefenseScan;uint vanishFailedBase;bool vanishLatched;long vanishAt=-1,vanishSafeAt=-1;
         long restHoldUntil,restStarted,missingCombatTarget=-1,missingTarget=-1,nextDefensive;
         long foodProgressAt,drinkProgressAt;int restHealth,restPower,foodRetries,drinkRetries;
@@ -78,7 +80,7 @@ namespace WoWProbe
             if(route!=null){route.TickNearbySearch(o,now,token==0&&!resting);route.ObserveCombat(o);if(!route.CanOperate(o))return Stop("角色超出巡航及追怪范围，停止追击。");}
             else if(Double.IsNaN(o.X)||Double.IsNaN(o.Y)||Math.Abs(o.X-x)>0.04||Math.Abs(o.Y-y)>0.04)return Stop("离开启动位置四坐标点范围，停止追击。");
             if(token!=0&&!looted&&!o.InCombat&&now-started>=45000)return Stop("单怪45秒未确认击杀，停止并检查朝向、距离和伤害。");
-            if(resting&&!o.InCombat&&now-restStarted>=60000)return Stop("60秒内未恢复满，检查食物和饮水绑定。");
+            if(resting&&!foodStealth&&!o.InCombat&&now-restStarted>=60000)return Stop("60秒内未恢复满，检查食物和饮水绑定。");
             if(sequence==o.Sequence)return Cmd(QuickAction.None,"等待新一帧状态。",0);sequence=o.Sequence;
             if(!o.CastingKnown)return Stop("施法状态不可读。");
             if(o.Health>=30&&vanishAt<0)vanishLatched=false;
@@ -86,10 +88,12 @@ namespace WoWProbe
             {
                 if(!o.InCombat)
                 {
-                    if(vanishSafeAt<0)vanishSafeAt=now;
-                    if(now-vanishSafeAt<3000)return Cmd(QuickAction.None,"消失后等待3秒，暂停攻击和移动。",0);
-                    vanishAt=vanishSafeAt=-1;token=0;looted=false;corpse=null;resting=false;initialRest=true;
+                    token=0;looted=false;corpse=null;resting=false;initialRest=true;
+                    if(!vanishHolding){vanishHolding=true;return Cmd(QuickAction.StealthHold,"消失脱战后保持潜行，原地等待满血，不吃喝。",0);}
+                    if(o.Health<100)return Cmd(QuickAction.None,"等待恢复条件满足，暂不执行尸体动作。",0);
+                    vanishAt=vanishSafeAt=-1;vanishHolding=false;return Cmd(QuickAction.StealthExit,"血量100%，按Q退出潜行继续打怪。",81);
                 }
+                else if(vanishHolding){vanishHolding=false;vanishAt=vanishSafeAt=-1;}
                 else if(now-vanishAt<300&&(!o.CastEventsKnown||o.CastFailed==vanishFailedBase)){vanishSafeAt=-1;return Cmd(QuickAction.None,"短暂核验消失是否脱战，保留普通攻击。",0);}
                 else if(now-vanishAt<6000){vanishSafeAt=-1;}
                 else {vanishAt=vanishSafeAt=-1;}
@@ -112,11 +116,12 @@ namespace WoWProbe
                 if(mana&&(o.Power<0||o.Power>100))return Stop("法力值不可读，不能确认饮水完成。");
                 if(!resting&&!o.InCombat&&(o.Health<(initialRest?99:restBelow)||mana&&o.Power<(initialRest?99:restBelow)))
                 {resting=true;restStarted=now;restHoldUntil=now+10000;food=drink=false;foodProgressAt=drinkProgressAt=now;restHealth=o.Health;restPower=o.Power;foodRetries=drinkRetries=0;if(route!=null)route.Interrupt(o);}
-                if(resting&&o.InCombat){resting=false;initialRest=true;food=drink=false;if(o.Casting||o.Channeling)return Cmd(QuickAction.InterruptSkin,"吃喝期间受到攻击，停止恢复施法并优先反击。",27);}
+                if(resting&&o.InCombat){foodStealth=enterStealthPending=false;resting=false;initialRest=true;food=drink=false;if(o.Casting||o.Channeling)return Cmd(QuickAction.InterruptSkin,"吃喝期间受到攻击，停止恢复施法并优先反击。",27);}
                 if(resting)
                 {
-                    if(now>=restHoldUntil&&o.Health>=100&&(!mana||o.Power>=99)){resting=false;initialRest=false;if(route!=null)route.BeginNearbySearch(o,now);return Cmd(QuickAction.None,"已观察到血量和适用法力恢复至满。",0);}
-                    if(now-restStarted>=60000)return Stop("60秒内未恢复满，检查食物和饮水绑定。");
+                    if(enterStealthPending){enterStealthPending=false;foodStealth=true;return Cmd(QuickAction.StealthEnter,"进食后按Q潜行，保持恢复。",81);}
+                    if(now>=restHoldUntil&&o.Health>=100&&(!mana||o.Power>=99)){resting=false;initialRest=false;if(route!=null)route.BeginNearbySearch(o,now);if(foodStealth){foodStealth=false;return Cmd(QuickAction.StealthExit,"满血后按Q退出潜行。",81);}return Cmd(QuickAction.None,"已观察到血量和适用法力恢复至满。",0);}
+                    if(!foodStealth&&now-restStarted>=60000)return Stop("60秒内未恢复满，检查食物和饮水绑定。");
                     if(o.Health>restHealth)foodProgressAt=now;restHealth=o.Health;
                     if(mana&&o.Power>restPower)drinkProgressAt=now;restPower=o.Power;
                     if(o.Health<100&&(!food||now-foodProgressAt>=10000&&foodRetries<3&&o.FoodCount!=0))
@@ -130,7 +135,7 @@ namespace WoWProbe
             if((o.Casting||o.Channeling)&&!(o.InCombat&&looted&&corpse!=null))return Cmd(QuickAction.None,"等待当前施法。",0);
             if(token==0&&!o.InCombat&&deferredCorpses.Count>0)
             {var pending=deferredCorpses.Pop();token=pending.Token;corpse=pending.Corpse;creditedLoots=pending.Loots;creditedSkins=pending.Skins;looted=true;corpse.Resume(o,now);return AdvanceCorpse(o,now);}
-            if(token==0&&CanInspectCorpse(o)&&o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken!=0&&!o.TargetIsPlayer&&o.TargetDeadKnown&&o.TargetDead&&(o.LootKnown&&o.Lootable||skinning&&o.SkinKnown&&o.Skinnable)&&!inspectedCorpses.Contains(o.TargetToken)&&(route==null||route.TargetAllowed(o)))
+            if(now>=corpseBlockedUntil&&token==0&&CanInspectCorpse(o)&&o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken!=0&&!o.TargetIsPlayer&&o.TargetDeadKnown&&o.TargetDead&&(o.LootKnown&&o.Lootable||skinning&&o.SkinKnown&&o.Skinnable)&&!inspectedCorpses.Contains(o.TargetToken)&&(route==null||route.TargetAllowed(o)))
             {if(route!=null)route.Interrupt(o);token=o.TargetToken;inspectedCorpses.Add(token);looted=true;started=now;corpse=new QuickCorpse(token,skinning,o,now,true);creditedLoots=creditedSkins=0;return AdvanceCorpse(o,now);}
             if(token!=0)
             {
@@ -285,11 +290,12 @@ namespace WoWProbe
         }
         QuickCommand AdvanceCorpse(FarmObservation o,long now)
         {
+            if(now<corpseBlockedUntil){inspectedCorpses.Add(token);token=0;corpse=null;looted=false;nextScan=now;return Cmd(QuickAction.None,"等待恢复条件满足，暂不执行尸体动作。",0);}
             var c=corpse.Step(o,now,deferredCorpses.Count>0);Loots+=corpse.Loots-creditedLoots;Skins+=corpse.Skins-creditedSkins;creditedLoots=corpse.Loots;creditedSkins=corpse.Skins;
             if(corpse.Interrupted)
             {
                 if(deferredCorpses.Count>=8)return Stop("待处理尸体超过8具，停止检查持续攻击来源。");
-                deferredCorpses.Push(new DeferredCorpse{Token=token,Corpse=corpse,Loots=creditedLoots,Skins=creditedSkins});token=0;corpse=null;looted=false;nextScan=now;urgentDefenseScan=true;c.Report=true;
+                corpseBlockedUntil=now+60000;inspectedCorpses.Add(token);deferredCorpses.Clear();token=0;corpse=null;looted=false;nextScan=now;urgentDefenseScan=true;c.Report=true;
                 if(!(o.Casting||o.Channeling)){urgentDefenseScan=false;c.Action=QuickAction.Scan;c.Key=9;c.Reason="拾取剥皮受攻击，立即选择附近攻击者，脱战后恢复尸体处理。";}
                 if(o.Casting||o.Channeling){c.Action=QuickAction.InterruptSkin;c.Key=27;c.Reason="剥皮期间受到攻击：取消本次施法，先处理攻击者。";}
             }
@@ -305,6 +311,8 @@ namespace WoWProbe
             if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||o.PlayerDead||o.PlayerGhost)return false;
             if(c.RouteContext!=null&&!c.RouteContext.CanOperate(o))return false;
             if(!ownedChat&&o.ChatOpenKnown&&o.ChatOpen)return false;
+            if(c.Action==QuickAction.StealthEnter||c.Action==QuickAction.StealthHold)return !o.InCombat;
+            if(c.Action==QuickAction.StealthExit)return !o.InCombat&&o.Health==100;
             if(c.Action==QuickAction.Vanish)return o.InCombat&&o.Health>0&&o.Health<15&&o.PowerType==3;
             if(c.Action==QuickAction.Skill&&!c.MeleeConfirmed&&(!o.RangeKnown||!o.TargetInRange))return false;
             if(!o.InCombat&&Contested(o)&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill||c.Action==QuickAction.RouteProbe))return false;

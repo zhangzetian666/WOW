@@ -218,7 +218,7 @@ namespace WoWProbe
                         if(brokenGear&&plan.Vendor.Enabled){plan.Repair=plan.Vendor.Clone();plan.Repair.Enabled=true;}
                         bool needRepair=plan.Repair.Enabled&&(repairFirst||brokenGear);
                         if(!observed.BagFull)suppressFullBagSale=false;
-                        if(vendorTrip==null&&(!observed.InCombat||brokenGear)&&!observed.Casting&&!observed.Channeling&&(needRepair||plan.Vendor.Enabled&&(vendorFirst||observed.BagFull&&!suppressFullBagSale)))
+                        if(vendorTrip==null&&!engine.IsStealthRecovery&&(!observed.InCombat||brokenGear)&&!observed.Casting&&!observed.Channeling&&(needRepair||plan.Vendor.Enabled&&(vendorFirst||observed.BagFull&&!suppressFullBagSale)))
                         {
                             searchMotion.Stop();CancelQuickMovement(backend);routeFollower.Interrupt(observed);vendorTrip=new QuickVendorEngine(plan,ReadOperations(),needRepair,!vendorFirst&&!repairFirst,brokenGear);if(brokenGear)autoAttackToken=uint.MaxValue;if(needRepair)repairFirst=false;else vendorFirst=false;completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;
                             engine=new QuickCombat(observed,interval,skinning,null,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),true);vendorDefending=!vendorTrip.AvoidCombat&&observed.Health<plan.RestBelowPercent;write(needRepair?"装备损坏或手动修理：前往已配置修理NPC，实际修复后返回巡航。":"开始售卖行程：前往已配置NPC坐标，确认清包后返回巡航。");
@@ -265,7 +265,8 @@ namespace WoWProbe
                         input=new GrindInputGuard(backend,()=>{var o=read();if(!(commandUsesChat?QuickCombat.MatchesChatCommand(command,o):QuickCombat.Matches(command,o)))throw new InvalidOperationException("目标状态变化，停止当前按键。");return o;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
                         try
                         {
-                            if(command.Action==QuickAction.Vanish){Pulse(backend,54,80);}
+                            if(command.Action==QuickAction.StealthHold){searchMotion.Stop();CancelQuickMovement(backend);}
+                            else if(command.Action==QuickAction.Vanish){Pulse(backend,54,80);}
                             else if(command.Action==QuickAction.ReturnToRoute){CancelQuickMovement(backend);if(plan.NoChatCombat)Pulse(backend,QuickCombatHotkeys.ActionKey(command.Action,plan),80);else ChatChecked(backend,"/stopattack",()=>!read().InCombat);}
                             else if(command.Action==QuickAction.Reacquire||command.Action==QuickAction.CorpseSelect)
                             {CancelQuickMovement(backend);if(plan.NoChatCombat)Pulse(backend,QuickCombatHotkeys.ActionKey(command.Action,plan),80);else if(command.Action==QuickAction.CorpseSelect&&!String.IsNullOrWhiteSpace(command.SelectName))ChatChecked(backend,"/targetexact "+command.SelectName,()=>!read().InCombat);else Chat(backend,"/targetlasttarget");}
@@ -295,7 +296,7 @@ namespace WoWProbe
                                 if(command.RouteMovement&&command.Action==QuickAction.Turn&&!command.PauseForward)searchMotion.Start();
                                 int hold=command.Hold>0?command.Hold:command.Action==QuickAction.Turn?260:command.Action==QuickAction.BackOff?300:command.Action==QuickAction.DetourTurn?220:command.Action==QuickAction.DetourForward?600:80;
                                 Pulse(backend,command.Key,hold);
-                                if(command.Action==QuickAction.Food||command.Action==QuickAction.Drink)engine.RestInputCompleted(clock.ElapsedMilliseconds);
+                                if(command.Action==QuickAction.Food||command.Action==QuickAction.Drink)engine.RestInputCompleted(clock.ElapsedMilliseconds,command.Action==QuickAction.Food);
                                 // F starts native approach/facing. Leave click-to-move active
                                 // between skills; subsequent observations enforce the chase leash.
                             }
