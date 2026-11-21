@@ -38,7 +38,7 @@ namespace WoWProbe
         readonly Stack<DeferredCorpse> deferredCorpses=new Stack<DeferredCorpse>();
         long last=-1, nextSkill, nextFace, nextScan, started, lootUntil;
         bool stopped, looted,initialRest=true,resting,food,drink,reacquired;
-        bool vanishLatched;long vanishAt=-1,vanishSafeAt=-1;
+        bool urgentDefenseScan;uint vanishFailedBase;bool vanishLatched;long vanishAt=-1,vanishSafeAt=-1;
         long restHoldUntil,restStarted,missingCombatTarget=-1,missingTarget=-1,nextDefensive;
         long foodProgressAt,drinkProgressAt;int restHealth,restPower,foodRetries,drinkRetries;
         double progressX,progressY; uint progressCasts; long progressAt;
@@ -90,11 +90,13 @@ namespace WoWProbe
                     if(now-vanishSafeAt<3000)return Cmd(QuickAction.None,"消失后等待3秒，暂停攻击和移动。",0);
                     vanishAt=vanishSafeAt=-1;token=0;looted=false;corpse=null;resting=false;initialRest=true;
                 }
-                else if(now-vanishAt<6000){vanishSafeAt=-1;return Cmd(QuickAction.None,"等待消失脱战，暂不攻击或吃食物。",0);}
+                else if(now-vanishAt<300&&(!o.CastEventsKnown||o.CastFailed==vanishFailedBase)){vanishSafeAt=-1;return Cmd(QuickAction.None,"短暂核验消失是否脱战，保留普通攻击。",0);}
+                else if(now-vanishAt<6000){vanishSafeAt=-1;}
                 else {vanishAt=vanishSafeAt=-1;}
             }
             if(!vanishLatched&&o.InCombat&&o.Health>0&&o.Health<15&&o.PowerType==3&&(route==null||route.Plan.UseRogueVanish))
-            {vanishLatched=true;vanishAt=now;vanishSafeAt=-1;return Cmd(QuickAction.Vanish,"血量低于15%，优先按6尝试消失。",54);}
+            {vanishLatched=true;vanishFailedBase=o.CastFailed;vanishAt=now;vanishSafeAt=-1;return Cmd(QuickAction.Vanish,"血量低于15%，优先按6尝试消失。",54);}
+            if(urgentDefenseScan){urgentDefenseScan=false;if(o.InCombat)return Cmd(QuickAction.Scan,"剥皮中断后立即选择附近攻击者。",9);}
             bool lockedDead=token!=0&&(HasDeathEvidence(o,token)||o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken==token&&o.TargetDeadKnown&&o.TargetDead);
             if(o.InCombat&&token!=0&&!looted&&!lockedDead&&!o.TargetExists){if(route!=null)route.Interrupt(o);token=0;nextScan=Math.Min(nextScan,now);}
             if(o.InCombat&&!looted&&!lockedDead&&o.TargetExists&&o.TargetDeadKnown&&!o.TargetDead&&o.TargetVictimKnown&&!o.TargetTargetsPlayer)
@@ -287,7 +289,8 @@ namespace WoWProbe
             if(corpse.Interrupted)
             {
                 if(deferredCorpses.Count>=8)return Stop("待处理尸体超过8具，停止检查持续攻击来源。");
-                deferredCorpses.Push(new DeferredCorpse{Token=token,Corpse=corpse,Loots=creditedLoots,Skins=creditedSkins});token=0;corpse=null;looted=false;c.Report=true;
+                deferredCorpses.Push(new DeferredCorpse{Token=token,Corpse=corpse,Loots=creditedLoots,Skins=creditedSkins});token=0;corpse=null;looted=false;nextScan=now;urgentDefenseScan=true;c.Report=true;
+                if(!(o.Casting||o.Channeling)){urgentDefenseScan=false;c.Action=QuickAction.Scan;c.Key=9;c.Reason="拾取剥皮受攻击，立即选择附近攻击者，脱战后恢复尸体处理。";}
                 if(o.Casting||o.Channeling){c.Action=QuickAction.InterruptSkin;c.Key=27;c.Reason="剥皮期间受到攻击：取消本次施法，先处理攻击者。";}
             }
             else if(corpse.Done){inspectedCorpses.Add(token);token=0;corpse=null;nextScan=now;if(route!=null)route.BeginNearbySearch(o,now);}
