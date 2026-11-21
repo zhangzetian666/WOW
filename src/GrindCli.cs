@@ -29,7 +29,7 @@ namespace WoWProbe
         static long capturedAt = -1; static string logPath;
         static object gate = new object();
         static StreamWriter logFile;
-        static long lastShot;
+
         static GrindInputGuard input;
         static FarmSession activeSession;
         static int visualHealth=255,visualPower=255;
@@ -126,7 +126,7 @@ namespace WoWProbe
                 nativeReport=message=>{journal.WriteLine(DateTimeOffset.Now.ToString("HH:mm:ss.fff")+" [input] "+message);journal.Flush();};
                 Action<string> write=message=>{journal.WriteLine(DateTimeOffset.Now.ToString("HH:mm:ss.fff")+" "+message);journal.Flush();report(message);};
                 frames.WriteLine("time\tsequence\thealth\tcombat\tdead\tghost\ttargetExists\ttargetToken\ttargetName\ttargetDeadKnown\ttargetDead\tattackable\tcastSuccess\tdeathToken\tdeathCount\tx\ty\tkillCreditNameHash\tkillCredits\tlootOpened\tchatOpen\tlootClosed\tskinKnown\tskinnable\tskinSuccess\tcastFailed\tfoodCount\ttargetReaction\tfacing\tclaimKnown\tclaimedByOther\ttargetCombatKnown\ttargetCombat\tvictimKnown\ttargetsPlayer\tgearKnown\tgearRed\tdurability");
-                Action<string> shot=label=>{if(!backend.IsTargetForeground())return;try{using(var bitmap=Native.Capture(client))bitmap.Save(prefix+"-"+label+".png",System.Drawing.Imaging.ImageFormat.Png);}catch(Exception ex){write("截图未保存："+ex.Message);}};
+
                 try
                 {
                     write("固定路线："+plan.Route.Name+"，路点"+plan.Route.Points.Count+"，按顺序循环；允许偏离"+(plan.CorridorWidth*100).ToString("F2")+"坐标点。");
@@ -184,14 +184,14 @@ namespace WoWProbe
                         {
                             frameSequence=observed.Sequence;
                             frames.WriteLine(String.Join("\t",new object[]{DateTimeOffset.Now.ToString("HH:mm:ss.fff"),observed.Sequence,observed.Health,observed.InCombat,observed.PlayerDead,observed.PlayerGhost,observed.TargetExists,observed.TargetToken,observed.TargetName,observed.TargetDeadKnown,observed.TargetDead,observed.TargetCanAttack,observed.CastSuccess,observed.DeathToken,observed.TargetDeaths,observed.X,observed.Y,observed.KillCreditNameHash,observed.KillCredits,observed.LootOpened,observed.ChatOpen,observed.LootClosed,observed.SkinKnown,observed.Skinnable,observed.SkinSuccess,observed.CastFailed,observed.FoodCount,observed.TargetReaction,observed.Facing,observed.TargetClaimKnown,observed.TargetClaimedByOther,observed.TargetCombatKnown,observed.TargetInCombat,observed.TargetVictimKnown,observed.TargetTargetsPlayer,observed.GearKnown,observed.GearRed,observed.Durability}));frames.Flush();
-                            if(observed.TargetExists&&observed.TargetToken!=picturedToken){picturedToken=observed.TargetToken;shot("target-"+picturedToken);write("观察目标："+observed.TargetName+" token="+picturedToken+" reaction="+observed.TargetReaction);}
+                            if(observed.TargetExists&&observed.TargetToken!=picturedToken){picturedToken=observed.TargetToken;write("观察目标："+observed.TargetName+" token="+picturedToken+" reaction="+observed.TargetReaction);}
                         }
                         if(recovery!=null||observed.PlayerDead||observed.PlayerGhost)
                         {
                             if(recovery==null)
                             {
                                 vendorTrip=null;vendorDefending=false;
-                                CancelQuickMovement(backend);shot("death-"+(recoveries+1));
+                                CancelQuickMovement(backend);
                                 if(!deathRate.TryRecover(clock.ElapsedMilliseconds))throw new InvalidOperationException("10分钟内连续三次复活后再次死亡，停止检查装备、补给及怪物强度。");recoveries++;
                                 if(observed.PlayerDead&&!observed.PlayerGhost){RouteFiles.Save(prefix+"-death-"+recoveries+".json",new System.Web.Script.Serialization.JavaScriptSerializer().Serialize(new{map_id=observed.MapId,map_mode=observed.MapMode,zone=observed.Zone,x=observed.X,y=observed.Y,recorded_at=DateTimeOffset.Now.ToString("o"),source="observed_player_death"}));write("已记录实际死亡坐标；释放后保持幽魂，回死亡点接受尸体复活，不与灵魂医者交互。");}
                                 var route=recoveryRoute;
@@ -201,7 +201,7 @@ namespace WoWProbe
                             read();var op=ReadOperations();var rc=recovery.Step(op,clock.ElapsedMilliseconds);
                             if(rc.Action==QuickRecoveryAction.Stop)throw new InvalidOperationException(rc.Reason);
                             if(rc.Action==QuickRecoveryAction.Complete)
-                            {completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;routeFollower.Resume();engine=new QuickCombat(observed,interval,skinning,routeFollower,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey));autoAttackToken=0;recovery=null;write(rc.Reason);shot("revived-"+recoveries);input=guard();continue;}
+                            {completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;routeFollower.Resume();engine=new QuickCombat(observed,interval,skinning,routeFollower,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey));autoAttackToken=0;recovery=null;write(rc.Reason);input=guard();continue;}
                             if(rc.Action==QuickRecoveryAction.None){Thread.Sleep(60);continue;}
                             write(rc.Reason);
                             input=new GrindInputGuard(backend,()=>{var f=read();if(!QuickRecovery.Matches(rc,ReadOperations()))throw new InvalidOperationException("复活动作状态变化。");return f;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
@@ -245,9 +245,9 @@ namespace WoWProbe
                         QuickCommand command=engine.Step(observed,clock.ElapsedMilliseconds);
                         if(!engine.IsResting)restMovementStopped=false;
                         else searchMotion.Stop();
-                        if(completedKills+engine.Kills!=reportedKills){reportedKills=completedKills+engine.Kills;killCounter.Record(reportedKills);CancelQuickMovement(backend);write("已确认目标死亡，窗口累计击杀="+killCounter.Total);shot("kill-"+reportedKills);}
-                        if(completedLoots+engine.Loots!=reportedLoots){reportedLoots=completedLoots+engine.Loots;write("已确认拾取窗口完成，累计拾取="+reportedLoots);shot("loot-"+reportedLoots);}
-                        if(completedSkins+engine.Skins!=reportedSkins){reportedSkins=completedSkins+engine.Skins;write("已确认剥皮成功，累计剥皮="+reportedSkins);shot("skin-"+reportedSkins);}
+                        if(completedKills+engine.Kills!=reportedKills){reportedKills=completedKills+engine.Kills;killCounter.Record(reportedKills);CancelQuickMovement(backend);write("已确认目标死亡，窗口累计击杀="+killCounter.Total);}
+                        if(completedLoots+engine.Loots!=reportedLoots){reportedLoots=completedLoots+engine.Loots;write("已确认拾取窗口完成，累计拾取="+reportedLoots);}
+                        if(completedSkins+engine.Skins!=reportedSkins){reportedSkins=completedSkins+engine.Skins;write("已确认剥皮成功，累计剥皮="+reportedSkins);}
                         if(command.Action==QuickAction.Stop){searchMotion.Stop();write(command.Reason);break;}
                         if(command.Action==QuickAction.None){if(command.Report)write(command.Reason);Pause(40);continue;}
                         bool keepMoving=!command.PauseForward&&(command.Action==QuickAction.Patrol||command.Action==QuickAction.RouteProbe||command.Action==QuickAction.Scan&&!observed.InCombat||command.Action==QuickAction.Turn&&!command.MouseTurn);
@@ -317,7 +317,7 @@ namespace WoWProbe
                         }
                     }
                     write("已停止。窗口累计击杀："+killCounter.Total+"；拾取完成："+(completedLoots+engine.Loots)+"；剥皮成功："+(completedSkins+engine.Skins)+"。按键尝试不代表成功。");
-                    shot("stop");
+                    
                 }
                 catch(Exception ex){write("停止："+ex.Message);throw;}
                 finally{try{searchMotion.Stop();}finally{try{CancelQuickMovement(backend);}finally{stream.Dispose();chatReader=null;input=null;}}}
@@ -493,7 +493,7 @@ namespace WoWProbe
                     session.Tick();
                     if (!session.IsActive) break;
                     input.Ensure();
-                    MaybeShot();
+                    
                     // Sample once per second: capability bits, real target-damage evidence and
                     // auto-attack. Without a target, FromPackets leaves range/attackability bits
                     // at false defaults, so a no-target probe cannot tell "secret" from "out of range".
@@ -998,19 +998,6 @@ namespace WoWProbe
         static double Normalize(double a)
         {
             a %= 2 * Math.PI; if (a < 0) a += 2 * Math.PI; return a;
-        }
-
-        static void MaybeShot()
-        {
-            long now = clock.ElapsedMilliseconds;
-            if (now - lastShot < 10000) return; lastShot = now;
-            try
-            {
-                Rectangle region = new Rectangle(client.X, client.Y, Math.Min(client.Width, 1600), Math.Min(client.Height, 900));
-                using (var img = Native.Capture(region))
-                    img.Save(Path.Combine(Path.GetDirectoryName(logPath), "grind-latest.png"), System.Drawing.Imaging.ImageFormat.Png);
-            }
-            catch { }
         }
 
         static void Log(string text)
