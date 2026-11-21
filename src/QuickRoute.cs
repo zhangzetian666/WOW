@@ -13,7 +13,7 @@ namespace WoWProbe
         public double CombatRadius=.02;
         public string OpeningKeys="242223",LoopKeys="2";
         public int SkillIntervalMs=750;
-        public bool AttackHostile;public bool NoChatCombat;public string StartAttackKey="1",LastTargetKey="F8",StopAttackKey="F9";
+        public bool UseRogueVanish=true;public bool AttackHostile;public bool NoChatCombat;public string StartAttackKey="1",LastTargetKey="F8",StopAttackKey="F9";
         public int RestBelowPercent=80;public string DrinkKey="";
         public QuickVendorSettings Vendor=new QuickVendorSettings();
         public QuickVendorSettings Repair=new QuickVendorSettings();
@@ -36,7 +36,7 @@ namespace WoWProbe
             {if(i>0&&NavigationMath.Distance(Route.Points[i].X-Route.Points[i-1].X,Route.Points[i].Y-Route.Points[i-1].Y,Calibration.AxisScale)<1e-8)throw new FormatException("相邻路点不能重复。");if(Route.Points[i].Tolerance>CorridorWidth/2)throw new FormatException("路点到达误差须小于路线偏离范围的一半。");if(Route.Points[i].WaitMilliseconds!=0||Route.Points[i].Action=="interact")throw new FormatException("打怪巡航路点不支持等待或商人交互动作。");}
             if(live&&!Calibration.Confirmed)throw new InvalidOperationException("请先核对本机地图与移动参数。");
         }
-        public QuickRoutePlan Clone(){return new QuickRoutePlan{SchemaVersion=SchemaVersion,AttackHostile=AttackHostile,NoChatCombat=NoChatCombat,StartAttackKey=StartAttackKey,LastTargetKey=LastTargetKey,StopAttackKey=StopAttackKey,Route=Route.Clone(),Calibration=Calibration.Clone(),CorridorWidth=CorridorWidth,CombatRadius=CombatRadius,OpeningKeys=OpeningKeys,LoopKeys=LoopKeys,SkillIntervalMs=SkillIntervalMs,RestBelowPercent=RestBelowPercent,DrinkKey=DrinkKey,Vendor=Vendor.Clone(),Repair=Repair.Clone()};}
+        public QuickRoutePlan Clone(){return new QuickRoutePlan{SchemaVersion=SchemaVersion,UseRogueVanish=UseRogueVanish,AttackHostile=AttackHostile,NoChatCombat=NoChatCombat,StartAttackKey=StartAttackKey,LastTargetKey=LastTargetKey,StopAttackKey=StopAttackKey,Route=Route.Clone(),Calibration=Calibration.Clone(),CorridorWidth=CorridorWidth,CombatRadius=CombatRadius,OpeningKeys=OpeningKeys,LoopKeys=LoopKeys,SkillIntervalMs=SkillIntervalMs,RestBelowPercent=RestBelowPercent,DrinkKey=DrinkKey,Vendor=Vendor.Clone(),Repair=Repair.Clone()};}
         public bool MapMatches(FarmObservation o){return o!=null&&o.MapId==Route.MapId&&o.MapMode==Route.MapMode&&o.Zone==Route.Zone;}
         public double DistanceToRoute(double x,double y)
         {double px,py;int end;Project(x,y,out px,out py,out end);return NavigationMath.Distance(x-px,y-py,Calibration.AxisScale);}
@@ -91,7 +91,7 @@ namespace WoWProbe
         }
         static QuickRoutePlan Load(string path,bool recording)
         {
-            var root=RouteJson.Object(RouteFiles.Load(path));RouteJson.Keys(root,"SchemaVersion,Route,Calibration,CorridorWidth,CombatRadius,OpeningKeys,LoopKeys,SkillIntervalMs,RestBelowPercent,DrinkKey,Vendor,Repair,AttackHostile,NoChatCombat,StartAttackKey,LastTargetKey,StopAttackKey","CombatRadius,OpeningKeys,LoopKeys,SkillIntervalMs,RestBelowPercent,DrinkKey,Vendor,Repair,AttackHostile,NoChatCombat,StartAttackKey,LastTargetKey,StopAttackKey");
+            var root=RouteJson.Object(RouteFiles.Load(path));RouteJson.Keys(root,"SchemaVersion,Route,Calibration,CorridorWidth,CombatRadius,OpeningKeys,LoopKeys,SkillIntervalMs,RestBelowPercent,DrinkKey,Vendor,Repair,UseRogueVanish,AttackHostile,NoChatCombat,StartAttackKey,LastTargetKey,StopAttackKey","CombatRadius,OpeningKeys,LoopKeys,SkillIntervalMs,RestBelowPercent,DrinkKey,Vendor,Repair,UseRogueVanish,AttackHostile,NoChatCombat,StartAttackKey,LastTargetKey,StopAttackKey");
             foreach(string field in new[]{"Vendor","Repair"})if(root.ContainsKey(field)){var s=RouteJson.Object(root[field]);RouteJson.Keys(s,"Enabled,X,Y,Name,Points,RouteComplete","Points,RouteComplete");if(s.ContainsKey("Points")){var ps=s["Points"] as System.Collections.Generic.List<object>;if(ps==null)throw new FormatException("NPC路线列表无效。");foreach(var point in ps)RouteJson.Keys(RouteJson.Object(point),"X,Y,Tolerance,WaitMilliseconds,Action",null);}}
             var r=RouteJson.Object(root["Route"]);RouteJson.Keys(r,"SchemaVersion,RouteId,Name,RouteType,Zone,MapId,MapMode,AllowReverse,Loop,Points",null);
             var c=RouteJson.Object(root["Calibration"]);RouteJson.Keys(c,"AxisScale,FacingSign,FacingOffset,TurnRadiansPerSecond,ForwardUnitsPerSecond,Confirmed,MapId,MapMode,Zone",null);

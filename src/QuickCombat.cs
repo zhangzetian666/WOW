@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace WoWProbe
 {
-    public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin }
+    public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin, Vanish }
     public sealed class QuickCommand
     {
         public bool AttackHostile;public bool MeleeConfirmed;
@@ -38,6 +38,7 @@ namespace WoWProbe
         readonly Stack<DeferredCorpse> deferredCorpses=new Stack<DeferredCorpse>();
         long last=-1, nextSkill, nextFace, nextScan, started, lootUntil;
         bool stopped, looted,initialRest=true,resting,food,drink,reacquired;
+        bool vanishLatched;long vanishAt=-1,vanishSafeAt=-1;
         long restHoldUntil,restStarted,missingCombatTarget=-1,missingTarget=-1,nextDefensive;
         long foodProgressAt,drinkProgressAt;int restHealth,restPower,foodRetries,drinkRetries;
         double progressX,progressY; uint progressCasts; long progressAt;
@@ -80,6 +81,20 @@ namespace WoWProbe
             if(resting&&!o.InCombat&&now-restStarted>=60000)return Stop("60秒内未恢复满，检查食物和饮水绑定。");
             if(sequence==o.Sequence)return Cmd(QuickAction.None,"等待新一帧状态。",0);sequence=o.Sequence;
             if(!o.CastingKnown)return Stop("施法状态不可读。");
+            if(o.Health>=30&&vanishAt<0)vanishLatched=false;
+            if(vanishAt>=0)
+            {
+                if(!o.InCombat)
+                {
+                    if(vanishSafeAt<0)vanishSafeAt=now;
+                    if(now-vanishSafeAt<3000)return Cmd(QuickAction.None,"消失后等待3秒，暂停攻击和移动。",0);
+                    vanishAt=vanishSafeAt=-1;token=0;looted=false;corpse=null;resting=false;initialRest=true;
+                }
+                else if(now-vanishAt<6000){vanishSafeAt=-1;return Cmd(QuickAction.None,"等待消失脱战，暂不攻击或吃食物。",0);}
+                else {vanishAt=vanishSafeAt=-1;}
+            }
+            if(!vanishLatched&&o.InCombat&&o.Health>0&&o.Health<15&&o.PowerType==3&&(route==null||route.Plan.UseRogueVanish))
+            {vanishLatched=true;vanishAt=now;vanishSafeAt=-1;return Cmd(QuickAction.Vanish,"血量低于15%，优先按6尝试消失。",54);}
             bool lockedDead=token!=0&&(HasDeathEvidence(o,token)||o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken==token&&o.TargetDeadKnown&&o.TargetDead);
             if(o.InCombat&&token!=0&&!looted&&!lockedDead&&!o.TargetExists){if(route!=null)route.Interrupt(o);token=0;nextScan=Math.Min(nextScan,now);}
             if(o.InCombat&&!looted&&!lockedDead&&o.TargetExists&&o.TargetDeadKnown&&!o.TargetDead&&o.TargetVictimKnown&&!o.TargetTargetsPlayer)
@@ -287,6 +302,7 @@ namespace WoWProbe
             if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||o.PlayerDead||o.PlayerGhost)return false;
             if(c.RouteContext!=null&&!c.RouteContext.CanOperate(o))return false;
             if(!ownedChat&&o.ChatOpenKnown&&o.ChatOpen)return false;
+            if(c.Action==QuickAction.Vanish)return o.InCombat&&o.Health>0&&o.Health<15&&o.PowerType==3;
             if(c.Action==QuickAction.Skill&&!c.MeleeConfirmed&&(!o.RangeKnown||!o.TargetInRange))return false;
             if(!o.InCombat&&Contested(o)&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill||c.Action==QuickAction.RouteProbe))return false;
             if(c.Action==QuickAction.InterruptSkin)return o.InCombat&&(o.Casting||o.Channeling);
