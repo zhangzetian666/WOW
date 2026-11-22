@@ -19,7 +19,7 @@ namespace WoWProbe
     public sealed class QuickVendorEngine
     {
         enum Phase {Outbound,Select,Open,WaitSale,Close,Return,Done}
-        readonly QuickRoutePlan plan;readonly QuickVendorSettings settings;readonly RouteDocument outbound;readonly long tripDeadline;Navigator nav;Phase phase;
+        readonly QuickRoutePlan plan;readonly QuickVendorSettings settings;readonly RouteDocument outbound;Navigator nav;Phase phase;
         readonly RouteKeyBindings movement=new RouteKeyBindings{TurnLeft=37,TurnRight=39};
         readonly System.Collections.Generic.HashSet<uint> rejected=new System.Collections.Generic.HashSet<uint>();
         public void ResumeAfterCombat(OperationObservation o,long now)
@@ -45,7 +45,6 @@ namespace WoWProbe
             if(plan==null)throw new ArgumentNullException("plan");plan.Validate(true);var service=repair?plan.Repair:plan.Vendor;if(!service.Enabled)throw new InvalidOperationException(repair?"请先启用并填写修理NPC坐标。":"请先启用并填写售卖NPC坐标。");if(start==null||!start.Fresh||start.Farm==null||!start.Farm.Fresh)throw new InvalidOperationException("商人及背包状态不可读，请确认配套插件已加载。");
             this.emergencyRepair=emergencyRepair&&start.Farm.GearKnown&&start.Farm.GearRed&&start.Farm.Durability==0;this.plan=plan.Clone();this.repair=repair;settings=service.Clone();settings.RequireRoute();var f=start.Farm;if(!plan.MapMatches(f)||f.InCombat&&!this.emergencyRepair||f.PlayerDead||f.PlayerGhost)throw new InvalidOperationException("商人行程须在当前地图存活脱战时开始。");outbound=QuickServicePaths.Outbound(this.plan,settings,f,!fromStart);nav=QuickServicePaths.Navigate(this.plan,outbound,f);phase=nav==null?Phase.Select:Phase.Outbound;
             sharedService=plan.Vendor.Enabled&&plan.Repair.Enabled&&plan.Vendor.X==plan.Repair.X&&plan.Vendor.Y==plan.Repair.Y;saleRequired=!repair||f.BagFull;
-            double length=0;for(int i=1;i<outbound.Points.Count;i++)length+=NavigationMath.Distance(outbound.Points[i].X-outbound.Points[i-1].X,outbound.Points[i].Y-outbound.Points[i-1].Y,plan.Calibration.AxisScale);tripDeadline=Math.Max(360000,Math.Min(7200000,(long)(length/plan.Calibration.ForwardUnitsPerSecond*4000)+120000));
         }
         Navigator ReturnTravel(FarmObservation f){return QuickServicePaths.Navigate(plan,QuickServicePaths.TripReturn(plan,settings,outbound,f),f);}
         QuickVendorCommand C(QuickVendorAction a,string reason){return new QuickVendorCommand{Action=a,Reason=reason,Token=token,Hash=hash};}
@@ -64,7 +63,9 @@ namespace WoWProbe
         public QuickVendorCommand Step(OperationObservation o,long now)
         {
             if(started<0){started=stateAt=now;}
-            if(now<started||now-started>tripDeadline)return C(QuickVendorAction.Stop,"录制NPC路线往返超时，停止检查路线及NPC。");
+            if(now<started)return C(QuickVendorAction.Stop,"NPC行程时钟异常。");
+            // Navigation owns per-waypoint progress/stuck checks; merchant phases own their timeouts.
+            // Do not impose a wall-clock budget on the entire outbound and return trip.
             if(o==null||!o.Fresh||o.Farm==null||!o.Farm.Fresh||!o.Farm.KnownCore||o.Farm.ReadFailures!=0||!plan.MapMatches(o.Farm)||o.Farm.PlayerDead||o.Farm.PlayerGhost)return C(QuickVendorAction.Stop,"商人行程状态或地图失效。");
             if(!o.CursorKnown||!o.CursorEmpty||!o.ConfirmationKnown||o.ConfirmationVisible)return C(QuickVendorAction.Stop,"鼠标持有物品、确认弹窗或状态未知，暂停商人操作。");
             if(o.Farm.InCombat&&!AvoidCombat)return C(QuickVendorAction.None,"先处理攻击者，暂缓售卖行程。");
