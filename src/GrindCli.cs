@@ -106,6 +106,9 @@ namespace WoWProbe
         {
             if(killCounter==null)killCounter=new QuickKillCounter();killCounter.BeginRun();
             if(plan==null)throw new InvalidOperationException("请先手动配置固定打怪巡航路线，再点击开始。");plan.Validate(true);plan=plan.Clone();
+            string vendorCheckpointPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-npc-progress.json");
+            var savedTrip=QuickVendorCheckpoint.Load(vendorCheckpointPath);
+            if(savedTrip!=null){savedTrip.Plan.Validate(true);plan=savedTrip.Plan.Clone();}
             WindowInfo window = OpenTelemetry();Native.RequireInputIntegrity(window.ProcessId);
             Action<string> nativeReport=report;var backend = new WindowsInputBackend(window, message=>nativeReport(message));
             FarmObservation anchor = Snapshot();
@@ -135,7 +138,7 @@ namespace WoWProbe
                     if(!anchor.ChatOpenKnown||anchor.ChatOpen)throw new InvalidOperationException("请先关闭聊天输入框，并确认新版插件已加载。");
                     if(!anchor.MeleeEventsKnown)throw new InvalidOperationException("游戏尚未加载普攻命中检测。请在游戏输入 /reload 后重试，避免只普攻不放技能。");
                     if(skinning&&(!anchor.SkinBindingKnown||!anchor.SkinBindingCorrect))throw new InvalidOperationException("请把当前剥皮技能放在7号技能栏，并确认按键为7；或取消勾选剥皮。");
-                    if(!vendorFirst&&!repairFirst&&!anchor.PlayerDead&&!anchor.PlayerGhost&&anchor.FoodCount<1)throw new InvalidOperationException("未确认食物键=有库存，请核对插件、栏位和食物数量后再开始。");
+                    if(savedTrip==null&&!vendorFirst&&!repairFirst&&!anchor.PlayerDead&&!anchor.PlayerGhost&&anchor.FoodCount<1)throw new InvalidOperationException("未确认食物键=有库存，请核对插件、栏位和食物数量后再开始。");
                     RouteDocument recoveryRoute=null;
                     string recoveryPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-corpse-route.json");
                     if(File.Exists(recoveryPath))
@@ -216,6 +219,7 @@ namespace WoWProbe
                         }
                         bool brokenGear=observed.GearKnown&&observed.GearRed&&observed.Durability==0;
                         if(brokenGear&&plan.Vendor.Enabled){plan.Repair=plan.Vendor.Clone();plan.Repair.Enabled=true;}
+                        if(vendorTrip==null&&savedTrip!=null){vendorTrip=new QuickVendorEngine(savedTrip,ReadOperations());vendorFirst=repairFirst=false;write("已恢复未完成NPC行程，从保存的下一未到达路点继续，不返回起点。");}
                         bool needRepair=plan.Repair.Enabled&&(repairFirst||brokenGear);
                         if(!observed.BagFull)suppressFullBagSale=false;
                         if(vendorTrip==null&&!engine.IsStealthRecovery&&(!observed.InCombat||brokenGear)&&!observed.Casting&&!observed.Channeling&&(needRepair||plan.Vendor.Enabled&&(vendorFirst||observed.BagFull&&!suppressFullBagSale)))
@@ -232,12 +236,13 @@ namespace WoWProbe
                             if(!vendorDefending)
                             {
                                 var vc=vendorTrip.Step(ReadOperations(),clock.ElapsedMilliseconds);
+                                savedTrip=vendorTrip.Checkpoint;QuickVendorCheckpoint.Save(vendorCheckpointPath,savedTrip);
                                 if(vc.Action==QuickVendorAction.Stop)throw new InvalidOperationException(vc.Reason);
                                 if(vc.Action==QuickVendorAction.Complete){suppressFullBagSale=observed.BagFull;vendorTrip=null;routeFollower.Resume();routeFollower.BeginNearbySearch(observed,clock.ElapsedMilliseconds);engine=new QuickCombat(observed,interval,skinning,routeFollower,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),suppressFullBagSale);write(vc.Reason);autoAttackToken=0;continue;}
                                 if(vc.Action==QuickVendorAction.None){Pause(60);continue;}
                                 write(vc.Reason);var activeVendor=vendorTrip;
                                 input=new GrindInputGuard(backend,()=>{var f=read();if(!activeVendor.Matches(vc,ReadOperations(),vc.Action==QuickVendorAction.Select))throw new InvalidOperationException("商人操作状态变化。");return f;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
-                                try{if(vc.Action==QuickVendorAction.Select)ChatChecked(backend,vc.Text,null);else if(vc.Action==QuickVendorAction.Goods||vc.Action==QuickVendorAction.Repair){var point=new Point(client.X+vc.Region.X+vc.Region.Width/2,client.Y+vc.Region.Y+vc.Region.Height/2);input.Click(point,false,p=>Native.ClientBounds(target)==client&&client.Contains(p),Native.MoveMouse,Native.SendMouseButton);}else Pulse(backend,vc.Key,vc.Hold);}
+                                try{if(vc.Action==QuickVendorAction.Select)ChatChecked(backend,vc.Text,null);else if(vc.Action==QuickVendorAction.Goods||vc.Action==QuickVendorAction.Repair){var point=new Point(client.X+vc.Region.X+vc.Region.Width/2,client.Y+vc.Region.Y+vc.Region.Height/2);input.Click(point,false,p=>Native.ClientBounds(target)==client&&client.Contains(p),Native.MoveMouse,Native.SendMouseButton);}else Pulse(backend,vc.Key,vc.Hold);activeVendor.ConfirmStealthCommand(vc);savedTrip=activeVendor.Checkpoint;QuickVendorCheckpoint.Save(vendorCheckpointPath,savedTrip);}
                                 catch(InvalidOperationException ex){if(ex.Message!="商人操作状态变化。"||safety.Faulted||backend.IsEmergencyPressed()||!backend.IsTargetForeground())throw;input=guard();try{var edit=read();if(edit.ChatOpenKnown&&edit.ChatOpen)Pulse(backend,27,60);}catch{}CancelQuickMovement(backend);}
                                 input=guard();Pause(50);continue;
                             }

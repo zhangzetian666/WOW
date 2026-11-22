@@ -84,8 +84,8 @@ namespace WoWProbe
             var full=Empty(p);foreach(var point in service.Points)Add(full,point);
             return Return(p,full,current);
         }
-        public static Navigator Navigate(QuickRoutePlan p,RouteDocument path,FarmObservation current,int next=0)
-        {var r=Empty(p);Add(r,new Waypoint{X=current.X,Y=current.Y,Tolerance=.0004});for(int i=next;i<path.Points.Count;i++)Add(r,path.Points[i]);r=StraightSegments(p,r);if(r.Points.Count<2)return null;return new Navigator(r,p.Calibration,false,false,0,NavigationPurpose.VendorReturn,120000){ForwardPulseLimit=3000};}
+        public static Navigator Navigate(QuickRoutePlan p,RouteDocument path,FarmObservation current,int next=0,bool unlimited=false)
+        {var r=Empty(p);Add(r,new Waypoint{X=current.X,Y=current.Y,Tolerance=.0004});for(int i=next;i<path.Points.Count;i++)Add(r,path.Points[i]);r=StraightSegments(p,r);if(r.Points.Count<2)return null;return new Navigator(r,p.Calibration,false,false,0,NavigationPurpose.VendorReturn,unlimited?long.MaxValue:120000){ForwardPulseLimit=3000};}
         public static RouteDocument StraightSegments(QuickRoutePlan p,RouteDocument path)
         {
             var r=Empty(p);if(path.Points.Count==0)return r;Add(r,path.Points[0]);int first=0;

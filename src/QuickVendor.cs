@@ -11,7 +11,7 @@ namespace WoWProbe
         public void RequireRoute(){Validate();if(!RouteComplete||Points.Count<2)throw new InvalidOperationException("请先从巡航路线附近开始录制，走到NPC旁后结束录制；旧单坐标不能直接作为NPC路线。");}
         public QuickVendorSettings Clone(){var c=(QuickVendorSettings)MemberwiseClone();c.Points=new List<Waypoint>();foreach(var p in Points)c.Points.Add(p.Clone());return c;}
     }
-    public enum QuickVendorAction {None,Key,Select,Goods,Repair,Complete,Stop}
+    public enum QuickVendorAction {None,Stealth,Key,Select,Goods,Repair,Complete,Stop}
     public sealed class QuickVendorCommand
     {public QuickVendorAction Action;public ushort Key;public int Hold=80;public string Text,Reason;public Rectangle Region;public uint Token,Hash,Cost;}
     // Opens the actual merchant and observes the user's existing auto-sell.
@@ -25,9 +25,9 @@ namespace WoWProbe
         public void ResumeAfterCombat(OperationObservation o,long now)
         {
             if(o==null||!o.Fresh||o.Farm==null||!plan.MapMatches(o.Farm))throw new InvalidOperationException("NPC路线恢复状态无效。");
-            inventoryQuietSince=-1;detourPhase=0;if((phase==Phase.Outbound||phase==Phase.Return)&&nav!=null){nav=QuickServicePaths.Navigate(plan,nav.WorkingRoute,o.Farm,nav.TargetIndex);stateAt=now;sequence=-1;return;}
+            inventoryQuietSince=-1;detourPhase=0;if((phase==Phase.Outbound||phase==Phase.Return)&&nav!=null){nav=QuickServicePaths.Navigate(plan,nav.WorkingRoute,o.Farm,nav.TargetIndex,emergencyRepair);stateAt=now;sequence=-1;return;}
             bool done=(!TwoVisits||completedVisits>=2)&&merchantVerified&&(sharedService?o.Farm.GearKnown&&o.Farm.Durability>=10000&&(!saleRequired||o.FreeSlotsKnown&&o.InventoryEventsKnown&&o.InventoryRevision!=revision&&o.FreeSlots>free&&!o.Farm.BagFull):repair?o.Farm.GearKnown&&o.Farm.Durability>=10000:o.FreeSlotsKnown&&o.InventoryEventsKnown&&o.InventoryRevision!=revision&&o.FreeSlots>free&&!o.Farm.BagFull);
-            nav=done?ReturnTravel(o.Farm):QuickServicePaths.Navigate(plan,outbound,o.Farm,outbound.Points.Count-1);phase=done?Phase.Return:nav==null?Phase.Select:Phase.Outbound;stateAt=now;sequence=-1;token=hash=0;if(done&&o.MerchantOpen){phase=Phase.Close;closed=o.MerchantClosed;closeAfterCombat=true;}if(!done){repairIssued=false;merchantVerified=false;saleAt=-1;}
+            nav=done?ReturnTravel(o.Farm):QuickServicePaths.Navigate(plan,outbound,o.Farm,outbound.Points.Count-1,emergencyRepair);phase=done?Phase.Return:nav==null?Phase.Select:Phase.Outbound;stateAt=now;sequence=-1;token=hash=0;if(done&&o.MerchantOpen){phase=Phase.Close;closed=o.MerchantClosed;closeAfterCombat=true;}if(!done){repairIssued=false;merchantVerified=false;saleAt=-1;}
         }
         long started=-1,stateAt,nextSelect,saleAt=-1;int sequence=-1,attempts;uint token,hash,revision,opened,closed;int free;
         bool TwoVisits {get{return !repair||sharedService&&saleRequired;}}
@@ -36,17 +36,30 @@ namespace WoWProbe
         long inventoryQuietSince=-1;uint quietRevision;bool noSaleObserved;
         public bool NoSaleObserved {get{return noSaleObserved;}}
         bool closeAfterCombat;
+        bool stealthRequested,stealthExitRequested;long nextStealth;
         bool emergencyRepair;
         public bool AvoidCombat {get{return emergencyRepair&&phase!=Phase.Return&&phase!=Phase.Done;}}
-        public void PrioritizeBrokenGear(FarmObservation f){if(f!=null&&f.GearKnown&&f.GearRed&&f.Durability==0)emergencyRepair=true;}
+        public void PrioritizeBrokenGear(FarmObservation f){if(f!=null&&f.GearKnown&&f.GearRed&&f.Durability==0&&!emergencyRepair){emergencyRepair=true;if(nav!=null)nav=QuickServicePaths.Navigate(plan,nav.WorkingRoute,f,nav.TargetIndex,true);}}
         readonly bool repair;bool repairIssued;bool sharedService,saleRequired;
         public QuickVendorEngine(QuickRoutePlan plan,OperationObservation start,bool repair=false,bool fromStart=false,bool emergencyRepair=false)
         {
             if(plan==null)throw new ArgumentNullException("plan");plan.Validate(true);var service=repair?plan.Repair:plan.Vendor;if(!service.Enabled)throw new InvalidOperationException(repair?"请先启用并填写修理NPC坐标。":"请先启用并填写售卖NPC坐标。");if(start==null||!start.Fresh||start.Farm==null||!start.Farm.Fresh)throw new InvalidOperationException("商人及背包状态不可读，请确认配套插件已加载。");
-            this.emergencyRepair=emergencyRepair&&start.Farm.GearKnown&&start.Farm.GearRed&&start.Farm.Durability==0;this.plan=plan.Clone();this.repair=repair;settings=service.Clone();settings.RequireRoute();var f=start.Farm;if(!plan.MapMatches(f)||f.InCombat&&!this.emergencyRepair||f.PlayerDead||f.PlayerGhost)throw new InvalidOperationException("商人行程须在当前地图存活脱战时开始。");outbound=QuickServicePaths.Outbound(this.plan,settings,f,!fromStart);nav=QuickServicePaths.Navigate(this.plan,outbound,f);phase=nav==null?Phase.Select:Phase.Outbound;
+            this.emergencyRepair=emergencyRepair&&start.Farm.GearKnown&&start.Farm.GearRed&&start.Farm.Durability==0;this.plan=plan.Clone();this.repair=repair;settings=service.Clone();settings.RequireRoute();var f=start.Farm;if(!plan.MapMatches(f)||f.InCombat&&!this.emergencyRepair||f.PlayerDead||f.PlayerGhost)throw new InvalidOperationException("商人行程须在当前地图存活脱战时开始。");outbound=QuickServicePaths.Outbound(this.plan,settings,f,!fromStart);nav=QuickServicePaths.Navigate(this.plan,outbound,f,0,this.emergencyRepair);phase=nav==null?Phase.Select:Phase.Outbound;
             sharedService=plan.Vendor.Enabled&&plan.Repair.Enabled&&plan.Vendor.X==plan.Repair.X&&plan.Vendor.Y==plan.Repair.Y;saleRequired=!repair||f.BagFull;
         }
-        Navigator ReturnTravel(FarmObservation f){return QuickServicePaths.Navigate(plan,QuickServicePaths.TripReturn(plan,settings,outbound,f),f);}
+        public QuickVendorCheckpoint Checkpoint
+        {get{return phase==Phase.Done?null:new QuickVendorCheckpoint{Plan=plan.Clone(),Outbound=outbound.Clone(),Path=nav==null?null:nav.WorkingRoute,Next=nav==null?0:nav.TargetIndex,Returning=phase==Phase.Return,Repair=repair,Emergency=emergencyRepair,StealthRequested=stealthRequested&&!stealthExitRequested};}}
+        public QuickVendorEngine(QuickVendorCheckpoint cp,OperationObservation start)
+            :this(cp.Plan,start,cp.Repair,false,cp.Emergency)
+        {
+            if(cp.Outbound==null||!cp.Plan.MapMatches(start.Farm))throw new InvalidOperationException("NPC断点地图或路线无效，保留断点等待检查。");
+            cp.Outbound.Validate();outbound=cp.Outbound.Clone();emergencyRepair=cp.Emergency;stealthRequested=cp.StealthRequested;
+            if(cp.Path!=null){cp.Path.Validate();if(cp.Next<0||cp.Next>cp.Path.Points.Count)throw new InvalidOperationException("NPC断点路点编号无效。");nav=new Navigator(cp.Path,plan.Calibration,false,false,cp.Next,NavigationPurpose.VendorReturn,emergencyRepair?long.MaxValue:120000){ForwardPulseLimit=3000};phase=cp.Returning?Phase.Return:Phase.Outbound;}
+            else {nav=null;phase=Phase.Select;}
+        }
+        public void ConfirmStealthCommand(QuickVendorCommand c)
+        {if(c.Action==QuickVendorAction.Stealth){if(phase==Phase.Outbound)stealthRequested=true;else stealthExitRequested=true;}}
+        Navigator ReturnTravel(FarmObservation f){return QuickServicePaths.Navigate(plan,QuickServicePaths.TripReturn(plan,settings,outbound,f),f,0,emergencyRepair);}
         QuickVendorCommand C(QuickVendorAction a,string reason){return new QuickVendorCommand{Action=a,Reason=reason,Token=token,Hash=hash};}
         bool Npc(FarmObservation f){return f.TargetExists&&f.TargetIdentityKnown&&f.TargetToken!=0&&!rejected.Contains(f.TargetToken)&&f.NameHashKnown&&f.AttackabilityKnown&&!f.TargetCanAttack&&!f.TargetIsPlayer&&f.TargetDeadKnown&&!f.TargetDead&&(settings.Name.Length==0||f.TargetNameHash==TargetCatalog.HashName(settings.Name));}
         public bool Matches(QuickVendorCommand c,OperationObservation o,bool ownedChat)
@@ -71,6 +84,11 @@ namespace WoWProbe
             if(o.Farm.InCombat&&!AvoidCombat)return C(QuickVendorAction.None,"先处理攻击者，暂缓售卖行程。");
             if(sequence==o.Sequence)return C(QuickVendorAction.None,"等待商人状态更新。");sequence=o.Sequence;
             var f=o.Farm;
+            if(AvoidCombat&&!stealthExitRequested&&now>=nextStealth)
+            {
+                if(phase==Phase.Outbound&&(f.StealthKnown?!f.Stealthed:!stealthRequested)&&!f.InCombat)
+                {nextStealth=now+3000;var stealth=C(QuickVendorAction.Stealth,"零耐久修理：按Q进入潜行，沿未完成路线前往NPC。");stealth.Key=81;return stealth;}
+            }
             if(detourPhase!=0&&(phase==Phase.Outbound||phase==Phase.Return))
             {
                 if(detourPhase==1)detourFacing=f.Facing;
@@ -87,6 +105,7 @@ namespace WoWProbe
             if(phase==Phase.Select)
             {
                 if(!o.FreeSlotsKnown||!o.InventoryEventsKnown||!o.MerchantKnown)return C(QuickVendorAction.Stop,"商人或背包事件不可读，不能确认售卖。");
+                if(Npc(f)&&AvoidCombat&&(f.StealthKnown?f.Stealthed:stealthRequested&&!stealthExitRequested)){if(now<nextStealth)return C(QuickVendorAction.None,"等待退出潜行状态后与NPC交互。");nextStealth=now+3000;var exit=C(QuickVendorAction.Stealth,"已抵达NPC，按Q退出潜行后交互修理。");exit.Key=81;return exit;}
                 if(Npc(f)){token=f.TargetToken;hash=f.TargetNameHash;free=o.FreeSlots;revision=o.InventoryRevision;opened=o.MerchantOpened;phase=Phase.Open;stateAt=now;var c=C(QuickVendorAction.Key,"与已核验的非玩家NPC交互。");c.Key=70;return c;}
                 if(now<nextSelect)return C(QuickVendorAction.None,"等待选择附近商人。");if(++attempts>8)return C(QuickVendorAction.Stop,"未选中商人；请填写NPC名称或核对坐标。");nextSelect=now+1500;var select=C(QuickVendorAction.Select,"在商人坐标选择附近友方NPC。");select.Text=settings.Name.Length>0?"/targetexact "+settings.Name:"/targetfriend";return select;
             }
