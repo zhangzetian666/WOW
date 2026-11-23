@@ -21,7 +21,7 @@ namespace WoWProbe
         uint skippedToken;long skipUntil;
         readonly HashSet<uint> inspectedCorpses=new HashSet<uint>();
         string lockedTargetName;
-        readonly string openingKeys,loopKeys;int loopIndex;
+        string openingKeys,loopKeys;readonly QuickSkillRows skillRows;int loopIndex;
         bool openingPending;uint openingCast;int sliceRecovery;uint sliceCast;char retryFinisher;
         bool meleeConfirmed;uint meleeBaseline;
         int contactHealth=255;
@@ -55,17 +55,17 @@ namespace WoWProbe
         public QuickCombat(FarmObservation initial,int interval,bool skinning):this(initial,interval,skinning,null){}
         public QuickCombat(FarmObservation initial,int interval,bool skinning,QuickRouteFollower route)
             :this(initial,interval,skinning,route,"242223","2"){}
-        public QuickCombat(FarmObservation initial,int interval,bool skinning,QuickRouteFollower route,string openingKeys,string loopKeys,int restBelow=80,ushort drinkKey=0,bool permitFullBags=false)
+        public QuickCombat(FarmObservation initial,int interval,bool skinning,QuickRouteFollower route,string openingKeys,string loopKeys,int restBelow=80,ushort drinkKey=0,bool permitFullBags=false,string[] skillRows=null)
         {
             if(initial==null||!initial.Fresh||!initial.KnownCore)throw new InvalidOperationException("需要连续有效的插件数据。");
             if(interval<100||interval>5000)throw new ArgumentOutOfRangeException("interval");
-            this.openingKeys=CleanKeys(openingKeys,true);this.loopKeys=CleanKeys(loopKeys,false);
+            this.skillRows=skillRows==null?null:new QuickSkillRows(skillRows);this.openingKeys=CleanKeys(openingKeys,true);this.loopKeys=CleanKeys(loopKeys,false);
             this.permitFullBags=permitFullBags;this.attackHostile=route!=null&&route.Plan.AttackHostile;
             if(restBelow<30||restBelow>95)throw new ArgumentOutOfRangeException("restBelow");if(drinkKey!=0&&!((drinkKey>=48&&drinkKey<=57)||drinkKey==187||drinkKey==189))throw new ArgumentException("Invalid drink key.");this.restBelow=restBelow;this.drinkKey=drinkKey;
             map=initial.MapId;mode=initial.MapMode;zone=initial.Zone;x=initial.X;y=initial.Y;this.interval=interval;this.skinning=skinning;this.route=route;
         }
         QuickCommand Cmd(QuickAction a,string r,ushort k)
-        {return new QuickCommand{AttackHostile=attackHostile,Action=a,Reason=r,Key=k,Token=token,RouteContext=route,CombatRecovery=escapeCombat&&(a==QuickAction.BackOff||a==QuickAction.DetourTurn||a==QuickAction.DetourForward)};}
+        {return new QuickCommand{Report=skillRows!=null&&r.StartsWith("锁定怪物："),AttackHostile=attackHostile,Action=a,Reason=r,Key=k,Token=token,RouteContext=route,CombatRecovery=escapeCombat&&(a==QuickAction.BackOff||a==QuickAction.DetourTurn||a==QuickAction.DetourForward)};}
         QuickCommand Stop(string reason){stopped=true;return Cmd(QuickAction.Stop,reason,0);}
         public QuickCommand Step(FarmObservation o,long now)
         {
@@ -225,7 +225,7 @@ namespace WoWProbe
                 return Cmd(QuickAction.None,"等待下一拍技能。",0);
             }
             if(ShouldAcquire(o,now))
-            {if(route!=null)route.Interrupt(o);token=o.TargetToken;lockedTargetName=o.TargetName;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;meleeConfirmed=false;contactHealth=o.Health;meleeBaseline=o.MeleeHits;openingPending=false;sliceRecovery=0;opening=loopIndex=deadFrames=escapes=escapePhase=combatEscapes=0;escapeCombat=false;combatCastAt=now;combatCasts=o.CastSuccess;patrolPending=searchTurning=false;blockedWalks=searchEscapes=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName,0);}
+            {if(route!=null)route.Interrupt(o);token=o.TargetToken;if(skillRows!=null){skillRows.Choose();this.openingKeys="";this.loopKeys=skillRows.Keys;}lockedTargetName=o.TargetName;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;meleeConfirmed=false;contactHealth=o.Health;meleeBaseline=o.MeleeHits;openingPending=false;sliceRecovery=0;opening=loopIndex=deadFrames=escapes=escapePhase=combatEscapes=0;escapeCombat=false;combatCastAt=now;combatCasts=o.CastSuccess;patrolPending=searchTurning=false;blockedWalks=searchEscapes=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName+(skillRows==null?"":"；随机技能行"+(skillRows.Selected+1)+"="+skillRows.Keys),0);}
             if(route!=null&&!o.InCombat)
             {
                 if((route.SearchingNearby||!route.Returning)&&now>=nextScan){nextScan=now+1200;return Cmd(QuickAction.Scan,"移动中扫描附近怪物；附近无目标再前往巡航点。",9);}

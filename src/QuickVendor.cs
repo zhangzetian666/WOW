@@ -19,7 +19,8 @@ namespace WoWProbe
     public sealed class QuickVendorEngine
     {
         enum Phase {Outbound,Select,Open,WaitSale,Close,Return,Done}
-        readonly QuickRoutePlan plan;readonly QuickVendorSettings settings;readonly RouteDocument outbound;Navigator nav;Phase phase;
+        readonly QuickRoutePlan plan;readonly QuickVendorSettings settings;readonly RouteDocument outbound;RouteDocument returnVariant;public int OutboundChoice,ReturnChoice;
+        public string RouteSummary {get{return "NPC去程="+QuickRandom.Label(OutboundChoice)+"；返程="+QuickRandom.Label(ReturnChoice);}}Navigator nav;Phase phase;
         readonly RouteKeyBindings movement=new RouteKeyBindings{TurnLeft=37,TurnRight=39};
         readonly System.Collections.Generic.HashSet<uint> rejected=new System.Collections.Generic.HashSet<uint>();
         public void ResumeAfterCombat(OperationObservation o,long now)
@@ -44,22 +45,24 @@ namespace WoWProbe
         public QuickVendorEngine(QuickRoutePlan plan,OperationObservation start,bool repair=false,bool fromStart=false,bool emergencyRepair=false)
         {
             if(plan==null)throw new ArgumentNullException("plan");plan.Validate(true);var service=repair?plan.Repair:plan.Vendor;if(!service.Enabled)throw new InvalidOperationException(repair?"请先启用并填写修理NPC坐标。":"请先启用并填写售卖NPC坐标。");if(start==null||!start.Fresh||start.Farm==null||!start.Farm.Fresh)throw new InvalidOperationException("商人及背包状态不可读，请确认配套插件已加载。");
-            this.emergencyRepair=emergencyRepair&&start.Farm.GearKnown&&start.Farm.GearRed&&start.Farm.Durability==0;this.plan=plan.Clone();this.repair=repair;settings=service.Clone();settings.RequireRoute();var f=start.Farm;if(!plan.MapMatches(f)||f.InCombat&&!this.emergencyRepair||f.PlayerDead||f.PlayerGhost)throw new InvalidOperationException("商人行程须在当前地图存活脱战时开始。");outbound=QuickServicePaths.Outbound(this.plan,settings,f,!fromStart);nav=QuickServicePaths.Navigate(this.plan,outbound,f,0,this.emergencyRepair);phase=nav==null?Phase.Select:Phase.Outbound;
+            this.emergencyRepair=emergencyRepair&&start.Farm.GearKnown&&start.Farm.GearRed&&start.Farm.Durability==0;this.plan=plan.Clone();this.repair=repair;settings=service.Clone();settings.RequireRoute();if(plan.RandomRoutes){var variants=QuickRouteVariants.For(plan,QuickRouteVariants.Service(plan,settings),10);OutboundChoice=QuickRandom.Next(variants.Count);ReturnChoice=QuickRandom.Except(variants.Count,OutboundChoice);settings.Points=variants[OutboundChoice].Clone().Points;returnVariant=variants[ReturnChoice].Clone();}var f=start.Farm;if(!plan.MapMatches(f)||f.InCombat&&!this.emergencyRepair||f.PlayerDead||f.PlayerGhost)throw new InvalidOperationException("商人行程须在当前地图存活脱战时开始。");outbound=QuickServicePaths.Outbound(this.plan,settings,f,!fromStart);nav=QuickServicePaths.Navigate(this.plan,outbound,f,0,this.emergencyRepair);phase=nav==null?Phase.Select:Phase.Outbound;
             sharedService=plan.Vendor.Enabled&&plan.Repair.Enabled&&plan.Vendor.X==plan.Repair.X&&plan.Vendor.Y==plan.Repair.Y;saleRequired=!repair||f.BagFull;
         }
         public QuickVendorCheckpoint Checkpoint
-        {get{return phase==Phase.Done?null:new QuickVendorCheckpoint{Plan=plan.Clone(),Outbound=outbound.Clone(),Path=nav==null?null:nav.WorkingRoute,Next=nav==null?0:nav.TargetIndex,Returning=phase==Phase.Return,Repair=repair,Emergency=emergencyRepair,StealthRequested=stealthRequested&&!stealthExitRequested};}}
+        {get{return phase==Phase.Done?null:new QuickVendorCheckpoint{Plan=plan.Clone(),Outbound=outbound.Clone(),ReturnVariant=returnVariant==null?null:returnVariant.Clone(),OutboundChoice=OutboundChoice,ReturnChoice=ReturnChoice,Path=nav==null?null:nav.WorkingRoute,Next=nav==null?0:nav.TargetIndex,Returning=phase==Phase.Return,Repair=repair,Emergency=emergencyRepair,StealthRequested=stealthRequested&&!stealthExitRequested};}}
+        static QuickRoutePlan RestorePlan(QuickRoutePlan p){var copy=p.Clone();copy.RandomRoutes=false;return copy;}
         public QuickVendorEngine(QuickVendorCheckpoint cp,OperationObservation start)
-            :this(cp.Plan,start,cp.Repair,false,cp.Emergency)
+            :this(RestorePlan(cp.Plan),start,cp.Repair,false,cp.Emergency)
         {
+            plan=cp.Plan.Clone();
             if(cp.Outbound==null||!cp.Plan.MapMatches(start.Farm))throw new InvalidOperationException("NPC断点地图或路线无效，保留断点等待检查。");
-            cp.Outbound.Validate();outbound=cp.Outbound.Clone();emergencyRepair=cp.Emergency;stealthRequested=cp.StealthRequested;
+            cp.Outbound.Validate();outbound=cp.Outbound.Clone();returnVariant=cp.ReturnVariant==null?null:cp.ReturnVariant.Clone();OutboundChoice=cp.OutboundChoice;ReturnChoice=cp.ReturnChoice;emergencyRepair=cp.Emergency;stealthRequested=cp.StealthRequested;
             if(cp.Path!=null){cp.Path.Validate();if(cp.Next<0||cp.Next>cp.Path.Points.Count)throw new InvalidOperationException("NPC断点路点编号无效。");nav=new Navigator(cp.Path,plan.Calibration,false,false,cp.Next,NavigationPurpose.VendorReturn,emergencyRepair?long.MaxValue:120000){ForwardPulseLimit=3000};phase=cp.Returning?Phase.Return:Phase.Outbound;}
             else {nav=null;phase=Phase.Select;}
         }
         public void ConfirmStealthCommand(QuickVendorCommand c)
         {if(c.Action==QuickVendorAction.Stealth){if(phase==Phase.Outbound)stealthRequested=true;else stealthExitRequested=true;}}
-        Navigator ReturnTravel(FarmObservation f){return QuickServicePaths.Navigate(plan,QuickServicePaths.TripReturn(plan,settings,outbound,f),f,0,emergencyRepair);}
+        Navigator ReturnTravel(FarmObservation f){return QuickServicePaths.Navigate(plan,returnVariant==null?QuickServicePaths.TripReturn(plan,settings,outbound,f):QuickServicePaths.Return(plan,returnVariant,f),f,0,emergencyRepair);}
         QuickVendorCommand C(QuickVendorAction a,string reason){return new QuickVendorCommand{Action=a,Reason=reason,Token=token,Hash=hash};}
         bool Npc(FarmObservation f){return f.TargetExists&&f.TargetIdentityKnown&&f.TargetToken!=0&&!rejected.Contains(f.TargetToken)&&f.NameHashKnown&&f.AttackabilityKnown&&!f.TargetCanAttack&&!f.TargetIsPlayer&&f.TargetDeadKnown&&!f.TargetDead&&(settings.Name.Length==0||f.TargetNameHash==TargetCatalog.HashName(settings.Name));}
         public bool Matches(QuickVendorCommand c,OperationObservation o,bool ownedChat)
@@ -100,7 +103,7 @@ namespace WoWProbe
             if(phase==Phase.Outbound||phase==Phase.Return)
             {
                 if(nav==null){phase=phase==Phase.Outbound?Phase.Select:Phase.Done;stateAt=now;}
-                else{var n=nav.Step(new NavigationSample{Fresh=f.Fresh,KnownCore=f.KnownCore,ReadFailures=f.ReadFailures,X=f.X,Y=f.Y,Facing=f.Facing,MapId=f.MapId,MapMode=f.MapMode,Zone=f.Zone,Sequence=f.Sequence,BagFull=f.BagFull},now);if(n.Action==NavigationAction.Jump||n.Action==NavigationAction.StrafeLeft){detourPhase=1;var back=C(QuickVendorAction.Key,"NPC路线前进无位移：先后退，再转向绕开障碍。");back.Key=83;back.Hold=250;return back;}if(n.Action==NavigationAction.Stop)return C(QuickVendorAction.Stop,"商人行程受阻："+n.Reason);if(n.Action==NavigationAction.Completed){nav=null;phase=phase==Phase.Outbound?Phase.Select:Phase.Done;stateAt=now;}else if(n.Action!=NavigationAction.None){var c=C(QuickVendorAction.Key,phase==Phase.Outbound?"沿已录制路线前往NPC，第"+(n.TargetIndex+1)+"个路点。":"沿去程逆序返回，第"+(n.TargetIndex+1)+"个路点。");c.Key=movement.For(n.Action);c.Hold=n.HoldMilliseconds;return c;}else return C(QuickVendorAction.None,n.Reason);}
+                else{var n=nav.Step(new NavigationSample{Fresh=f.Fresh,KnownCore=f.KnownCore,ReadFailures=f.ReadFailures,X=f.X,Y=f.Y,Facing=f.Facing,MapId=f.MapId,MapMode=f.MapMode,Zone=f.Zone,Sequence=f.Sequence,BagFull=f.BagFull},now);if(n.Action==NavigationAction.Jump||n.Action==NavigationAction.StrafeLeft){detourPhase=1;var back=C(QuickVendorAction.Key,"NPC路线前进无位移：先后退，再转向绕开障碍。");back.Key=83;back.Hold=250;return back;}if(n.Action==NavigationAction.Stop)return C(QuickVendorAction.Stop,"商人行程受阻："+n.Reason);if(n.Action==NavigationAction.Completed){nav=null;phase=phase==Phase.Outbound?Phase.Select:Phase.Done;stateAt=now;}else if(n.Action!=NavigationAction.None){var c=C(QuickVendorAction.Key,phase==Phase.Outbound?"沿已录制路线前往NPC，第"+(n.TargetIndex+1)+"个路点。":"NPC返程（"+QuickRandom.Label(ReturnChoice)+"），第"+(n.TargetIndex+1)+"个路点。");c.Key=movement.For(n.Action);c.Hold=n.HoldMilliseconds;return c;}else return C(QuickVendorAction.None,n.Reason);}
             }
             if(phase==Phase.Select)
             {

@@ -58,7 +58,7 @@ namespace WoWProbe
                         {
                             var bytes=PixelCodec.Decode(screen,4,4,8);var packet=ProbePacket.Decode(bytes);
                             if(packet.TargetName!="TEST" || packet.Zone!="SIMULATION" || packet.FreeSlots!=16 || packet.Health!=80)throw new Exception("Actual screen capture did not match known fixture");
-                            var report=new {kind="local_simulation_not_game_validation",screen_capture=true,packet_decoded=true,input_emitted=false,telemetry=ReportData.From(packet)};
+                            var report=new {kind="local_simulation_not_game_validation",screen_capture=true,packet_decoded=true,input_emitted=false,telemetry=new{packet.Health,packet.TargetName,packet.Zone,packet.FreeSlots}};
                             File.WriteAllText(Path.Combine(directory,"smoke-test.json"),new JavaScriptSerializer().Serialize(report),new UTF8Encoding(true));
                         }
                         exit=0;

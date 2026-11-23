@@ -11,6 +11,10 @@ namespace WoWProbe
         readonly NumericUpDown mode=N(1,3,1,0),corridor=N(.05m,2,.5m,2),tolerance=N(.01m,.5m,.1m,2),axis=N(.1m,10,1.5m,3),offset=N(-6.2832m,6.2832m,0,4),turn=N(.1m,10,5.85m,3),speed=N(.0001m,.2m,.008m,4);
         readonly NumericUpDown chase=N(.05m,5,2,2);
         readonly TextBox openingKeys=new TextBox{Text="242223",Width=160},loopKeys=new TextBox{Text="2",Width=160};
+        readonly TextBox[] extraSkillRows=new[]{new TextBox{Width=160},new TextBox{Width=160},new TextBox{Width=160},new TextBox{Width=160}};
+        readonly CheckBox randomRoutes=new CheckBox{Text="启用随机路线：巡航20条、NPC10条、跑尸5条变体",AutoSize=true,Checked=true};
+        readonly CheckBox timedBreaks=new CheckBox{Text="定时下线休息：2小时加随机时长，休息13/15/18分钟后上线",AutoSize=true,Checked=true};
+        readonly NumericUpDown routeVariation=N(.01m,.2m,.06m,2);int variationSeed=20261123;
         readonly CheckBox rogueVanish=new CheckBox{Text="盗贼保命：低于15%按6消失，脱战3秒后吃食物",Checked=true,AutoSize=true};
         readonly CheckBox attackHostile=new CheckBox{Text="主动攻击红名怪（不勾选只主动打黄名怪）",AutoSize=true};
         readonly CheckBox noChatCombat=new CheckBox{Text="战斗、拾取、剥皮使用快捷键，不开聊天框（先绑定以下按键）",AutoSize=true};
@@ -47,7 +51,11 @@ namespace WoWProbe
             tabs.TabPages.Add(ServiceTab(true));
             var corpseTab=new TabPage("跑尸路线");var corpsePanel=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(10),AutoScroll=true};corpseTab.Controls.Add(corpsePanel);corpsePanel.Controls.Add(new Label{AutoSize=true,MaximumSize=new Size(760,0),Text="在墓地点击开始录制，绕过障碍走到打怪区后点击结束录制即可保存；存活或灵魂状态均可，中途复活不影响录制。\n录制期间不会自动移动。死亡后沿此路线跑尸，不与灵魂医者复活。路线单独保存在 quick-corpse-route.json。"});corpsePanel.Controls.Add(corpseRoute);tabs.TabPages.Add(corpseTab);
             if(File.Exists(CorpsePath)){try{var r=RouteStore.Load(CorpsePath);if(r.RouteType=="corpse_run"){corpseSettings=new QuickVendorSettings{Enabled=true,RouteComplete=true,Points=r.Points,X=r.Points[r.Points.Count-1].X,Y=r.Points[r.Points.Count-1].Y};corpseRoute.Bind(corpseSettings);}}catch(Exception ex){corpsePanel.Controls.Add(new Label{AutoSize=true,Text="旧跑尸路线未载入："+ex.Message});}}
-            var sk1=Row();sk1.AutoSize=true;L(sk1,"每只怪开场一次（可留空）");sk1.Controls.Add(openingKeys);skillPanel.Controls.Add(sk1);var sk2=Row();sk2.AutoSize=true;L(sk2,"之后重复循环");sk2.Controls.Add(loopKeys);L(sk2,"技能间隔（秒）");sk2.Controls.Add(skillSeconds);skillPanel.Controls.Add(sk2);skillPanel.Controls.Add(new Label{AutoSize=true,Text="例如循环填242223，间隔填0.75，就每0.75秒尝试下一键并循环。\n开场填242223、循环填2，则每只怪先打242223，之后持续2。\n支持0–9、-、=键；新怪重新从开场开始。发送尝试不等于技能施放成功。"});
+            for(int i=0;i<5;i++){var row=Row();row.AutoSize=true;L(row,"技能行"+(i+1));row.Controls.Add(i==0?openingKeys:extraSkillRows[i-1]);skillPanel.Controls.Add(row);}
+            var sk2=Row();sk2.AutoSize=true;L(sk2,"技能间隔（秒）");sk2.Controls.Add(skillSeconds);skillPanel.Controls.Add(sk2);
+            skillPanel.Controls.Add(new Label{AutoSize=true,Text="每只新怪随机选择一条非空行，本次战斗循环执行该行；日志显示行号。\n支持0–9、-、=；至少填写一行。终结技4/5失败仍先补2。"});
+            var variationTab=new TabPage("随机路线与休息");var variationPanel=new FlowLayoutPanel{Dock=DockStyle.Fill,FlowDirection=FlowDirection.TopDown,WrapContents=false,Padding=new Padding(10),AutoScroll=true};variationTab.Controls.Add(variationPanel);tabs.TabPages.Add(variationTab);variationPanel.Controls.Add(randomRoutes);var variationRow=Row();variationRow.AutoSize=true;L(variationRow,"路线最大偏移（坐标点）");variationRow.Controls.Add(routeVariation);variationPanel.Controls.Add(variationRow);variationPanel.Controls.Add(timedBreaks);variationPanel.Controls.Add(B("生成并保存随机路线",ExportVariants));variationPanel.Controls.Add(new Label{AutoSize=true,MaximumSize=new Size(760,0),Text="原路线保留；变体保留起终点和原转角，仅在路段内添加邻近点。附近坐标仍需实测通行性。\n巡航每圈重新选择；NPC去返程选择不同编号；跑尸每次选择。\n在线时长包含售卖、修理和跑尸，额外随机时长不超过120分钟。确认角色菜单后才开始离线计时。\n需要Windows文字识别组件；无法确认菜单时等待并记录，不盲目回车。停止/F12取消自动运行。"});
+
             var root=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=4,ColumnCount=1};root.RowStyles.Add(new RowStyle(SizeType.Absolute,34));root.RowStyles.Add(new RowStyle(SizeType.Absolute,35));root.RowStyles.Add(new RowStyle(SizeType.Percent,100));root.RowStyles.Add(new RowStyle(SizeType.Absolute,32));routeTab.Controls.Add(root);
             var names=Row();root.Controls.Add(names,0,0);L(names,"名称");names.Controls.Add(routeName);L(names,"允许偏离（坐标点）");names.Controls.Add(corridor);L(names,"到点误差");names.Controls.Add(tolerance);
             var buttons=Row();root.Controls.Add(buttons,0,1);buttons.AutoScroll=true;buttons.WrapContents=false;buttons.Controls.Add(B("新建巡航路线",NewRoute));buttons.Controls.Add(B("已有巡航路线",LoadSavedRoute));buttons.Controls.Add(B("保存当前巡航点",CapturePoint));buttons.Controls.Add(B("闭合到起点",CloseLoop));buttons.Controls.Add(B("删除所选点",Delete));buttons.Controls.Add(B("载入方案",LoadPlanFile));buttons.Controls.Add(B("保存方案",Save));
@@ -73,7 +81,7 @@ namespace WoWProbe
         void ApplyService(bool repair,QuickVendorSettings s)
         {(repair?repairEnabled:vendorEnabled).Checked=s.Enabled;(repair?repairX:vendorX).Value=(decimal)s.X*100;(repair?repairY:vendorY).Value=(decimal)s.Y*100;(repair?repairName:vendorName).Text=s.Name;(repair?repairRoute:vendorRoute).Bind(s);}
         QuickServiceRoutePanel CreateServicePanel(bool repair)
-        {return new QuickServiceRoutePanel(Current,()=>readCurrent!=null?readCurrent():GrindCli.ReadTelemetry(),ReadEditor,()=>ServiceSettings(repair),s=>{ApplyService(repair,s);if(s.RouteComplete)ApplyService(!repair,s.Clone());},()=>QuickRoutePlan.SaveRecording(recordingPath,ReadEditor()),UpdateRecordingState,()=>repair?vendorRoute!=null&&vendorRoute.IsRecording:repairRoute!=null&&repairRoute.IsRecording,readCurrent==null);}
+        {return new QuickServiceRoutePanel(Current,()=>readCurrent!=null?readCurrent():GrindCli.ReadTelemetry(),ReadEditor,()=>ServiceSettings(repair),s=>{ApplyService(repair,s);if(s.RouteComplete)ApplyService(!repair,s.Clone());},()=>{QuickRoutePlan.SaveRecording(recordingPath,ReadEditor());AutoExport();},UpdateRecordingState,()=>repair?vendorRoute!=null&&vendorRoute.IsRecording:repairRoute!=null&&repairRoute.IsRecording,readCurrent==null);}
         void UpdateRecordingState()
         {
             bool active=RecordingServiceRoute;foreach(TabPage page in tabs.TabPages)page.Enabled=!active||page.Text=="自动售卖"&&vendorRoute.IsRecording||page.Text=="自动修理"&&repairRoute.IsRecording||page.Text=="跑尸路线"&&corpseRoute.IsRecording;
@@ -100,7 +108,7 @@ namespace WoWProbe
                 if(!Double.TryParse(Convert.ToString(row.Cells[1].Value),NumberStyles.Float,CultureInfo.InvariantCulture,out x)||!Double.TryParse(Convert.ToString(row.Cells[2].Value),NumberStyles.Float,CultureInfo.InvariantCulture,out y)||!NavigationMath.InRange(x,0,100)||!NavigationMath.InRange(y,0,100))throw new FormatException("第"+(row.Index+1)+"点必须输入0–100的X、Y坐标。");
                 r.Points.Add(new Waypoint{X=x/100,Y=y/100,Tolerance=(double)tolerance.Value/100});
             }
-            var p=new QuickRoutePlan{UseRogueVanish=rogueVanish.Checked,AttackHostile=attackHostile.Checked,NoChatCombat=noChatCombat.Checked,StartAttackKey=startAttackKey.Text.Trim(),LastTargetKey=lastTargetKey.Text.Trim(),StopAttackKey=stopAttackKey.Text.Trim(),Route=r,CorridorWidth=(double)corridor.Value/100,CombatRadius=(double)chase.Value/100,OpeningKeys=QuickCombat.CleanKeys(openingKeys.Text,true),LoopKeys=QuickCombat.CleanKeys(loopKeys.Text,false),SkillIntervalMs=(int)(skillSeconds.Value*1000),RestBelowPercent=(int)restBelow.Value,DrinkKey=drinkKey.Text,Calibration=new NavigationCalibration{MapId=id,MapMode=r.MapMode,Zone=r.Zone,AxisScale=(double)axis.Value,FacingSign=sign.SelectedIndex==0?-1:1,FacingOffset=(double)offset.Value,TurnRadiansPerSecond=(double)turn.Value,ForwardUnitsPerSecond=(double)speed.Value,Confirmed=confirmed.Checked}};
+            var p=new QuickRoutePlan{SkillRows=new[]{openingKeys.Text,extraSkillRows[0].Text,extraSkillRows[1].Text,extraSkillRows[2].Text,extraSkillRows[3].Text},RandomRoutes=randomRoutes.Checked,TimedBreaks=timedBreaks.Checked,RouteVariation=(double)routeVariation.Value/100,RandomRouteSeed=variationSeed,UseRogueVanish=rogueVanish.Checked,AttackHostile=attackHostile.Checked,NoChatCombat=noChatCombat.Checked,StartAttackKey=startAttackKey.Text.Trim(),LastTargetKey=lastTargetKey.Text.Trim(),StopAttackKey=stopAttackKey.Text.Trim(),Route=r,CorridorWidth=(double)corridor.Value/100,CombatRadius=(double)chase.Value/100,OpeningKeys=QuickCombat.CleanKeys(openingKeys.Text,true),LoopKeys=QuickCombat.CleanKeys(loopKeys.Text,false),SkillIntervalMs=(int)(skillSeconds.Value*1000),RestBelowPercent=(int)restBelow.Value,DrinkKey=drinkKey.Text,Calibration=new NavigationCalibration{MapId=id,MapMode=r.MapMode,Zone=r.Zone,AxisScale=(double)axis.Value,FacingSign=sign.SelectedIndex==0?-1:1,FacingOffset=(double)offset.Value,TurnRadiansPerSecond=(double)turn.Value,ForwardUnitsPerSecond=(double)speed.Value,Confirmed=confirmed.Checked}};
             p.Vendor=ServiceSettings(false);p.Repair=ServiceSettings(true);
             if(p.Vendor.RouteComplete&&!p.Repair.RouteComplete){p.Repair=p.Vendor.Clone();}
             else if(p.Repair.RouteComplete&&!p.Vendor.RouteComplete){p.Vendor=p.Repair.Clone();}
@@ -113,7 +121,7 @@ namespace WoWProbe
             routeName.Text=p.Route.Name;mapId.Text=p.Route.MapId.ToString();mode.Value=p.Route.MapMode;zone.Text=p.Route.Zone;
             corridor.Value=(decimal)p.CorridorWidth*100;if(p.Route.Points.Count>0)tolerance.Value=(decimal)p.Route.Points[0].Tolerance*100;
             chase.Value=(decimal)p.CombatRadius*100;
-            openingKeys.Text=p.OpeningKeys;loopKeys.Text=p.LoopKeys;skillSeconds.Value=(decimal)p.SkillIntervalMs/1000;
+            openingKeys.Text=p.SkillRows==null?(String.IsNullOrWhiteSpace(p.OpeningKeys)?p.LoopKeys:p.OpeningKeys):p.SkillRows[0];for(int i=0;i<4;i++)extraSkillRows[i].Text=p.SkillRows==null?"":p.SkillRows[i+1];randomRoutes.Checked=p.RandomRoutes;timedBreaks.Checked=p.TimedBreaks;routeVariation.Value=(decimal)p.RouteVariation*100;variationSeed=p.RandomRouteSeed;loopKeys.Text=p.LoopKeys;skillSeconds.Value=(decimal)p.SkillIntervalMs/1000;
             restBelow.Value=p.RestBelowPercent;drinkKey.Text=p.DrinkKey;
             rogueVanish.Checked=p.UseRogueVanish;attackHostile.Checked=p.AttackHostile;noChatCombat.Checked=p.NoChatCombat;startAttackKey.Text=p.StartAttackKey;lastTargetKey.Text=p.LastTargetKey;stopAttackKey.Text=p.StopAttackKey;
             vendorEnabled.Checked=p.Vendor.Enabled;vendorX.Value=(decimal)p.Vendor.X*100;vendorY.Value=(decimal)p.Vendor.Y*100;vendorName.Text=p.Vendor.Name;
@@ -121,12 +129,23 @@ namespace WoWProbe
             axis.Value=(decimal)p.Calibration.AxisScale;offset.Value=(decimal)p.Calibration.FacingOffset;turn.Value=(decimal)p.Calibration.TurnRadiansPerSecond;speed.Value=(decimal)p.Calibration.ForwardUnitsPerSecond;sign.SelectedIndex=p.Calibration.FacingSign==-1?0:1;
             grid.Rows.Clear();foreach(var point in p.Route.Points)grid.Rows.Add("",(point.X*100).ToString("F3",CultureInfo.InvariantCulture),(point.Y*100).ToString("F3",CultureInfo.InvariantCulture));confirmed.Checked=false;Preview();
         }
+        void ExportAvailable(QuickRoutePlan p)
+        {
+            if(!p.RandomRoutes)return;string dir=Path.Combine(Path.GetDirectoryName(recordingPath),"random-routes");
+            if(p.Route.Points.Count>2){var a=p.Route.Points[0];var z=p.Route.Points[p.Route.Points.Count-1];if(a.X==z.X&&a.Y==z.Y)QuickRouteVariants.Export(dir,"patrol",QuickRouteVariants.For(p,p.Route,20));}
+            var service=p.Vendor.RouteComplete?p.Vendor:p.Repair;if(service.RouteComplete)QuickRouteVariants.Export(dir,"npc",QuickRouteVariants.For(p,QuickRouteVariants.Service(p,service),10));
+            if(File.Exists(CorpsePath)){var r=RouteStore.Load(CorpsePath);if(r.MapId==p.Route.MapId&&r.MapMode==p.Route.MapMode&&r.Zone==p.Route.Zone)QuickRouteVariants.Export(dir,"corpse",QuickRouteVariants.For(p,r,5));}
+            info.Text="随机路线已保存到："+dir;
+        }
+        void ExportVariants(){var p=ReadPlan(false);p.RandomRoutes=true;ExportAvailable(p);}
+        void AutoExport(){try{ExportAvailable(ReadEditor());}catch(Exception ex){info.Text="原路线已保存；随机路线生成失败："+ex.Message;}}
+
         void Preview()
         {
             int count=0;foreach(DataGridViewRow row in grid.Rows)if(!row.IsNewRow)row.Cells[0].Value=count<26?((char)('A'+count++)).ToString():"P"+(++count);
             try{var p=ReadPlan(false);grid.Rows[grid.Rows.Count-2].Cells[0].Value="A";canvas.Route=p.Route;canvas.AxisScale=p.Calibration.AxisScale;info.Text="已配置"+(p.Route.Points.Count-1)+"个巡航点并回到A；按输入顺序循环。";}catch{canvas.Route=null;info.Text="手填0–100坐标，至少两个不同点；最后一个点回到A。";}canvas.Invalidate();
         }
-        void SaveCorpseRoute(){if(!corpseSettings.RouteComplete)return;var p=ReadEditor();var r=new RouteDocument{RouteId="recorded-ghost",Name="墓地到打怪区",RouteType="corpse_run",MapId=p.Route.MapId,MapMode=p.Route.MapMode,Zone=p.Route.Zone};foreach(var w in corpseSettings.Points)r.Points.Add(w.Clone());RouteStore.Save(CorpsePath,r);}
+        void SaveCorpseRoute(){if(!corpseSettings.RouteComplete)return;var p=ReadEditor();var r=new RouteDocument{RouteId="recorded-ghost",Name="墓地到打怪区",RouteType="corpse_run",MapId=p.Route.MapId,MapMode=p.Route.MapMode,Zone=p.Route.Zone};foreach(var w in corpseSettings.Points)r.Points.Add(w.Clone());RouteStore.Save(CorpsePath,r);AutoExport();}
         FarmObservation Current(){return ReadCurrent(false);}
         FarmObservation ReadCurrent(bool ghost)
         {
@@ -151,7 +170,7 @@ namespace WoWProbe
                 archived=Path.Combine(directory,"巡航-"+DateTime.Now.ToString("yyyyMMdd-HHmmss")+"-"+Guid.NewGuid().ToString("N").Substring(0,6)+".json");
                 QuickRoutePlan.SaveRecording(archived,p);
             }
-            else p=new QuickRoutePlan();
+            else p=new QuickRoutePlan{RandomRoutes=true,TimedBreaks=true};
             bool sameMap=p.MapMatches(o);
             p.Route=new RouteDocument{RouteId="manual-farm",Name="新巡航路线 "+DateTime.Now.ToString("MM-dd HH:mm"),RouteType="farm",Loop=true,MapId=o.MapId,MapMode=o.MapMode,Zone=o.Zone};
             p.Calibration.MapId=o.MapId;p.Calibration.MapMode=o.MapMode;p.Calibration.Zone=o.Zone;p.Calibration.Confirmed=false;
@@ -167,11 +186,11 @@ namespace WoWProbe
             p.Route.Points.Add(new Waypoint{X=Math.Round(o.X*100,3)/100,Y=Math.Round(o.Y*100,3)/100,Tolerance=(double)tolerance.Value/100});
             QuickRoutePlan.SaveRecording(recordingPath,p);bool wasConfirmed=confirmed.Checked;Bind(p);confirmed.Checked=wasConfirmed;info.Text="已保存巡航点"+grid.Rows[grid.Rows.Count-2].Cells[0].Value+"；走到下一处后再次点击。草稿已写入本机。";
         }
-        void CloseLoop(){grid.EndEdit();if(grid.Rows.Count<3)throw new InvalidOperationException("请先输入至少两个不同点。");var a=grid.Rows[0];var b=grid.Rows[grid.Rows.Count-2];if(Convert.ToString(a.Cells[1].Value)!=Convert.ToString(b.Cells[1].Value)||Convert.ToString(a.Cells[2].Value)!=Convert.ToString(b.Cells[2].Value))grid.Rows.Add("A",a.Cells[1].Value,a.Cells[2].Value);var p=ReadPlan(false);QuickRoutePlan.SaveRecording(recordingPath,p);Preview();}
+        void CloseLoop(){grid.EndEdit();if(grid.Rows.Count<3)throw new InvalidOperationException("请先输入至少两个不同点。");var a=grid.Rows[0];var b=grid.Rows[grid.Rows.Count-2];if(Convert.ToString(a.Cells[1].Value)!=Convert.ToString(b.Cells[1].Value)||Convert.ToString(a.Cells[2].Value)!=Convert.ToString(b.Cells[2].Value))grid.Rows.Add("A",a.Cells[1].Value,a.Cells[2].Value);var p=ReadPlan(false);QuickRoutePlan.SaveRecording(recordingPath,p);Preview();AutoExport();}
         void Delete(){foreach(DataGridViewRow r in grid.SelectedRows)if(!r.IsNewRow)grid.Rows.Remove(r);QuickRoutePlan.SaveRecording(recordingPath,ReadEditor());Preview();}
         void LoadSavedRoute(){string directory=Path.Combine(Path.GetDirectoryName(recordingPath),"patrol-routes");Directory.CreateDirectory(directory);using(var d=new OpenFileDialog{Filter="已保存巡航路线|*.json",InitialDirectory=directory})if(d.ShowDialog()==DialogResult.OK){var p=QuickRoutePlan.Import(d.FileName);Bind(p);QuickRoutePlan.SaveRecording(recordingPath,p);}}
         void LoadPlanFile(){using(var d=new OpenFileDialog{Filter="巡航方案、旧路线或录点草稿|*.json"})if(d.ShowDialog()==DialogResult.OK){var p=QuickRoutePlan.Import(d.FileName);Bind(p);QuickRoutePlan.SaveRecording(recordingPath,p);}}
-        void Save(){var p=ReadPlan(false);using(var d=new SaveFileDialog{Filter="巡航方案|*.json",FileName="我的巡航路线.json"})if(d.ShowDialog()==DialogResult.OK)QuickRoutePlan.Save(d.FileName,p);}
+        void Save(){var p=ReadPlan(false);using(var d=new SaveFileDialog{Filter="巡航方案|*.json",FileName="我的巡航路线.json"})if(d.ShowDialog()==DialogResult.OK){QuickRoutePlan.Save(d.FileName,p);AutoExport();}}
         void ImportRoute(){LoadPlanFile();}
         void ImportCalibration(){using(var d=new OpenFileDialog{Filter="地图标定|*.json"})if(d.ShowDialog()==DialogResult.OK){if(new FileInfo(d.FileName).Length>65536)throw new FormatException("标定文件过大。");var c=new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<NavigationCalibration>(File.ReadAllText(d.FileName));c.Validate();var p=ReadPlan(false);if(c.MapId!=p.Route.MapId||c.MapMode!=p.Route.MapMode||c.Zone!=p.Route.Zone)throw new FormatException("标定与路线地图不同。");p.Calibration=c;Bind(p);}}
     }

@@ -14,8 +14,8 @@ $sources = @(Get-ChildItem -LiteralPath (Join-Path $projectRoot 'src') -Filter '
 if ($LASTEXITCODE -ne 0) { throw 'Application compilation failed.' }
 if ($QuickCheck) {
     if ($Package) { throw 'QuickCheck does not produce a release package.' }
-    $quickSources = @($sources | Where-Object { [System.IO.Path]::GetFileName($_) -notmatch '(^Program\.cs$|^Native\.cs$|^CampaignNative\.cs$|^GrindCli\.cs$|^FishingAudioNative\.cs$|^AssemblyInfo\.cs$|Form\.cs$)' })
-    foreach ($testName in @('RoutesTests','QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','MouseLookTests','QuickForwardMotionTests','QuickRouteTests','QuickVendorTests','QuickServiceRouteTests','GrindSafetyTests')) {
+    $quickSources = @($sources | Where-Object { [System.IO.Path]::GetFileName($_) -notmatch '(^Program\.cs$|^Native\.cs$|^CampaignNative\.cs$|^GrindCli.*\.cs$|^FishingAudioNative\.cs$|^AssemblyInfo\.cs$|Form\.cs$)' })
+    foreach ($testName in @('RoutesTests','QuickRandomTests','QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','MouseLookTests','QuickForwardMotionTests','QuickRouteTests','QuickVendorTests','QuickServiceRouteTests','GrindSafetyTests')) {
         & $compiler @common /target:exe "/out:$bin\$testName.exe" @quickSources "$projectRoot\tests\$testName.cs"
         if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
         & "$bin\$testName.exe"
@@ -53,14 +53,14 @@ foreach ($testName in @('CombatTelemetryTests','BattleProfileTests','FarmingTest
     & "$bin\$testName.exe"
     if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
 }
-$domainSources = @($sources | Where-Object { [System.IO.Path]::GetFileName($_) -notmatch '(^Program\.cs$|^Native\.cs$|^CampaignNative\.cs$|^GrindCli\.cs$|^FishingAudioNative\.cs$|^AssemblyInfo\.cs$|Form\.cs$)' })
+$domainSources = @($sources | Where-Object { [System.IO.Path]::GetFileName($_) -notmatch '(^Program\.cs$|^Native\.cs$|^CampaignNative\.cs$|^GrindCli.*\.cs$|^FishingAudioNative\.cs$|^AssemblyInfo\.cs$|Form\.cs$)' })
 foreach ($testName in @('CampaignSettingsTests','RecoveryWorkflowTests','VendorWorkflowTests','CampaignEngineTests','CampaignSessionTests','CampaignSimulatorTests','RuntimeEvidenceTests','OperationsTelemetryTests','CampaignBundleTests','CampaignCheckpointTests','FeedbackSummaryTests','CampaignPreflightTests','GrindSafetyTests','GrindHealerApproachTests','FishingTests','FishingSimulatorTests','FishingAudioFormatTests','FishingPerceptionTests','FishingSessionTests')) {
     & $compiler @common /target:exe "/out:$bin\$testName.exe" @domainSources "$projectRoot\tests\CampaignFixtures.cs" "$projectRoot\tests\FishingFixtures.cs" "$projectRoot\tests\$testName.cs"
     if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
     & "$bin\$testName.exe"
     if ($LASTEXITCODE -ne 0) { throw "$testName failed." }
 }
-foreach ($testName in @('QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','VisualVitalsTests','MouseLookTests','QuickForwardMotionTests','QuickRouteTests','QuickVendorTests','QuickServiceRouteTests')) {
+foreach ($testName in @('QuickRandomTests','QuickCombatTests','QuickCorpseTests','QuickRecoveryTests','VisualVitalsTests','MouseLookTests','QuickForwardMotionTests','QuickRouteTests','QuickVendorTests','QuickServiceRouteTests')) {
     & $compiler @common /target:exe "/out:$bin\$testName.exe" @domainSources "$projectRoot\tests\$testName.cs"
     if ($LASTEXITCODE -ne 0) { throw "$testName compilation failed." }
     & "$bin\$testName.exe"

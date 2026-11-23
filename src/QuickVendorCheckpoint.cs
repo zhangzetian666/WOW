@@ -6,7 +6,7 @@ namespace WoWProbe
     public sealed class QuickVendorCheckpoint
     {
         public QuickRoutePlan Plan;
-        public RouteDocument Outbound,Path;
+        public RouteDocument Outbound,Path,ReturnVariant;public int OutboundChoice,ReturnChoice;
         public int Next;
         public bool Returning,Repair,Emergency,StealthRequested;
         public static QuickVendorCheckpoint Load(string path)
