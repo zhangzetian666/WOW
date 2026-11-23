@@ -441,6 +441,16 @@ test("WC3 binds selected range and action masks to actual current page slots",fu
     env.IsActionInRange=function() return nil end
     p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],4),false);eq(has(p[8],4),false)
 end)
+test("WC3 hover identity is independent of restricted nameplate geometry",function()
+    local env=combatEnvironment()
+    env.C_NamePlate={GetNamePlateForUnit=function()error("restricted measurement must not be attempted")end}
+    env.UnitIsUnit=function(a,b)eq(a,"mouseover");eq(b,"target");return true end
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[126],3)
+    env.UnitIsUnit=function()return false end;p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[126],1)
+    env.UnitIsUnit=function()error("restricted identity")end;p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[126],0)
+    env.UnitIsUnit=nil;p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[126],0)
+end)
+
 test("WC3 reports each paged action range, active auto repeat, and ranged or melee type",function()
     local env=combatEnvironment()
     env.IsAutoRepeatAction=function(slot)return slot==15 end

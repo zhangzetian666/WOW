@@ -597,6 +597,14 @@ function P.BuildCombatPacket(core)
         if loot~=nil then caps=caps+16;if loot then flags=flags+8 end end
         local skin=section("skinTooltip",skinState)
         if skin~=nil then caps=caps+32;if skin then flags=flags+16 end end
+        -- Only readable identity is reported. Never measure restricted nameplate frames.
+        local hovered=section("targetHover",function()
+            if not token or type(UnitIsUnit)~="function" then return nil end
+            local value=UnitIsUnit("mouseover","target")
+            if value==true or value==1 then return true end
+            if value==false or value==0 then return false end
+        end)
+        if hovered~=nil then put(125,hovered and 3 or 1) end
         local rect=section("portrait",portraitState)
         if rect then extra=extra+1;for i=1,4 do u16(46+i*2,rect[i]) end end
     end
@@ -890,7 +898,7 @@ local function printLine(text)
 end
 function P.ResetDiagnostics()
     local visible = type(WoWProbeDB) == "table" and WoWProbeDB.visible ~= false
-    WoWProbeDB = { schema = 1, addonVersion = "0.5.9", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
+    WoWProbeDB = { schema = 1, addonVersion = "0.5.11", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
     readClient(); captureBindings(); captureAPIs(); if P.panel then P.ScalePanel() end
 end
 function P.Command(command)
@@ -1028,7 +1036,7 @@ function P.Initialize()
     WoWProbeDB = old; WoWProbeDB.visible = visible
     if integer(old.rangeSlot,4) and old.rangeSlot>=1 then P.rangeSlot=old.rangeSlot end
     WoWProbeDB.previousSession = previous
-    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.9"
+    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.11"
     WoWProbeDB.errors, WoWProbeDB.bindings, WoWProbeDB.capabilities = {}, {}, {}
     readClient(); captureBindings(); captureAPIs()
     local ok, reason = pcall(createPanel)

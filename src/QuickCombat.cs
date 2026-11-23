@@ -3,16 +3,15 @@ using System.Collections.Generic;
 
 namespace WoWProbe
 {
-    public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin, Vanish, StealthEnter, StealthExit, StealthHold, RangedStop, ApproachForward }
+    public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin, Vanish, StealthEnter, StealthExit, StealthHold, RangedStop }
     public sealed class QuickCommand
     {
         public bool AttackHostile;public bool MeleeConfirmed;public bool RangedSkill;public bool AllowApproach;public bool InputStarted;
-        public int ApproachRangeMask;
         public QuickAction Action; public ushort Key; public uint Token,IgnoredTarget; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement,PauseForward,CombatRecovery;public QuickRouteFollower RouteContext;
     }
 
-    // Nearby combat only. F supplies native target interaction; stalled approach
-    // gets bounded forward pulses under the same identity, range and route guards.
+    // Nearby combat only. Prefer interaction at the observed target nameplate.
+    // A target binding alone does not prove that the character faces that target.
     public sealed class QuickCombat
     {
         readonly uint map; readonly int mode; readonly string zone;
@@ -25,8 +24,9 @@ namespace WoWProbe
         string openingKeys,loopKeys;readonly QuickSkillRows skillRows;int loopIndex;
         bool openingPending;uint openingCast;int sliceRecovery;uint sliceCast;char retryFinisher;
         bool meleeConfirmed;uint meleeBaseline;
+        uint visuallyApproachedToken;
+        public void ConfirmVisualApproach(uint targetToken){if(targetToken!=0&&targetToken==token)visuallyApproachedToken=targetToken;}
         bool rangedMoving;long nextRangedReport;uint rangedTarget;
-        long nextApproach;
         int contactHealth=255;
         long lastDefenseScan=-10000;
         readonly int restBelow;readonly ushort drinkKey;
@@ -179,6 +179,8 @@ namespace WoWProbe
                 if(!meleeConfirmed&&o.InCombat&&o.TargetVictimKnown&&o.TargetTargetsPlayer&&o.Health<contactHealth&&o.Health<=100&&contactHealth<=100)
                 {meleeConfirmed=true;combatCastAt=now;var contact=Cmd(QuickAction.None,"普攻事件未返回；当前怪物正在攻击本人且已观察到实际掉血，启用技能设置中的按键。",0);contact.Report=true;return contact;}
                 if(o.CastEventsKnown&&o.CastSuccess!=combatCasts){combatCasts=o.CastSuccess;combatCastAt=now;combatEscapes=0;}
+                int configuredMask=0;foreach(char configured in openingKeys+loopKeys)configuredMask|=ActionBit(configured);
+                if(configuredMask!=0&&(o.KnownActionsMask&configuredMask)==configuredMask&&(o.ReadyActionsMask&o.UsableActionsMask&configuredMask)==0)combatCastAt=now;
                 if(escapePhase!=0)
                 {
                     if(o.InCombat&&!escapeCombat||!o.InCombat&&escapeCombat){escapePhase=0;escapeCombat=false;progressAt=now;}
@@ -202,6 +204,7 @@ namespace WoWProbe
                 {progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;progressAt=now;}
                 if(!rangedCombat&&!o.InCombat&&now-progressAt>=4500)
                 {
+                    if(visuallyApproachedToken!=token&&!o.TargetPositionKnown)return route!=null?AbandonChase(now,"当前目标位置无法确认，不沿未核实的朝向前进；返回路线继续寻怪。"):Stop("当前目标位置无法确认，请让怪物姓名板出现在画面内。");
                     if(escapes>=2)return route!=null?AbandonChase(now,"两次脱困仍未接近目标，返回路线寻找下一只。"):Stop("连续两次换向仍无法接近怪物，停止以免持续顶住障碍。");
                     escapes++;escapePhase=1;progressAt=now;return Cmd(QuickAction.BackOff,"位置持续不变且未进入战斗：取消直走，后退后换向。",83);
                 }
@@ -214,9 +217,7 @@ namespace WoWProbe
                 if(approach&&!rangedMoving)nextFace=now;
                 if(rangedMoving&&!approach){rangedMoving=false;nextFace=long.MaxValue;return Cmd(QuickAction.RangedStop,"已进入技能距离，停止接近后攻击。",0);}
                 if(now>=nextFace)
-                {nextFace=rangedCombat&&!approach?long.MaxValue:now+1500;var face=Cmd(QuickAction.Face,rangedCombat?(approach?"远程目标尚未进入有效射程，F接近；不提前取消移动。":"远程：F校正朝向，停稳后执行可用技能。"):"F：让游戏面向并接近锁定怪物。",0x46);face.AllowApproach=approach;rangedMoving=approach;return face;}
-                if(!o.InCombat&&!meleeConfirmed&&(approach||!rangedCombat&&(!o.RangeKnown||!o.TargetInRange))&&now-progressAt>=700&&now>=nextApproach)
-                {nextApproach=now+700;var forward=Cmd(QuickAction.ApproachForward,"目标未进入攻击距离且交互后无持续位移：保持目标，短距离前进后重新核验。",87);forward.Hold=300;forward.ApproachRangeMask=rangedBit;return forward;}
+                {nextFace=rangedCombat&&!approach?long.MaxValue:now+1500;var face=Cmd(QuickAction.Face,rangedCombat?(approach?"远程目标尚未进入有效射程，核验画面目标后接近。":"远程：校正朝向，停稳后执行可用技能。"):"核验画面血条对应当前怪物，确认后右键接近。",0x46);face.AllowApproach=approach;rangedMoving=approach;return face;}
                 if(approach&&(o.ActionRangeKnownMask&rangedBit)!=0)return Cmd(QuickAction.None,"继续接近远程目标，等待进入有效射程。",0);
                 if(o.MeleeEventsKnown&&o.MeleeHitToken==token&&o.MeleeHits!=meleeBaseline)meleeConfirmed=true;
                 if(sliceRecovery==2&&o.CastEventsKnown&&o.CastSuccess!=sliceCast){sliceRecovery=3;}
@@ -253,7 +254,7 @@ namespace WoWProbe
                 return Cmd(QuickAction.None,"等待下一拍技能。",0);
             }
             if(ShouldAcquire(o,now))
-            {if(route!=null)route.Interrupt(o);token=o.TargetToken;if(skillRows!=null){skillRows.Choose();this.openingKeys="";this.loopKeys=skillRows.Keys;}lockedTargetName=o.TargetName;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;meleeConfirmed=false;contactHealth=o.Health;meleeBaseline=o.MeleeHits;openingPending=false;sliceRecovery=0;opening=loopIndex=deadFrames=escapes=escapePhase=combatEscapes=0;escapeCombat=false;combatCastAt=now;combatCasts=o.CastSuccess;patrolPending=searchTurning=false;blockedWalks=searchEscapes=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName+(skillRows==null?"":"；随机技能行"+(skillRows.Selected+1)+"="+skillRows.Keys),0);}
+            {if(route!=null)route.Interrupt(o);token=o.TargetToken;visuallyApproachedToken=0;if(skillRows!=null){skillRows.Choose();this.openingKeys="";this.loopKeys=skillRows.Keys;}lockedTargetName=o.TargetName;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;meleeConfirmed=false;contactHealth=o.Health;meleeBaseline=o.MeleeHits;openingPending=false;sliceRecovery=0;opening=loopIndex=deadFrames=escapes=escapePhase=combatEscapes=0;escapeCombat=false;combatCastAt=now;combatCasts=o.CastSuccess;patrolPending=searchTurning=false;blockedWalks=searchEscapes=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName+(skillRows==null?"":"；随机技能行"+(skillRows.Selected+1)+"="+skillRows.Keys),0);}
             if(route!=null&&!o.InCombat)
             {
                 if((route.SearchingNearby||!route.Returning)&&now>=nextScan){nextScan=now+1200;return Cmd(QuickAction.Scan,"移动中扫描附近怪物；附近无目标再前往巡航点。",9);}
@@ -355,12 +356,12 @@ namespace WoWProbe
             if(c.Action==QuickAction.Vanish)return o.InCombat&&o.Health>0&&o.Health<15&&o.PowerType==3;
             if(c.Action==QuickAction.Skill&&!c.RangedSkill&&!c.MeleeConfirmed&&(!o.RangeKnown||!o.TargetInRange))return false;
             if(c.Action==QuickAction.Skill&&c.RangedSkill&&!RangedKeyAllowed(c.Key,o,c.MeleeConfirmed,c.InputStarted))return false;
-            if(!o.InCombat&&Contested(o)&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill||c.Action==QuickAction.RouteProbe||c.Action==QuickAction.ApproachForward))return false;
+            if(!o.InCombat&&Contested(o)&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill||c.Action==QuickAction.RouteProbe))return false;
             if(c.Action==QuickAction.InterruptSkin)return o.InCombat&&(o.Casting||o.Channeling);
             if(c.RouteMovement)return !o.InCombat&&!(CanAcquire(o,c.AttackHostile)&&c.RouteContext.MayAcquire(o)&&o.TargetToken!=c.IgnoredTarget);
             if(c.Action==QuickAction.ReturnToRoute)return c.RouteContext!=null&&c.RouteContext.Returning&&!o.InCombat;
             if(c.Action==QuickAction.RouteProbe)return c.RouteContext!=null&&!c.RouteContext.Returning&&!o.InCombat&&CanAcquire(o,c.AttackHostile)&&o.TargetToken==c.Token&&!o.TargetPositionKnown;
-            if(c.RouteContext!=null&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill||c.Action==QuickAction.ApproachForward)&&!c.RouteContext.TargetAllowed(o))return false;
+            if(c.RouteContext!=null&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill)&&!c.RouteContext.TargetAllowed(o))return false;
             if(c.Action==QuickAction.Scan)return true;
             if(c.Action==QuickAction.CorpseSelect)return !o.InCombat;
             if(c.Action==QuickAction.Reacquire)return !o.TargetExists||o.TargetIdentityKnown&&o.TargetToken==c.Token&&!o.TargetIsPlayer;
@@ -370,7 +371,6 @@ namespace WoWProbe
             if(c.Action==QuickAction.Food||c.Action==QuickAction.Drink)return !o.InCombat;
             if(!o.TargetExists||!o.TargetIdentityKnown||c.Token==0||o.TargetToken!=c.Token||o.TargetIsPlayer||!o.AttackabilityKnown||!o.TargetDeadKnown)return false;
             if(c.Action==QuickAction.CorpseApproach)return o.TargetDead&&!o.InCombat&&(o.LootKnown&&o.Lootable||o.SkinKnown&&o.Skinnable);
-            if(c.Action==QuickAction.ApproachForward)return !o.InCombat&&!o.TargetDead&&o.TargetCanAttack&&(c.ApproachRangeMask==0?(!o.RangeKnown||!o.TargetInRange):(o.ActionRangeKnownMask&o.ActionsInRangeMask&c.ApproachRangeMask)==0);
             if(c.Action==QuickAction.BackOff||c.Action==QuickAction.DetourTurn||c.Action==QuickAction.DetourForward)return (c.CombatRecovery?o.InCombat:!o.InCombat)&&!o.TargetDead&&o.TargetCanAttack;
             if(c.Action==QuickAction.Skin)return o.TargetDead&&!o.InCombat&&o.SkinKnown&&o.Skinnable&&o.SkinBindingKnown&&o.SkinBindingCorrect;
             return c.Action==QuickAction.Loot?o.TargetDead&&!o.InCombat:!o.TargetDead&&o.TargetCanAttack;

@@ -49,6 +49,7 @@ namespace WoWProbe
         public double TargetX { get; private set; }
         public double TargetY { get; private set; }
         public Rectangle Portrait { get; private set; }
+        public bool TargetHoverKnown {get;private set;}public bool TargetHovered {get;private set;}
 
         private CombatPacket() { }
         public static CombatPacket Decode(byte[] bytes)
@@ -61,7 +62,7 @@ namespace WoWProbe
             if(b[118]!=0&&b[118]!=1&&b[118]!=3)throw Invalid("Invalid stealth flags.");
             if(b[119]!=0&&b[119]!=1&&b[119]!=3)throw Invalid("Invalid interact binding flags.");
             if(b[120]!=0&&b[120]!=1&&b[120]!=3)throw Invalid("Invalid click-to-move flags.");
-            if(b[125]!=0)throw Invalid("WC3 reserved bytes must be zero.");
+            if((b[125]!=0&&b[125]!=1&&b[125]!=3)||b[125]!=0&&(b[6]&1)==0)throw Invalid("WC3 target hover needs readable target identity.");
             if(((b[121]>>4)&~(b[121]&15))!=0||((b[122]>>4)&~(b[122]&15))!=0||b[123]>15||b[124]>15||(b[123]&b[124])!=0)throw Invalid("WC3 per-action range or repeat masks disagree.");
             if(b[109]>1||b[109]==0&&(U32(b,110)!=0||U32(b,114)!=0)||(U32(b,110)==0)!=(U32(b,114)==0))throw Invalid("WC3 melee evidence is inconsistent.");
             int durability=U16(b,90),repair=b[92],rx=U16(b,93),ry=U16(b,95),rw=U16(b,97),rh=U16(b,99);
@@ -106,7 +107,7 @@ namespace WoWProbe
                 TargetVictimKnown=(b[79]&16)!=0,TargetTargetsPlayer=(b[79]&32)!=0,
                 GossipGoodsVisible=b[80]==7,GossipGoodsRegion=b[80]==7?new Rectangle(gx,gy,gw,gh):Rectangle.Empty,
                 StealthKnown=(b[118]&1)!=0,Stealthed=(b[118]&2)!=0,GearKnown=(b[89]&1)!=0,GearRed=(b[89]&2)!=0,Durability=(b[89]&1)!=0?durability:-1,RepairButtonVisible=(repair&2)!=0,RepairButtonEnabled=(repair&4)!=0,RepairRegion=(repair&2)!=0?new Rectangle(rx,ry,rw,rh):Rectangle.Empty,RepairCostKnown=(repair&8)!=0,RepairCost=U32(b,101),MoneyKnown=(repair&16)!=0,Money=U32(b,105),
-                Portrait=(k&1)!=0?new Rectangle(px,py,pw,ph):Rectangle.Empty };
+                TargetHoverKnown=(b[125]&1)!=0,TargetHovered=(b[125]&2)!=0,Portrait=(k&1)!=0?new Rectangle(px,py,pw,ph):Rectangle.Empty };
         }
         private static void Flag(int c,int cap,int flags,int mask){if((c&cap)==0 && (flags&mask)!=0)throw Invalid("Unknown WC3 flag cannot be true.");}
         private static void Match(int bits,int mask,bool value,string name){if(((bits&mask)!=0)!=value)throw Invalid("WC3 capability disagrees with "+name+".");}
@@ -126,6 +127,7 @@ namespace WoWProbe
         public string Zone="",TargetName="";
         public double X=Double.NaN,Y=Double.NaN,Facing=Double.NaN,TargetX=Double.NaN,TargetY=Double.NaN;
         public Rectangle Portrait;
+        public bool TargetHoverKnown,TargetHovered;
         public bool Fresh,KnownCore,PlayerDead,PlayerGhost,InCombat,BagFull,TargetExists,TargetDeadKnown,TargetDead,
             TargetIdentityKnown,NameHashKnown,AttackabilityKnown,TargetCanAttack,TargetIsPlayer,RangeKnown,TargetInRange,
             TargetPositionKnown,LootKnown,Lootable,SkinKnown,Skinnable,CastingKnown,Casting,Channeling,ActionsKnown,
@@ -177,6 +179,7 @@ namespace WoWProbe
             o.TargetPositionKnown=(c&8)!=0 && (core.Capabilities&65)==65 && core.MapMode==1;
             if(o.TargetPositionKnown){o.TargetX=extra.TargetX;o.TargetY=extra.TargetY;}
             o.LootKnown=(c&16)!=0;o.Lootable=o.LootKnown && (f&8)!=0;o.SkinKnown=(c&32)!=0;o.Skinnable=o.SkinKnown && (f&16)!=0;
+            o.TargetHoverKnown=extra.TargetHoverKnown;o.TargetHovered=extra.TargetHovered;
             o.PortraitKnown=(k&1)!=0;if(o.PortraitKnown)o.Portrait=extra.Portrait;
             return o;
         }

@@ -274,7 +274,7 @@ namespace WoWProbe
                         if(!keepMoving)searchMotion.Stop();
                         if(!QuickCombat.Matches(command,read())){searchMotion.Stop();CancelQuickMovement(backend);Pause(40);continue;}
                         write(command.Reason+" 窗口累计击杀="+killCounter.Total);
-                        if(command.Action==QuickAction.Face&&!plan.RangedCombat&&autoAttackToken!=command.Token)
+                        if(command.Action==QuickAction.Skill&&!plan.RangedCombat&&autoAttackToken!=command.Token)
                         {
                             input=guard();
                             try{if(plan.NoChatCombat){input=new GrindInputGuard(backend,()=>{var unit=read();if(!GrindRecoveryPolicy.CanAttack(unit)||unit.TargetToken!=command.Token||QuickCombat.Contested(unit))throw new InvalidOperationException("CLI chat target context changed.");return unit;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);Pulse(backend,QuickCombatHotkeys.Key(plan.StartAttackKey),80);}else ChatChecked(backend,"/startattack",()=>{var unit=read();return GrindRecoveryPolicy.CanAttack(unit)&&unit.TargetToken==command.Token&&!QuickCombat.Contested(unit);});}
@@ -315,7 +315,25 @@ namespace WoWProbe
                                 if((command.Action==QuickAction.Food||command.Action==QuickAction.Drink)&&!restMovementStopped){Pulse(backend,87,80);write("进食准备：停止移动，等待坐标连续稳定1秒。");QuickRestPreparation.Wait(read,Pause);restMovementStopped=true;}
                                 if(command.RouteMovement&&command.Action==QuickAction.Turn&&!command.PauseForward)searchMotion.Start();
                                 int hold=command.Hold>0?command.Hold:command.Action==QuickAction.Turn?260:command.Action==QuickAction.BackOff?300:command.Action==QuickAction.DetourTurn?220:command.Action==QuickAction.DetourForward?600:80;
-                                if(command.Action==QuickAction.Skill&&command.RangedSkill)RequireInput().Pulse(command.Key,hold,()=>command.InputStarted=true);else Pulse(backend,command.Key,hold);
+                                var faceTarget=command.Action==QuickAction.Face?read():null;
+                                if(faceTarget!=null&&(!plan.RangedCombat||command.AllowApproach))
+                                {
+                                    System.Collections.Generic.List<Rectangle> bars;
+                                    using(var screen=Native.Capture(client))bars=VisualTargetBars.Find(screen);
+                                    bool found=false;
+                                    foreach(var box in bars)
+                                    {
+                                        var point=new Point(client.X+box.X+box.Width/2,client.Y+box.Y+box.Height/2);
+                                        input.Ensure();if(Native.ClientBounds(target)!=client||!client.Contains(point))throw new InvalidOperationException("目标状态变化，停止当前按键。");
+                                        Native.MoveMouse(point);Pause(240);var hovered=read();
+                                        if(!VisualTargetBars.HoverMatches(hovered,command.Token))continue;
+                                        input.Click(point,true,p=>{var fresh=read();if(!VisualTargetBars.HoverMatches(fresh,command.Token)||!QuickCombat.Matches(command,fresh))throw new InvalidOperationException("目标状态变化，停止当前按键。");return Native.ClientBounds(target)==client&&client.Contains(p);},Native.MoveMouse,Native.SendMouseButton);
+                                        engine.ConfirmVisualApproach(command.Token);autoAttackToken=command.Token;found=true;
+                                        write("画面血条核验通过，右键接近：目标="+faceTarget.TargetName+"；位置="+box+"。");break;
+                                    }
+                                    if(!found)write("画面候选血条"+bars.Count+"个，未核对到当前怪物；不盲点、不沿原方向直走。");
+                                }
+                                else if(command.Action==QuickAction.Skill&&command.RangedSkill)RequireInput().Pulse(command.Key,hold,()=>command.InputStarted=true);else Pulse(backend,command.Key,hold);
                                 if(command.Action==QuickAction.Face&&plan.RangedCombat&&!command.AllowApproach)CancelQuickMovement(backend);
                                 if(command.Action==QuickAction.Food||command.Action==QuickAction.Drink)engine.RestInputCompleted(clock.ElapsedMilliseconds,command.Action==QuickAction.Food);
                                 // F starts native approach/facing. Leave click-to-move active
@@ -381,6 +399,7 @@ namespace WoWProbe
                 " Target=(" + o.TargetX.ToString("F5") + "," + o.TargetY.ToString("F5") + ") TargetDead=" + o.TargetDead + " TargetCanAttack=" + o.TargetCanAttack);
             Console.WriteLine("RangeKnown=" + o.RangeKnown + " TargetInRange=" + o.TargetInRange + " IncomingEvents: LootOpened=" + o.LootOpened + " CastSuccess=" + o.CastSuccess);
             Console.WriteLine("MeleeEventsKnown="+o.MeleeEventsKnown+" MeleeHitToken="+o.MeleeHitToken+" MeleeHits="+o.MeleeHits);
+            Console.WriteLine("TargetHoverKnown="+o.TargetHoverKnown+" TargetHovered="+o.TargetHovered);
             Console.WriteLine("ActionRangeKnownMask="+o.ActionRangeKnownMask+" InRangeMask="+o.ActionsInRangeMask+" RepeatKnownMask="+o.RepeatKnownMask+" RepeatingMask="+o.RepeatingMask+" RangedMask="+o.RangedActionsMask+" MeleeMask="+o.MeleeActionsMask);
             Console.WriteLine("ActionsKnown=" + o.ActionsKnown + " KnownMask=" + o.KnownActionsMask + " ReadyMask=" + o.ReadyActionsMask + " UsableMask=" + o.UsableActionsMask +
                 " CastingKnown=" + o.CastingKnown + " LootKnown=" + o.LootKnown + " SkinKnown=" + o.SkinKnown);
