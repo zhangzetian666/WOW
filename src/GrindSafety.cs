@@ -9,6 +9,8 @@ namespace WoWProbe
     {
         readonly IInputBackend backend;readonly Func<FarmObservation> reader;readonly Func<long> clock;readonly Action<int> wait;readonly InputFailureLatch safety;
         readonly uint mapId;readonly int mapMode;readonly string zone;bool stopped;long lastTime=-1;string reason="";
+        FarmObservation latest;
+        public const string InteractBindingError="当前角色F未绑定“与目标互动”。请在游戏按键设置中将F绑定“与目标互动”，不要绑定“协助目标”，然后重新开始。";
         public GrindInputGuard(IInputBackend backend,Func<FarmObservation> reader,Func<long> clock,Action<int> wait,InputFailureLatch safety,uint mapId,int mapMode,string zone)
         {if(backend==null||reader==null||clock==null||wait==null||safety==null)throw new ArgumentNullException("grind input dependencies");this.backend=backend;this.reader=reader;this.clock=clock;this.wait=wait;this.safety=safety;this.mapId=mapId;this.mapMode=mapMode;this.zone=zone;}
         void Stop(string message){stopped=true;reason=message;throw new InvalidOperationException(message);}
@@ -24,6 +26,7 @@ namespace WoWProbe
                 if(!MapIdentity.Matches(o.MapId,o.MapMode,o.Zone,mapId,mapMode,zone))Stop("CLI map identity changed.");
                 if(backend.IsEmergencyPressed())Stop("Emergency stop during CLI checks.");if(!backend.IsTargetForeground())Stop("Target window lost foreground during CLI checks.");
                 if(safety.Faulted)Stop("Input failure was latched during CLI checks: "+safety.Reason);
+                latest=o;
             }catch(Exception ex){stopped=true;reason=ex.Message;throw new InvalidOperationException(reason,ex);}
         }
         public void Wait(int milliseconds)
@@ -32,6 +35,7 @@ namespace WoWProbe
         {
             if(milliseconds<1||milliseconds>5000)throw new ArgumentOutOfRangeException("milliseconds");Ensure();
             if(backend.IsKeyAlreadyDown(key))Stop("The user is already holding this CLI key.");Ensure();
+            if(key==70&&latest.InteractBindingKnown&&!latest.InteractBindingCorrect)Stop(InteractBindingError);
             bool owned=false;
             try{owned=true;try{backend.KeyDown(key);}catch(Exception ex){safety.Fail("CLI key-down failed: "+ex.Message);Stop("CLI key-down failed: "+ex.Message);}Wait(milliseconds);}
             finally{if(owned)try{backend.KeyUp(key);}catch(Exception ex){safety.Fail("CLI key release failed: "+ex.Message);Stop("CLI key release failed: "+ex.Message);}}

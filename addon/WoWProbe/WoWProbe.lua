@@ -662,6 +662,13 @@ function P.BuildCombatPacket(core)
         put(109,1);u32(110,P.meleeHitToken or 0);u32(114,P.meleeHits or 0)
     end
     if type(IsStealthed)=="function" then local ok,value=pcall(IsStealthed);if ok and type(value)=="boolean" then put(118,value and 3 or 1) end end
+    -- Query the current character each frame; another character's saved bindings are not evidence.
+    if type(GetBindingKey)=="function" then
+        local ok,first,second=pcall(GetBindingKey,"INTERACTTARGET")
+        if ok and (first==nil or type(first)=="string") and (second==nil or type(second)=="string") then
+            put(119,(first=="F" or second=="F") and 3 or 1)
+        end
+    end
     put(6,caps);put(7,flags);put(56,extra)
     local a,b=0,0;for i=1,126 do a=(a+p[i])%255;b=(b+a)%255 end;put(126,a);put(127,b)
     WoWProbeDB.lastCombatPacket={sequence=p[5]+p[6]*256,capabilities=caps,flags=flags,extraKnown=extra,
@@ -849,7 +856,7 @@ local function printLine(text)
 end
 function P.ResetDiagnostics()
     local visible = type(WoWProbeDB) == "table" and WoWProbeDB.visible ~= false
-    WoWProbeDB = { schema = 1, addonVersion = "0.5.6", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
+    WoWProbeDB = { schema = 1, addonVersion = "0.5.7", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
     readClient(); captureBindings(); captureAPIs(); if P.panel then P.ScalePanel() end
 end
 function P.Command(command)
@@ -987,7 +994,7 @@ function P.Initialize()
     WoWProbeDB = old; WoWProbeDB.visible = visible
     if integer(old.rangeSlot,4) and old.rangeSlot>=1 then P.rangeSlot=old.rangeSlot end
     WoWProbeDB.previousSession = previous
-    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.6"
+    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.7"
     WoWProbeDB.errors, WoWProbeDB.bindings, WoWProbeDB.capabilities = {}, {}, {}
     readClient(); captureBindings(); captureAPIs()
     local ok, reason = pcall(createPanel)

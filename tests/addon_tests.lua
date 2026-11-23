@@ -777,6 +777,17 @@ test("modern corpse tooltip current rank skin binding and food count are indepen
     env.C_TooltipInfo.GetUnit=function()return {lines={{leftText={}}}} end
     p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],32),false)
 end)
+test("interaction binding is live character evidence and accepts either binding slot",function()
+    local env=combatEnvironment();local wp=load(env)
+    for _,keys in ipairs({{"F",""},{"G","F"},{"G",""},{"",""}}) do
+        env.GetBindingKey=function(action) if action=="INTERACTTARGET" then return keys[1],keys[2] end end
+        local p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[120],(keys[1]=="F" or keys[2]=="F") and 3 or 1)
+    end
+    env.GetBindingKey=function()return nil end;eq(wp.BuildCombatPacket(wp.BuildPacket())[120],1)
+    env.GetBindingKey=nil;eq(wp.BuildCombatPacket(wp.BuildPacket())[120],0)
+    env.GetBindingKey=function()error("unavailable")end;eq(wp.BuildCombatPacket(wp.BuildPacket())[120],0)
+    env.GetBindingKey=function()return {}end;eq(wp.BuildCombatPacket(wp.BuildPacket())[120],0)
+end)
 test("target ownership flags skip claimed mobs and distinguish the player's attacker",function()
     local env=combatEnvironment();env.UnitIsTapDenied=function()return true end
     env.UnitAffectingCombat=function(unit)return unit=="target" end

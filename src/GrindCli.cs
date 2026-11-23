@@ -138,6 +138,8 @@ namespace WoWProbe
                     if(plan.RandomRoutes){string variants=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"random-routes");QuickRouteVariants.Export(variants,"patrol",QuickRouteVariants.For(plan,plan.Route,20));if(plan.Vendor.RouteComplete)QuickRouteVariants.Export(variants,"npc",QuickRouteVariants.For(plan,QuickRouteVariants.Service(plan,plan.Vendor),10));}
                     if(anchor.BagFull&&!plan.Vendor.Enabled)throw new InvalidOperationException("背包已满，请先填写并启用售卖NPC坐标。");
                     if(!anchor.ChatOpenKnown||anchor.ChatOpen)throw new InvalidOperationException("请先关闭聊天输入框，并确认新版插件已加载。");
+                    if(anchor.InteractBindingKnown&&!anchor.InteractBindingCorrect)throw new InvalidOperationException(GrindInputGuard.InteractBindingError);
+                    write(anchor.InteractBindingKnown?"已核对当前角色：F＝与目标互动。":"当前插件未提供F键核验；请更新插件并/reload。换角色后须确认F＝与目标互动。");
                     if(!anchor.MeleeEventsKnown)throw new InvalidOperationException("游戏尚未加载普攻命中检测。请在游戏输入 /reload 后重试，避免只普攻不放技能。");
                     if(skinning&&(!anchor.SkinBindingKnown||!anchor.SkinBindingCorrect))throw new InvalidOperationException("请把当前剥皮技能放在7号技能栏，并确认按键为7；或取消勾选剥皮。");
                     if(savedTrip==null&&!vendorFirst&&!repairFirst&&!anchor.PlayerDead&&!anchor.PlayerGhost&&anchor.FoodCount<1)throw new InvalidOperationException("未确认食物键=有库存，请核对插件、栏位和食物数量后再开始。");
@@ -380,6 +382,7 @@ namespace WoWProbe
             Console.WriteLine("ChatOpenKnown="+o.ChatOpenKnown+" ChatOpen="+o.ChatOpen);
             Console.WriteLine("KillCreditsKnown="+o.KillCreditsKnown+" KillCreditNameHash="+o.KillCreditNameHash+" KillCredits="+o.KillCredits);
             Console.WriteLine("SkinBindingKnown="+o.SkinBindingKnown+" SkinBindingCorrect="+o.SkinBindingCorrect+" FoodCount="+o.FoodCount+" SkinSuccess="+o.SkinSuccess);
+            Console.WriteLine("InteractBindingKnown="+o.InteractBindingKnown+" InteractBindingCorrect="+o.InteractBindingCorrect);
             var operation=ReadOperations();if(operation!=null)Console.WriteLine("OperationsFresh="+operation.Fresh+" CorpseKnown="+operation.CorpseKnown+" Corpse=("+operation.CorpseX+","+operation.CorpseY+") ReleaseKnown="+operation.ReleaseKnown+" ReleaseVisible="+operation.ReleaseVisible+" ResurrectKnown="+operation.ResurrectKnown+" ResurrectVisible="+operation.ResurrectVisible+" Delay="+operation.RecoveryDelayMs);
             return 0;
         }

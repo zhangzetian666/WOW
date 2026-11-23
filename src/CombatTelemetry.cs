@@ -38,6 +38,7 @@ namespace WoWProbe
         public bool TargetVictimKnown {get;private set;}public bool TargetTargetsPlayer {get;private set;}
         public bool GossipGoodsVisible {get;private set;}public Rectangle GossipGoodsRegion {get;private set;}
         public bool StealthKnown {get;private set;}public bool Stealthed {get;private set;}
+        public bool InteractBindingKnown {get;private set;}public bool InteractBindingCorrect {get;private set;}
         public bool GearKnown {get;private set;}public bool GearRed {get;private set;}public int Durability {get;private set;}
         public bool RepairButtonVisible {get;private set;}public bool RepairButtonEnabled {get;private set;}public Rectangle RepairRegion {get;private set;}
         public bool RepairCostKnown {get;private set;}public uint RepairCost {get;private set;}public bool MoneyKnown {get;private set;}public uint Money {get;private set;}
@@ -54,7 +55,8 @@ namespace WoWProbe
             int a=0,s=0;for(int i=0;i<126;i++){a=(a+b[i])%255;s=(s+a)%255;}
             if(b[126]!=a || b[127]!=s)throw Invalid("WC3 Fletcher16 checksum mismatch.");
             if(b[118]!=0&&b[118]!=1&&b[118]!=3)throw Invalid("Invalid stealth flags.");
-            for(int i=119;i<126;i++)if(b[i]!=0)throw Invalid("WC3 reserved bytes must be zero.");
+            if(b[119]!=0&&b[119]!=1&&b[119]!=3)throw Invalid("Invalid interact binding flags.");
+            for(int i=120;i<126;i++)if(b[i]!=0)throw Invalid("WC3 reserved bytes must be zero.");
             if(b[109]>1||b[109]==0&&(U32(b,110)!=0||U32(b,114)!=0)||(U32(b,110)==0)!=(U32(b,114)==0))throw Invalid("WC3 melee evidence is inconsistent.");
             int durability=U16(b,90),repair=b[92],rx=U16(b,93),ry=U16(b,95),rw=U16(b,97),rh=U16(b,99);
             if((b[89]!=0&&b[89]!=1&&b[89]!=3)||b[89]==0&&durability!=0||durability>10000||b[89]==3&&durability!=0)throw Invalid("WC3 durability evidence is inconsistent.");
@@ -88,6 +90,7 @@ namespace WoWProbe
                 throw Invalid("WC3 portrait capability disagrees with client pixel rectangle.");
             return new CombatPacket { Sequence=U16(b,4),Capabilities=c,Flags=f,RangeSlot=b[16],KnownActionsMask=known,
                 MeleeEventsKnown=b[109]==1,MeleeHitToken=U32(b,110),MeleeHits=U32(b,114),
+                InteractBindingKnown=(b[119]&1)!=0,InteractBindingCorrect=(b[119]&2)!=0,
                 ReadyActionsMask=ready,UsableActionsMask=usable,ExtraKnownFlags=k,TargetToken=token,TargetNameHash=name,
                 CastEndMilliseconds=end,LootOpened=opened,LootClosed=closed,CastSuccess=success,CastFailed=failed,SkinSuccess=skin,DeathToken=deathToken,TargetDeaths=deaths,ChatOpenKnown=(b[65]&1)!=0,ChatOpen=(b[65]&2)!=0,KillCreditsKnown=b[74]==1,KillCreditNameHash=creditName,KillCredits=credits,SkinBindingKnown=(b[75]&1)!=0,SkinBindingCorrect=(b[75]&2)!=0,FoodCount=b[76]==1?U16(b,77):-1,
                 TargetX=x==65535?Double.NaN:x/65534.0,TargetY=y==65535?Double.NaN:y/65534.0,
@@ -119,6 +122,7 @@ namespace WoWProbe
             TargetPositionKnown,LootKnown,Lootable,SkinKnown,Skinnable,CastingKnown,Casting,Channeling,ActionsKnown,
             LootEventsKnown,CastEventsKnown,SkinSuccessKnown,PortraitKnown,VisualHealth,VisualPower,DeathEventsKnown,ChatOpenKnown,ChatOpen,KillCreditsKnown,SkinBindingKnown,SkinBindingCorrect;
         public bool TargetClaimKnown,TargetClaimedByOther,TargetCombatKnown,TargetInCombat,TargetVictimKnown,TargetTargetsPlayer;
+        public bool InteractBindingKnown,InteractBindingCorrect;
         public bool GossipGoodsVisible;public Rectangle GossipGoodsRegion;
         public bool StealthKnown,Stealthed;public bool GearKnown,GearRed,RepairButtonVisible,RepairButtonEnabled,RepairCostKnown,MoneyKnown;public int Durability=-1;public uint RepairCost,Money;public Rectangle RepairRegion;
 
@@ -149,6 +153,7 @@ namespace WoWProbe
             o.ChatOpenKnown=extra.ChatOpenKnown;o.ChatOpen=extra.ChatOpen;
             o.KillCreditsKnown=extra.KillCreditsKnown;o.KillCreditNameHash=extra.KillCreditNameHash;o.KillCredits=extra.KillCredits;
             o.SkinBindingKnown=extra.SkinBindingKnown;o.SkinBindingCorrect=extra.SkinBindingCorrect;o.FoodCount=extra.FoodCount;
+            o.InteractBindingKnown=extra.InteractBindingKnown;o.InteractBindingCorrect=extra.InteractBindingCorrect;
             o.GossipGoodsVisible=extra.GossipGoodsVisible;o.GossipGoodsRegion=extra.GossipGoodsRegion;
             o.StealthKnown=extra.StealthKnown;o.Stealthed=extra.Stealthed;o.GearKnown=extra.GearKnown;o.GearRed=extra.GearRed;o.Durability=extra.Durability;o.RepairButtonVisible=extra.RepairButtonVisible;o.RepairButtonEnabled=extra.RepairButtonEnabled;o.RepairRegion=extra.RepairRegion;o.RepairCostKnown=extra.RepairCostKnown;o.RepairCost=extra.RepairCost;o.MoneyKnown=extra.MoneyKnown;o.Money=extra.Money;
             if(!o.TargetExists)return o;
