@@ -11,8 +11,8 @@ namespace WoWProbe
         public QuickAction Action; public ushort Key; public uint Token,IgnoredTarget; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement,PauseForward,CombatRecovery;public QuickRouteFollower RouteContext;
     }
 
-    // Nearby combat only. The game's confirmed F/click-to-move binding supplies
-    // facing and approach; there is no guessed target position or blind forward sweep.
+    // Nearby combat only. F supplies native target interaction; stalled approach
+    // gets bounded forward pulses under the same identity, range and route guards.
     public sealed class QuickCombat
     {
         readonly uint map; readonly int mode; readonly string zone;
@@ -82,7 +82,7 @@ namespace WoWProbe
             if(!MapIdentity.Matches(o.MapId,o.MapMode,o.Zone,map,mode,zone))return Stop("地图发生变化。");
             if(route!=null){route.TickNearbySearch(o,now,token==0&&!resting);route.ObserveCombat(o);if(!route.CanOperate(o))return Stop("角色超出巡航及追怪范围，停止追击。");}
             else if(Double.IsNaN(o.X)||Double.IsNaN(o.Y)||Math.Abs(o.X-x)>0.04||Math.Abs(o.Y-y)>0.04)return Stop("离开启动位置四坐标点范围，停止追击。");
-            if(token!=0&&!looted&&!o.InCombat&&now-started>=45000)return Stop("单怪45秒未确认击杀，停止并检查朝向、距离和伤害。");
+            if(token!=0&&!looted&&!o.InCombat&&now-started>=45000)return route!=null?AbandonChase(now,"45秒仍未进入战斗，放弃当前目标并继续巡航。"):Stop("单怪45秒未确认击杀，停止并检查朝向、距离和伤害。");
             if(resting&&(o.FoodCount==0||o.PowerType==0&&drinkKey==0))naturalRecovery=true;
             if(resting&&!naturalRecovery&&!foodStealth&&!o.InCombat&&now-restStarted>=60000)return Stop("60秒内未恢复满，检查食物和饮水绑定。");
             if(sequence==o.Sequence)return Cmd(QuickAction.None,"等待新一帧状态。",0);sequence=o.Sequence;
@@ -147,7 +147,8 @@ namespace WoWProbe
                 if(HasDeathEvidence(o,token))return ConfirmDeath(o,now);
                 if(o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken==token&&o.TargetDeadKnown&&o.TargetDead)return ConfirmDeath(o,now);
                 if(route!=null&&!o.InCombat&&o.TargetToken==token&&Contested(o))return AbandonChase(now,"目标已被其他人占有或正在战斗，跳过并继续寻怪。");
-                if(route!=null&&!o.InCombat&&(!route.TargetAllowed(o)||now-started>=12000||route.PursuitDistance(o)>route.Plan.CombatRadius-.001))return AbandonChase(now,"接近目标超时或到达追怪边界，放弃该目标并返回巡航路线。");
+                bool chaseStalled=now-progressAt>=12000&&(o.X-progressX)*(o.X-progressX)+(o.Y-progressY)*(o.Y-progressY)<.00000009;
+                if(route!=null&&!o.InCombat&&(!route.TargetAllowed(o)||chaseStalled||route.PursuitDistance(o)>route.Plan.CombatRadius-.001))return AbandonChase(now,chaseStalled?"接近持续无位移，放弃当前目标并继续巡航。":"到达配置的追怪范围边界，返回巡航路线。");
                 if(route!=null&&o.InCombat&&!route.TargetAllowed(o))return Stop("战斗目标已离开配置的追怪范围，停止继续追击。");
                 if(!o.TargetExists||!o.TargetIdentityKnown||o.TargetToken!=token)
                 {
