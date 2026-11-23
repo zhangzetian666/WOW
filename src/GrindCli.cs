@@ -159,7 +159,8 @@ namespace WoWProbe
                     if(recoveryRoute!=null)write("已加载跑尸路线；沿已录路点返回，再接近本轮死亡点，不与灵魂医者交互。");
                     write(plan.NoChatCombat?"战斗无聊天模式：开始攻击="+plan.StartAttackKey+"，上一个目标="+plan.LastTargetKey+"，停止攻击="+plan.StopAttackKey+"；拾取F、剥皮7。":"战斗命令模式；可在技能设置配置快捷键后启用无聊天模式。");
                     write(plan.Vendor.Enabled?"包满自动前往售卖NPC，确认空位恢复后返回；修理按独立设置执行。":"未启用售卖NPC；包满将停止，请在自动售卖页填写商人坐标。");
-                    write(plan.RangedCombat?"战斗类型：远程英雄，直接执行技能行；不等待近战命中，不执行盗贼专用按键。":"战斗类型：近战英雄，确认接触后执行技能行。");
+                    write(plan.RangedCombat?"战斗类型：远程英雄，按射程接近并执行可用技能；不等待近战命中，不执行盗贼专用按键。":"战斗类型：近战英雄，确认接触后执行技能行。");
+                    if(plan.RangedCombat)write("远程动作回读：射程已知="+anchor.ActionRangeKnownMask+"，射程内="+anchor.ActionsInRangeMask+"，自动射击开启="+anchor.RepeatingMask+"，远程栏="+anchor.RangedActionsMask+"，近战栏="+anchor.MeleeActionsMask+"；全零时请更新插件并/reload。");
                     write("技能设置：开场="+plan.OpeningKeys+"，循环="+plan.LoopKeys+"，间隔="+interval+"ms。生命="+anchor.Health+"%（"+(anchor.VisualHealth?"原生血条画面":"API")+"）；启动先恢复满血，脱战低于"+plan.RestBelowPercent+"%吃喝。");
                     Activate(window.Handle);
                     for(int i=5;i>0;i--)
@@ -284,7 +285,7 @@ namespace WoWProbe
                         input=new GrindInputGuard(backend,()=>{var o=read();if(!(commandUsesChat?QuickCombat.MatchesChatCommand(command,o):QuickCombat.Matches(command,o)))throw new InvalidOperationException("目标状态变化，停止当前按键。");return o;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
                         try
                         {
-                            if(command.Action==QuickAction.StealthHold){searchMotion.Stop();CancelQuickMovement(backend);}
+                            if(command.Action==QuickAction.StealthHold||command.Action==QuickAction.RangedStop){searchMotion.Stop();CancelQuickMovement(backend);}
                             else if(command.Action==QuickAction.Vanish){Pulse(backend,54,80);}
                             else if(command.Action==QuickAction.ReturnToRoute){CancelQuickMovement(backend);if(plan.NoChatCombat)Pulse(backend,QuickCombatHotkeys.ActionKey(command.Action,plan),80);else ChatChecked(backend,"/stopattack",()=>!read().InCombat);}
                             else if(command.Action==QuickAction.Reacquire||command.Action==QuickAction.CorpseSelect)
@@ -314,8 +315,8 @@ namespace WoWProbe
                                 if((command.Action==QuickAction.Food||command.Action==QuickAction.Drink)&&!restMovementStopped){Pulse(backend,87,80);write("进食准备：停止移动，等待坐标连续稳定1秒。");QuickRestPreparation.Wait(read,Pause);restMovementStopped=true;}
                                 if(command.RouteMovement&&command.Action==QuickAction.Turn&&!command.PauseForward)searchMotion.Start();
                                 int hold=command.Hold>0?command.Hold:command.Action==QuickAction.Turn?260:command.Action==QuickAction.BackOff?300:command.Action==QuickAction.DetourTurn?220:command.Action==QuickAction.DetourForward?600:80;
-                                Pulse(backend,command.Key,hold);
-                                if(command.Action==QuickAction.Face&&plan.RangedCombat)CancelQuickMovement(backend);
+                                if(command.Action==QuickAction.Skill&&command.RangedSkill)RequireInput().Pulse(command.Key,hold,()=>command.InputStarted=true);else Pulse(backend,command.Key,hold);
+                                if(command.Action==QuickAction.Face&&plan.RangedCombat&&!command.AllowApproach)CancelQuickMovement(backend);
                                 if(command.Action==QuickAction.Food||command.Action==QuickAction.Drink)engine.RestInputCompleted(clock.ElapsedMilliseconds,command.Action==QuickAction.Food);
                                 // F starts native approach/facing. Leave click-to-move active
                                 // between skills; subsequent observations enforce the chase leash.
@@ -380,6 +381,7 @@ namespace WoWProbe
                 " Target=(" + o.TargetX.ToString("F5") + "," + o.TargetY.ToString("F5") + ") TargetDead=" + o.TargetDead + " TargetCanAttack=" + o.TargetCanAttack);
             Console.WriteLine("RangeKnown=" + o.RangeKnown + " TargetInRange=" + o.TargetInRange + " IncomingEvents: LootOpened=" + o.LootOpened + " CastSuccess=" + o.CastSuccess);
             Console.WriteLine("MeleeEventsKnown="+o.MeleeEventsKnown+" MeleeHitToken="+o.MeleeHitToken+" MeleeHits="+o.MeleeHits);
+            Console.WriteLine("ActionRangeKnownMask="+o.ActionRangeKnownMask+" InRangeMask="+o.ActionsInRangeMask+" RepeatKnownMask="+o.RepeatKnownMask+" RepeatingMask="+o.RepeatingMask+" RangedMask="+o.RangedActionsMask+" MeleeMask="+o.MeleeActionsMask);
             Console.WriteLine("ActionsKnown=" + o.ActionsKnown + " KnownMask=" + o.KnownActionsMask + " ReadyMask=" + o.ReadyActionsMask + " UsableMask=" + o.UsableActionsMask +
                 " CastingKnown=" + o.CastingKnown + " LootKnown=" + o.LootKnown + " SkinKnown=" + o.SkinKnown);
             Console.WriteLine("TargetIdentityKnown=" + o.TargetIdentityKnown + " NameHashKnown=" + o.NameHashKnown + " AttackabilityKnown=" + o.AttackabilityKnown +

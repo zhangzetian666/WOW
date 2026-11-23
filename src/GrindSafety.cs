@@ -31,13 +31,13 @@ namespace WoWProbe
         }
         public void Wait(int milliseconds)
         {if(milliseconds<0||milliseconds>60000)throw new ArgumentOutOfRangeException("milliseconds");Ensure();for(int left=milliseconds;left>0;){int slice=Math.Min(25,left);wait(slice);left-=slice;Ensure();}}
-        public void Pulse(ushort key,int milliseconds)
+        public void Pulse(ushort key,int milliseconds,Action afterKeyDown=null)
         {
             if(milliseconds<1||milliseconds>5000)throw new ArgumentOutOfRangeException("milliseconds");Ensure();
             if(backend.IsKeyAlreadyDown(key))Stop("The user is already holding this CLI key.");Ensure();
             if(key==70&&latest.InteractBindingKnown&&!latest.InteractBindingCorrect)Stop(InteractBindingError);
             bool owned=false;
-            try{owned=true;try{backend.KeyDown(key);}catch(Exception ex){safety.Fail("CLI key-down failed: "+ex.Message);Stop("CLI key-down failed: "+ex.Message);}Wait(milliseconds);}
+            try{owned=true;try{backend.KeyDown(key);}catch(Exception ex){safety.Fail("CLI key-down failed: "+ex.Message);Stop("CLI key-down failed: "+ex.Message);}if(afterKeyDown!=null)afterKeyDown();Wait(milliseconds);}
             finally{if(owned)try{backend.KeyUp(key);}catch(Exception ex){safety.Fail("CLI key release failed: "+ex.Message);Stop("CLI key release failed: "+ex.Message);}}
         }
         public void TypeText(string text,Action<char> send)

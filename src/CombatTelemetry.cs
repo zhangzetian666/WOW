@@ -13,6 +13,9 @@ namespace WoWProbe
         public int KnownActionsMask { get; private set; }
         public int ReadyActionsMask { get; private set; }
         public int UsableActionsMask { get; private set; }
+        public int ActionRangeKnownMask {get;private set;}public int ActionsInRangeMask {get;private set;}
+        public int RepeatKnownMask {get;private set;}public int RepeatingMask {get;private set;}
+        public int RangedActionsMask {get;private set;}public int MeleeActionsMask {get;private set;}
         public int ExtraKnownFlags { get; private set; }
         public uint TargetToken { get; private set; }
         public uint TargetNameHash { get; private set; }
@@ -58,7 +61,8 @@ namespace WoWProbe
             if(b[118]!=0&&b[118]!=1&&b[118]!=3)throw Invalid("Invalid stealth flags.");
             if(b[119]!=0&&b[119]!=1&&b[119]!=3)throw Invalid("Invalid interact binding flags.");
             if(b[120]!=0&&b[120]!=1&&b[120]!=3)throw Invalid("Invalid click-to-move flags.");
-            for(int i=121;i<126;i++)if(b[i]!=0)throw Invalid("WC3 reserved bytes must be zero.");
+            if(b[125]!=0)throw Invalid("WC3 reserved bytes must be zero.");
+            if(((b[121]>>4)&~(b[121]&15))!=0||((b[122]>>4)&~(b[122]&15))!=0||b[123]>15||b[124]>15||(b[123]&b[124])!=0)throw Invalid("WC3 per-action range or repeat masks disagree.");
             if(b[109]>1||b[109]==0&&(U32(b,110)!=0||U32(b,114)!=0)||(U32(b,110)==0)!=(U32(b,114)==0))throw Invalid("WC3 melee evidence is inconsistent.");
             int durability=U16(b,90),repair=b[92],rx=U16(b,93),ry=U16(b,95),rw=U16(b,97),rh=U16(b,99);
             if((b[89]!=0&&b[89]!=1&&b[89]!=3)||b[89]==0&&durability!=0||durability>10000||b[89]==3&&durability!=0)throw Invalid("WC3 durability evidence is inconsistent.");
@@ -94,6 +98,7 @@ namespace WoWProbe
                 MeleeEventsKnown=b[109]==1,MeleeHitToken=U32(b,110),MeleeHits=U32(b,114),
                 InteractBindingKnown=(b[119]&1)!=0,InteractBindingCorrect=(b[119]&2)!=0,
                 ClickToMoveKnown=(b[120]&1)!=0,ClickToMoveEnabled=(b[120]&2)!=0,
+                ActionRangeKnownMask=b[121]&15,ActionsInRangeMask=b[121]>>4,RepeatKnownMask=b[122]&15,RepeatingMask=b[122]>>4,RangedActionsMask=b[123],MeleeActionsMask=b[124],
                 ReadyActionsMask=ready,UsableActionsMask=usable,ExtraKnownFlags=k,TargetToken=token,TargetNameHash=name,
                 CastEndMilliseconds=end,LootOpened=opened,LootClosed=closed,CastSuccess=success,CastFailed=failed,SkinSuccess=skin,DeathToken=deathToken,TargetDeaths=deaths,ChatOpenKnown=(b[65]&1)!=0,ChatOpen=(b[65]&2)!=0,KillCreditsKnown=b[74]==1,KillCreditNameHash=creditName,KillCredits=credits,SkinBindingKnown=(b[75]&1)!=0,SkinBindingCorrect=(b[75]&2)!=0,FoodCount=b[76]==1?U16(b,77):-1,
                 TargetX=x==65535?Double.NaN:x/65534.0,TargetY=y==65535?Double.NaN:y/65534.0,
@@ -114,6 +119,7 @@ namespace WoWProbe
     public sealed class FarmObservation
     {
         public bool MeleeEventsKnown;public uint MeleeHitToken,MeleeHits;
+        public int ActionRangeKnownMask,ActionsInRangeMask,RepeatKnownMask,RepeatingMask,RangedActionsMask,MeleeActionsMask;
         public int Sequence,ReadFailures,Health=255,Power=255,PowerType=255,TargetHealth=255,MapMode,RangeSlot,
             KnownActionsMask,ReadyActionsMask,UsableActionsMask,FoodCount=-1,TargetReaction=255;
         public uint MapId,TargetToken,TargetNameHash,LootOpened,LootClosed,CastSuccess,CastFailed,SkinSuccess,DeathToken,TargetDeaths,KillCreditNameHash,KillCredits;
@@ -150,6 +156,7 @@ namespace WoWProbe
             o.RangeSlot=extra.RangeSlot;
             o.CastingKnown=(c&64)!=0;o.Casting=o.CastingKnown && (f&32)!=0;o.Channeling=o.CastingKnown && (f&64)!=0;
             o.ActionsKnown=(c&128)!=0;o.KnownActionsMask=extra.KnownActionsMask;o.ReadyActionsMask=extra.ReadyActionsMask;o.UsableActionsMask=extra.UsableActionsMask;
+            o.ActionRangeKnownMask=extra.ActionRangeKnownMask;o.ActionsInRangeMask=extra.ActionsInRangeMask;o.RepeatKnownMask=extra.RepeatKnownMask;o.RepeatingMask=extra.RepeatingMask;o.RangedActionsMask=extra.RangedActionsMask;o.MeleeActionsMask=extra.MeleeActionsMask;
             o.LootEventsKnown=(k&8)!=0;o.CastEventsKnown=(k&16)!=0;o.SkinSuccessKnown=(k&2)!=0;
             o.LootOpened=extra.LootOpened;o.LootClosed=extra.LootClosed;o.CastSuccess=extra.CastSuccess;o.CastFailed=extra.CastFailed;o.SkinSuccess=extra.SkinSuccess;
             o.MeleeEventsKnown=extra.MeleeEventsKnown;o.MeleeHitToken=extra.MeleeHitToken;o.MeleeHits=extra.MeleeHits;

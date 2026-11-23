@@ -607,12 +607,42 @@ function P.BuildCombatPacket(core)
     end)
     if cast~=nil then caps=caps+64;if cast then flags=flags+32 end;if channel then flags=flags+64 end;u32(20,finish) end
     local known,ready,usable=0,0,0
+    local rangeKnown,inRange,repeatKnown,repeating,ranged,melee=0,0,0,0,0,0
     for i=1,4 do
+        local slot=actionSlot(i);local bit=2^(i-1)
+        if slot then
+            if exists then
+                local value=section("actionRange"..i,function()
+                    local ok,v=call("IsActionInRange",IsActionInRange,slot,"target")
+                    if ok then local b,k=strictBool(v,false);if k then return b end end
+                end)
+                if value~=nil then rangeKnown=rangeKnown+bit;if value then inRange=inRange+bit end end
+            end
+            local active=section("autoRepeat"..i,function()
+                if type(IsAutoRepeatAction)=="function" then return combatBool("IsAutoRepeatAction",IsAutoRepeatAction,slot) end
+            end)
+            if active~=nil then repeatKnown=repeatKnown+bit;if active then repeating=repeating+bit end end
+            local kind=section("actionDistanceType"..i,function()
+                local ok,action,id=call("GetActionInfo",GetActionInfo,slot)
+                if not ok or action~="spell" then return nil end
+                if id==6603 then return "melee" end
+                if id==75 or id==5019 then return "ranged" end
+                local maxRange
+                if type(C_Spell)=="table" and type(C_Spell.GetSpellInfo)=="function" then
+                    local success,info=pcall(C_Spell.GetSpellInfo,id);if success and type(info)=="table" then maxRange=info.maxRange end
+                elseif type(GetSpellInfo)=="function" then
+                    local success,name,rank,icon,time,minRange,maximum=pcall(GetSpellInfo,id);if success then maxRange=maximum end
+                end
+                if finite(maxRange) and maxRange>0 then return maxRange<=5 and "melee" or "ranged" end
+            end)
+            if kind=="ranged" then ranged=ranged+bit elseif kind=="melee" then melee=melee+bit end
+        end
         local r,u=section("action"..i,function() return actionState(actionSlot(i)) end)
         if r~=nil then local mask=2^(i-1);known=known+mask;if r then ready=ready+mask end;if u then usable=usable+mask end end
     end
     if known~=0 then caps=caps+128 end
     put(17,known);put(18,ready);put(19,usable)
+    put(121,rangeKnown+16*inRange);put(122,repeatKnown+16*repeating);put(123,ranged);put(124,melee)
     local events=P.eventRegistration or {};local counters=P.counters
     if events.UNIT_FLAGS and events.UNIT_HEALTH then
         extra=extra+32;u32(57,P.lastDeathToken or 0);u32(61,P.targetDeaths or 0)
@@ -860,7 +890,7 @@ local function printLine(text)
 end
 function P.ResetDiagnostics()
     local visible = type(WoWProbeDB) == "table" and WoWProbeDB.visible ~= false
-    WoWProbeDB = { schema = 1, addonVersion = "0.5.8", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
+    WoWProbeDB = { schema = 1, addonVersion = "0.5.9", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
     readClient(); captureBindings(); captureAPIs(); if P.panel then P.ScalePanel() end
 end
 function P.Command(command)
@@ -998,7 +1028,7 @@ function P.Initialize()
     WoWProbeDB = old; WoWProbeDB.visible = visible
     if integer(old.rangeSlot,4) and old.rangeSlot>=1 then P.rangeSlot=old.rangeSlot end
     WoWProbeDB.previousSession = previous
-    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.8"
+    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.9"
     WoWProbeDB.errors, WoWProbeDB.bindings, WoWProbeDB.capabilities = {}, {}, {}
     readClient(); captureBindings(); captureAPIs()
     local ok, reason = pcall(createPanel)

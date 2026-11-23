@@ -441,6 +441,16 @@ test("WC3 binds selected range and action masks to actual current page slots",fu
     env.IsActionInRange=function() return nil end
     p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[7],4),false);eq(has(p[8],4),false)
 end)
+test("WC3 reports each paged action range, active auto repeat, and ranged or melee type",function()
+    local env=combatEnvironment()
+    env.IsAutoRepeatAction=function(slot)return slot==15 end
+    env.GetActionInfo=function(slot)return "spell",slot==13 and 6603 or slot==15 and 75 or 999 end
+    env.GetSpellInfo=function(id)return "skill",nil,nil,0,0,5 end
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket())
+    eq(p[122],15+16*13);eq(p[123],15+16*4);eq(p[124],4);eq(p[125],11)
+    env.IsActionInRange=function()return nil end;env.IsAutoRepeatAction=nil;env.GetActionInfo=nil
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[122],0);eq(p[123],0);eq(p[124],0);eq(p[125],0)
+end)
 test("WC3 interaction proximity never substitutes for the selected action range",function()
     local env=combatEnvironment();env.IsActionInRange=function() return nil end
     env.CheckInteractDistance=function(unit,index) eq(unit,"target");eq(index,3);return true end

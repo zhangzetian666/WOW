@@ -3,10 +3,11 @@ using System.Collections.Generic;
 
 namespace WoWProbe
 {
-    public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin, Vanish, StealthEnter, StealthExit, StealthHold }
+    public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin, Vanish, StealthEnter, StealthExit, StealthHold, RangedStop, ApproachForward }
     public sealed class QuickCommand
     {
-        public bool AttackHostile;public bool MeleeConfirmed;public bool RangedSkill;
+        public bool AttackHostile;public bool MeleeConfirmed;public bool RangedSkill;public bool AllowApproach;public bool InputStarted;
+        public int ApproachRangeMask;
         public QuickAction Action; public ushort Key; public uint Token,IgnoredTarget; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement,PauseForward,CombatRecovery;public QuickRouteFollower RouteContext;
     }
 
@@ -24,6 +25,8 @@ namespace WoWProbe
         string openingKeys,loopKeys;readonly QuickSkillRows skillRows;int loopIndex;
         bool openingPending;uint openingCast;int sliceRecovery;uint sliceCast;char retryFinisher;
         bool meleeConfirmed;uint meleeBaseline;
+        bool rangedMoving;long nextRangedReport;uint rangedTarget;
+        long nextApproach;
         int contactHealth=255;
         long lastDefenseScan=-10000;
         readonly int restBelow;readonly ushort drinkKey;
@@ -202,8 +205,18 @@ namespace WoWProbe
                     escapes++;escapePhase=1;progressAt=now;return Cmd(QuickAction.BackOff,"位置持续不变且未进入战斗：取消直走，后退后换向。",83);
                 }
                 if(!o.InCombat&&now-started>=45000)return Stop("单怪45秒未确认击杀，停止并检查朝向、距离和伤害。");
+                if(rangedTarget!=token){rangedTarget=token;rangedMoving=false;nextRangedReport=0;}
+                int rangedBit=rangedCombat?FirstRangedAction(o):0;
+                bool rangedReady=rangedBit!=0&&(o.ActionRangeKnownMask&o.ActionsInRangeMask&rangedBit)!=0;
+                bool closeContact=meleeConfirmed||CloseContact(o);
+                bool approach=rangedCombat&&rangedBit!=0&&!rangedReady&&!closeContact;
+                if(approach&&!rangedMoving)nextFace=now;
+                if(rangedMoving&&!approach){rangedMoving=false;nextFace=long.MaxValue;return Cmd(QuickAction.RangedStop,"已进入技能距离，停止接近后攻击。",0);}
                 if(now>=nextFace)
-                {nextFace=rangedCombat?long.MaxValue:now+1500;return Cmd(QuickAction.Face,rangedCombat?"远程：F校正目标朝向，随后停止移动并施放技能。":"F：让游戏面向并接近锁定怪物。",0x46);}
+                {nextFace=rangedCombat&&!approach?long.MaxValue:now+1500;var face=Cmd(QuickAction.Face,rangedCombat?(approach?"远程目标尚未进入有效射程，F接近；不提前取消移动。":"远程：F校正朝向，停稳后执行可用技能。"):"F：让游戏面向并接近锁定怪物。",0x46);face.AllowApproach=approach;rangedMoving=approach;return face;}
+                if(!o.InCombat&&!meleeConfirmed&&(approach||!rangedCombat&&(!o.RangeKnown||!o.TargetInRange))&&now-progressAt>=700&&now>=nextApproach)
+                {nextApproach=now+700;var forward=Cmd(QuickAction.ApproachForward,"目标未进入攻击距离且交互后无持续位移：保持目标，短距离前进后重新核验。",87);forward.Hold=300;forward.ApproachRangeMask=rangedBit;return forward;}
+                if(approach&&(o.ActionRangeKnownMask&rangedBit)!=0)return Cmd(QuickAction.None,"继续接近远程目标，等待进入有效射程。",0);
                 if(o.MeleeEventsKnown&&o.MeleeHitToken==token&&o.MeleeHits!=meleeBaseline)meleeConfirmed=true;
                 if(sliceRecovery==2&&o.CastEventsKnown&&o.CastSuccess!=sliceCast){sliceRecovery=3;}
                 if(sliceRecovery==1&&o.CastEventsKnown&&o.CastSuccess!=sliceCast)sliceRecovery=0;
@@ -212,6 +225,19 @@ namespace WoWProbe
                 if(now>=nextSkill)
                 {
                     nextSkill=now+interval;
+                    if(rangedCombat)
+                    {
+                        int attempts=openingKeys.Length+loopKeys.Length;
+                        while(attempts-->0)
+                        {
+                            bool inOpening=opening<openingKeys.Length;char candidate=inOpening?openingKeys[opening]:loopKeys[(loopIndex++)%loopKeys.Length];
+                            ushort candidateKey=(ushort)(candidate=='='?187:candidate=='-'?189:candidate);
+                            if(!RangedKeyAllowed(candidateKey,o,meleeConfirmed)){if(inOpening){opening++;openingPending=false;}continue;}
+                            if(inOpening){openingPending=o.CastEventsKnown;openingCast=o.CastSuccess;if(!o.CastEventsKnown)opening++;}
+                            var rangedCommand=Cmd(QuickAction.Skill,"远程技能键 "+candidate+"：射程、可用状态及自动射击状态核验后尝试。",candidateKey);rangedCommand.RangedSkill=true;rangedCommand.MeleeConfirmed=meleeConfirmed;return rangedCommand;
+                        }
+                        var wait=Cmd(QuickAction.None,"当前技能行没有需要再次按下的可用技能：保持已开启的自动射击；不可用时检查弹药、装备或技能条件。",0);if(now>=nextRangedReport){wait.Report=true;nextRangedReport=now+5000;}return wait;
+                    }
                     char digit;
                     if(sliceRecovery==1){sliceRecovery=2;openingPending=false;}
                     bool rebuilding=sliceRecovery==2;
@@ -269,6 +295,17 @@ namespace WoWProbe
         }
         public bool HasDeathEvidence(FarmObservation o,uint expected)
         {return expected!=0&&expected==token&&o!=null&&o.Fresh&&(o.DeathEventsKnown&&o.DeathToken==expected&&o.TargetDeaths!=deathBase||o.KillCreditsKnown&&lockedName!=0&&o.KillCreditNameHash==lockedName&&o.KillCredits!=creditBase);}
+        static int ActionBit(ushort key){return key>=49&&key<=52?1<<(key-49):0;}
+        int FirstRangedAction(FarmObservation o){foreach(char key in openingKeys+loopKeys){int bit=ActionBit(key);if((o.RangedActionsMask&bit)!=0)return bit;}return 0;}
+        static bool CloseContact(FarmObservation o){return (o.MeleeActionsMask&o.ActionRangeKnownMask&o.ActionsInRangeMask)!=0;}
+        static bool RangedKeyAllowed(ushort key,FarmObservation o,bool contact,bool inputStarted=false)
+        {
+            int bit=ActionBit(key);if(bit==0)return true;
+            if((o.ActionRangeKnownMask&bit)!=0&&(o.ActionsInRangeMask&bit)==0)return false;
+            if(!inputStarted&&(o.RepeatKnownMask&o.RepeatingMask&bit)!=0)return false;
+            if((o.MeleeActionsMask&bit)!=0&&!contact&&!CloseContact(o))return false;
+            return inputStarted||(o.KnownActionsMask&bit)==0||(o.UsableActionsMask&o.ReadyActionsMask&bit)!=0;
+        }
         bool CanAcquire(FarmObservation o){return CanAcquire(o,attackHostile);}
         static bool CanAcquire(FarmObservation o,bool includeHostile)
         {return GrindRecoveryPolicy.CanAttack(o)&&(o.InCombat&&(!o.TargetVictimKnown||o.TargetTargetsPlayer)||(o.TargetReaction==4||includeHostile&&o.TargetReaction>=1&&o.TargetReaction<=3)&&!Contested(o));}
@@ -316,12 +353,13 @@ namespace WoWProbe
             if(c.Action==QuickAction.StealthExit)return !o.InCombat&&o.Health==100;
             if(c.Action==QuickAction.Vanish)return o.InCombat&&o.Health>0&&o.Health<15&&o.PowerType==3;
             if(c.Action==QuickAction.Skill&&!c.RangedSkill&&!c.MeleeConfirmed&&(!o.RangeKnown||!o.TargetInRange))return false;
-            if(!o.InCombat&&Contested(o)&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill||c.Action==QuickAction.RouteProbe))return false;
+            if(c.Action==QuickAction.Skill&&c.RangedSkill&&!RangedKeyAllowed(c.Key,o,c.MeleeConfirmed,c.InputStarted))return false;
+            if(!o.InCombat&&Contested(o)&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill||c.Action==QuickAction.RouteProbe||c.Action==QuickAction.ApproachForward))return false;
             if(c.Action==QuickAction.InterruptSkin)return o.InCombat&&(o.Casting||o.Channeling);
             if(c.RouteMovement)return !o.InCombat&&!(CanAcquire(o,c.AttackHostile)&&c.RouteContext.MayAcquire(o)&&o.TargetToken!=c.IgnoredTarget);
             if(c.Action==QuickAction.ReturnToRoute)return c.RouteContext!=null&&c.RouteContext.Returning&&!o.InCombat;
             if(c.Action==QuickAction.RouteProbe)return c.RouteContext!=null&&!c.RouteContext.Returning&&!o.InCombat&&CanAcquire(o,c.AttackHostile)&&o.TargetToken==c.Token&&!o.TargetPositionKnown;
-            if(c.RouteContext!=null&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill)&&!c.RouteContext.TargetAllowed(o))return false;
+            if(c.RouteContext!=null&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill||c.Action==QuickAction.ApproachForward)&&!c.RouteContext.TargetAllowed(o))return false;
             if(c.Action==QuickAction.Scan)return true;
             if(c.Action==QuickAction.CorpseSelect)return !o.InCombat;
             if(c.Action==QuickAction.Reacquire)return !o.TargetExists||o.TargetIdentityKnown&&o.TargetToken==c.Token&&!o.TargetIsPlayer;
@@ -331,6 +369,7 @@ namespace WoWProbe
             if(c.Action==QuickAction.Food||c.Action==QuickAction.Drink)return !o.InCombat;
             if(!o.TargetExists||!o.TargetIdentityKnown||c.Token==0||o.TargetToken!=c.Token||o.TargetIsPlayer||!o.AttackabilityKnown||!o.TargetDeadKnown)return false;
             if(c.Action==QuickAction.CorpseApproach)return o.TargetDead&&!o.InCombat&&(o.LootKnown&&o.Lootable||o.SkinKnown&&o.Skinnable);
+            if(c.Action==QuickAction.ApproachForward)return !o.InCombat&&!o.TargetDead&&o.TargetCanAttack&&(c.ApproachRangeMask==0?(!o.RangeKnown||!o.TargetInRange):(o.ActionRangeKnownMask&o.ActionsInRangeMask&c.ApproachRangeMask)==0);
             if(c.Action==QuickAction.BackOff||c.Action==QuickAction.DetourTurn||c.Action==QuickAction.DetourForward)return (c.CombatRecovery?o.InCombat:!o.InCombat)&&!o.TargetDead&&o.TargetCanAttack;
             if(c.Action==QuickAction.Skin)return o.TargetDead&&!o.InCombat&&o.SkinKnown&&o.Skinnable&&o.SkinBindingKnown&&o.SkinBindingCorrect;
             return c.Action==QuickAction.Loot?o.TargetDead&&!o.InCombat:!o.TargetDead&&o.TargetCanAttack;
