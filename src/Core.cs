@@ -109,6 +109,15 @@ namespace WoWProbe
         }
     }
 
+    public static class MapIdentity
+    {
+        // C_Map and GetCurrentMapAreaID identify the coordinate space. Zone text
+        // can change at a building entrance without changing those coordinates.
+        // Legacy continent/zone-index fallback retains its additional name check.
+        public static bool Matches(uint a,int am,string az,uint b,int bm,string bz)
+        {return a!=0&&a==b&&am==bm&&am>=1&&am<=3&&!String.IsNullOrWhiteSpace(az)&&!String.IsNullOrWhiteSpace(bz)&&(am!=3||String.Equals(az,bz,StringComparison.Ordinal));}
+    }
+
     /// <summary>A live stream alone is insufficient when required game API reads are unknown.</summary>
     public static class InputEligibility
     {

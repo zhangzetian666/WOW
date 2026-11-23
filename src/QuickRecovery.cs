@@ -22,12 +22,12 @@ namespace WoWProbe
         readonly double deathX=Double.NaN,deathY=Double.NaN;
         Navigator navigator;long started=-1,last=-1,clickedAt=-1;int sequence=-1,aliveFrames,resurrectAttempts;bool released,resurrected;double corpseX=Double.NaN,corpseY;
         public static bool RouteMatches(RouteDocument route,FarmObservation state)
-        {return route!=null&&state!=null&&route.RouteType=="corpse_run"&&route.MapId==state.MapId&&route.MapMode==state.MapMode&&route.Zone==state.Zone;}
+        {return route!=null&&state!=null&&route.RouteType=="corpse_run"&&MapIdentity.Matches(route.MapId,route.MapMode,route.Zone,state.MapId,state.MapMode,state.Zone);}
         public QuickRecovery(RouteDocument route,NavigationCalibration calibration,FarmObservation death,bool actualCorpseRouting=false)
         {
             if(calibration==null||death==null||route==null&&!actualCorpseRouting)throw new ArgumentNullException("recovery configuration");
             calibration.Validate();if(route!=null){route.Validate();if(!RouteMatches(route,death))throw new InvalidOperationException("跑尸路线与当前地图不匹配。");}
-            if(calibration.MapId!=death.MapId||calibration.MapMode!=death.MapMode||calibration.Zone!=death.Zone)throw new InvalidOperationException("跑尸移动参数与当前地图不匹配。");
+            if(!MapIdentity.Matches(calibration.MapId,calibration.MapMode,calibration.Zone,death.MapId,death.MapMode,death.Zone))throw new InvalidOperationException("跑尸移动参数与当前地图不匹配。");
             this.route=route==null?null:route.Clone();this.calibration=calibration.Clone();map=death.MapId;mode=death.MapMode;zone=death.Zone;this.actualCorpseRouting=actualCorpseRouting;
             if(death.PlayerDead&&!death.PlayerGhost&&NavigationMath.InRange(death.X,0,1)&&NavigationMath.InRange(death.Y,0,1)){deathX=death.X;deathY=death.Y;}
         }
@@ -40,7 +40,7 @@ namespace WoWProbe
             if(now-started>(route!=null&&route.RouteId=="recorded-ghost"?1800000:240000))return Stop("跑尸复活超时，停止检查路线。");
             if(o==null||!o.Fresh||o.Farm==null||!o.Farm.Fresh||!o.Farm.KnownCore||o.Farm.ReadFailures!=0)return Stop("复活状态或按钮数据不可读。");
             var f=o.Farm;
-            if(f.MapId!=map||f.MapMode!=mode||f.Zone!=zone)return Stop("复活地图发生变化。");
+            if(!MapIdentity.Matches(f.MapId,f.MapMode,f.Zone,map,mode,zone))return Stop("复活地图发生变化。");
             if(!f.PlayerDead&&!f.PlayerGhost)
             {
                 if(f.Health<=0||f.Health>100)return Stop("复活后尚不能确认正生命值。");

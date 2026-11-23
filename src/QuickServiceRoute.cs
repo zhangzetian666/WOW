@@ -14,7 +14,13 @@ namespace WoWProbe
             Add(start);lastPoint=lastGood=lastTime=now;sampleX=start.X;sampleY=start.Y;sequence=start.Sequence;
         }
         void Check(FarmObservation o)
-        {if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||(ghost?o.PlayerDead&&!o.PlayerGhost:o.PlayerDead||o.PlayerGhost)||!plan.MapMatches(o)||!NavigationMath.InRange(o.X,0,1)||!NavigationMath.InRange(o.Y,0,1))throw new InvalidOperationException(ghost?"跑尸录制需要存活或灵魂状态、同一地图和有效坐标。":"录制坐标失效、死亡或地图变化；请回到最后录点后重试，不能跨过未记录路段。");}
+        {
+            if(o==null||!o.Fresh)throw new InvalidOperationException("坐标采样暂不可读或已过期；录制保留，切回游戏露出左上色块后重试。");
+            if(!o.KnownCore||o.ReadFailures!=0)throw new InvalidOperationException("插件核心状态不完整，读取错误码="+o.ReadFailures+"；等待有效坐标，已录点保留。");
+            if(ghost?o.PlayerDead&&!o.PlayerGhost:o.PlayerDead||o.PlayerGhost)throw new InvalidOperationException(ghost?"角色尚未释放灵魂；跑尸路线可在存活或灵魂状态录制。":"当前角色死亡或处于灵魂状态；自动售卖路线需要存活时录制。");
+            if(!plan.MapMatches(o))throw new InvalidOperationException("坐标地图发生变化：原地图"+plan.Route.MapId+"/模式"+plan.Route.MapMode+"（"+plan.Route.Zone+"），当前"+o.MapId+"/模式"+o.MapMode+"（"+o.Zone+"）；不能把不同地图坐标串接为一条路线。");
+            if(!NavigationMath.InRange(o.X,0,1)||!NavigationMath.InRange(o.Y,0,1))throw new InvalidOperationException("当前坐标超出有效范围，已录点保留，请等待坐标恢复。");
+        }
         void Add(FarmObservation o){if(points.Count>=4990)throw new InvalidOperationException("NPC路线已达到4990点，请结束录制。");points.Add(new Waypoint{X=o.X,Y=o.Y,Tolerance=.0004});}
         public bool Observe(FarmObservation o,long now,bool endpoint=false)
         {

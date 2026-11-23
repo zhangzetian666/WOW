@@ -38,7 +38,7 @@ namespace WoWProbe
             if(live&&!Calibration.Confirmed)throw new InvalidOperationException("请先核对本机地图与移动参数。");
         }
         public QuickRoutePlan Clone(){return new QuickRoutePlan{SkillRows=SkillRows==null?null:(string[])SkillRows.Clone(),RandomRoutes=RandomRoutes,TimedBreaks=TimedBreaks,RouteVariation=RouteVariation,RandomRouteSeed=RandomRouteSeed,SchemaVersion=SchemaVersion,UseRogueVanish=UseRogueVanish,AttackHostile=AttackHostile,NoChatCombat=NoChatCombat,StartAttackKey=StartAttackKey,LastTargetKey=LastTargetKey,StopAttackKey=StopAttackKey,Route=Route.Clone(),Calibration=Calibration.Clone(),CorridorWidth=CorridorWidth,CombatRadius=CombatRadius,OpeningKeys=OpeningKeys,LoopKeys=LoopKeys,SkillIntervalMs=SkillIntervalMs,RestBelowPercent=RestBelowPercent,DrinkKey=DrinkKey,Vendor=Vendor.Clone(),Repair=Repair.Clone()};}
-        public bool MapMatches(FarmObservation o){return o!=null&&o.MapId==Route.MapId&&o.MapMode==Route.MapMode&&o.Zone==Route.Zone;}
+        public bool MapMatches(FarmObservation o){return o!=null&&MapIdentity.Matches(o.MapId,o.MapMode,o.Zone,Route.MapId,Route.MapMode,Route.Zone);}
         public double DistanceToRoute(double x,double y)
         {double px,py;int end;Project(x,y,out px,out py,out end);return NavigationMath.Distance(x-px,y-py,Calibration.AxisScale);}
         public bool Contains(double x,double y)

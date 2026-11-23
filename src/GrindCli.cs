@@ -158,7 +158,7 @@ namespace WoWProbe
                     for(int i=5;i>0;i--)
                     {
                         var ready=read();
-                        if(backend.IsEmergencyPressed()||!ready.Fresh||!ready.KnownCore||ready.ReadFailures!=0||ready.MapId!=anchor.MapId||ready.MapMode!=anchor.MapMode||ready.Zone!=anchor.Zone)throw new InvalidOperationException("倒计时期间急停或状态失效。");
+                        if(backend.IsEmergencyPressed()||!ready.Fresh||!ready.KnownCore||ready.ReadFailures!=0||!MapIdentity.Matches(ready.MapId,ready.MapMode,ready.Zone,anchor.MapId,anchor.MapMode,anchor.Zone))throw new InvalidOperationException("倒计时期间急停或状态失效。");
                         write(i+"秒后开始，保持游戏前台，F12急停。");Thread.Sleep(1000);
                     }
                     input.Ensure();

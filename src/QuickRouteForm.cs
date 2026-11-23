@@ -134,7 +134,7 @@ namespace WoWProbe
             if(!p.RandomRoutes)return;string dir=Path.Combine(Path.GetDirectoryName(recordingPath),"random-routes");
             if(p.Route.Points.Count>2){var a=p.Route.Points[0];var z=p.Route.Points[p.Route.Points.Count-1];if(a.X==z.X&&a.Y==z.Y)QuickRouteVariants.Export(dir,"patrol",QuickRouteVariants.For(p,p.Route,20));}
             var service=p.Vendor.RouteComplete?p.Vendor:p.Repair;if(service.RouteComplete)QuickRouteVariants.Export(dir,"npc",QuickRouteVariants.For(p,QuickRouteVariants.Service(p,service),10));
-            if(File.Exists(CorpsePath)){var r=RouteStore.Load(CorpsePath);if(r.MapId==p.Route.MapId&&r.MapMode==p.Route.MapMode&&r.Zone==p.Route.Zone)QuickRouteVariants.Export(dir,"corpse",QuickRouteVariants.For(p,r,5));}
+            if(File.Exists(CorpsePath)){var r=RouteStore.Load(CorpsePath);if(MapIdentity.Matches(r.MapId,r.MapMode,r.Zone,p.Route.MapId,p.Route.MapMode,p.Route.Zone))QuickRouteVariants.Export(dir,"corpse",QuickRouteVariants.For(p,r,5));}
             info.Text="随机路线已保存到："+dir;
         }
         void ExportVariants(){var p=ReadPlan(false);p.RandomRoutes=true;ExportAvailable(p);}
@@ -159,7 +159,7 @@ namespace WoWProbe
             }
             if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||(ghost?o.PlayerDead&&!o.PlayerGhost:o.PlayerDead||o.PlayerGhost)||o.InCombat||!NavigationMath.InRange(o.X,0,1)||!NavigationMath.InRange(o.Y,0,1))throw new InvalidOperationException(ghost?"请在存活或灵魂状态、脱战时录制跑尸路线。":"未读到新鲜、存活且脱战的角色坐标，未保存巡航点。");return o;
         }
-        void ReadMap(){var o=Current();if(grid.Rows.Count>1&&mapId.Text!=""&&(mapId.Text!=o.MapId.ToString()||zone.Text!=o.Zone))throw new InvalidOperationException("当前地图与已有路点不同，请先另存或清空原路点。");mapId.Text=o.MapId.ToString();mode.Value=o.MapMode;zone.Text=o.Zone;}
+        void ReadMap(){var o=Current();if(grid.Rows.Count>1&&mapId.Text!=""&&(mapId.Text!=o.MapId.ToString()||(int)mode.Value!=o.MapMode||(o.MapMode==3&&zone.Text!=o.Zone)))throw new InvalidOperationException("当前地图与已有路点不同，请先另存或清空原路点。");mapId.Text=o.MapId.ToString();mode.Value=o.MapMode;zone.Text=o.Zone;}
         void NewRoute()
         {
             if(RecordingServiceRoute)throw new InvalidOperationException("请先结束当前路线录制。");
@@ -181,7 +181,7 @@ namespace WoWProbe
         }
         void CapturePoint()
         {
-            var o=Current();if(mapId.Text==""){mapId.Text=o.MapId.ToString();mode.Value=o.MapMode;zone.Text=o.Zone;}if(mapId.Text!=o.MapId.ToString()||(int)mode.Value!=o.MapMode||zone.Text!=o.Zone)throw new InvalidOperationException("当前地图与方案不同，不能混录。");
+            var o=Current();if(mapId.Text==""){mapId.Text=o.MapId.ToString();mode.Value=o.MapMode;zone.Text=o.Zone;}if(mapId.Text!=o.MapId.ToString()||(int)mode.Value!=o.MapMode||(o.MapMode==3&&zone.Text!=o.Zone))throw new InvalidOperationException("当前地图与方案不同，不能混录。");
             var p=ReadEditor();if(p.Route.Points.Count>2){var a=p.Route.Points[0];var z=p.Route.Points[p.Route.Points.Count-1];if(a.X==z.X&&a.Y==z.Y)p.Route.Points.RemoveAt(p.Route.Points.Count-1);}
             p.Route.Points.Add(new Waypoint{X=Math.Round(o.X*100,3)/100,Y=Math.Round(o.Y*100,3)/100,Tolerance=(double)tolerance.Value/100});
             QuickRoutePlan.SaveRecording(recordingPath,p);bool wasConfirmed=confirmed.Checked;Bind(p);confirmed.Checked=wasConfirmed;info.Text="已保存巡航点"+grid.Rows[grid.Rows.Count-2].Cells[0].Value+"；走到下一处后再次点击。草稿已写入本机。";
@@ -192,6 +192,6 @@ namespace WoWProbe
         void LoadPlanFile(){using(var d=new OpenFileDialog{Filter="巡航方案、旧路线或录点草稿|*.json"})if(d.ShowDialog()==DialogResult.OK){var p=QuickRoutePlan.Import(d.FileName);Bind(p);QuickRoutePlan.SaveRecording(recordingPath,p);}}
         void Save(){var p=ReadPlan(false);using(var d=new SaveFileDialog{Filter="巡航方案|*.json",FileName="我的巡航路线.json"})if(d.ShowDialog()==DialogResult.OK){QuickRoutePlan.Save(d.FileName,p);AutoExport();}}
         void ImportRoute(){LoadPlanFile();}
-        void ImportCalibration(){using(var d=new OpenFileDialog{Filter="地图标定|*.json"})if(d.ShowDialog()==DialogResult.OK){if(new FileInfo(d.FileName).Length>65536)throw new FormatException("标定文件过大。");var c=new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<NavigationCalibration>(File.ReadAllText(d.FileName));c.Validate();var p=ReadPlan(false);if(c.MapId!=p.Route.MapId||c.MapMode!=p.Route.MapMode||c.Zone!=p.Route.Zone)throw new FormatException("标定与路线地图不同。");p.Calibration=c;Bind(p);}}
+        void ImportCalibration(){using(var d=new OpenFileDialog{Filter="地图标定|*.json"})if(d.ShowDialog()==DialogResult.OK){if(new FileInfo(d.FileName).Length>65536)throw new FormatException("标定文件过大。");var c=new System.Web.Script.Serialization.JavaScriptSerializer().Deserialize<NavigationCalibration>(File.ReadAllText(d.FileName));c.Validate();var p=ReadPlan(false);if(!MapIdentity.Matches(c.MapId,c.MapMode,c.Zone,p.Route.MapId,p.Route.MapMode,p.Route.Zone))throw new FormatException("标定与路线地图不同。");p.Calibration=c;Bind(p);}}
     }
 }

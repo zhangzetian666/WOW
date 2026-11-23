@@ -53,3 +53,6 @@ IInputBackend { bool IsTargetForeground(); bool IsEmergencyPressed(); bool IsKey
 InputGuard(IInputBackend backend, Func<long> clock, Func<bool> dataFresh).
 InputGuard.Schedule(ushort key,int delayMs,int holdMs); InputGuard.Tick(); InputGuard.Stop(string reason); properties Status(string), Pending(bool), Active(bool), LastReason(string).
 Schedule allows only W,S,A,D,Q,E,TAB,F,1,2,3,4,5,8,9,SPACE; delay 5000ms; hold 60..250ms. Schedule does not emit input or require current focus (user has countdown to focus game). Tick checks emergency, data freshness and target focus before KeyDown, and keeps checking until KeyUp; at due time failure cancels rather than waiting to regain focus. Stop cancels pending and releases only keys the tool pressed, even if focus moved. Backend exceptions latch stopped reason; no automatic retry/re-arm. Status and state access are thread safe.
+
+## 坐标空间身份（0.8.49）
+现代C_Map（模式1）与GetCurrentMapAreaID（模式2）以非零地图编号及模式判断坐标空间；GetRealZoneText在进入建筑时可能变化，非空区域名称作为显示信息，不再单独导致快速巡航、NPC录制/导航、跑尸和输入保护误停。模式3仍需名称一致。不同地图编号或模式、空名称、无效坐标与不新鲜数据仍被拒绝。

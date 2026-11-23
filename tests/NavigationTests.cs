@@ -9,6 +9,7 @@ internal static class NavigationTests
     private static int Main()
     {
         Run("calibration rejects invalid numeric bounds and route identity", CalibrationValidation);
+        Run("modern map subzone names may change but coordinate IDs modes and legacy names remain checked",delegate{var route=Route(.5,.5,.6,.5);var c=Calibration();c.Zone="Another subzone";var nav=new Navigator(route,c,false,false,0);var sample=Sample(1,.5,.5,0);sample.Zone="Building";Check(nav.Step(sample,0).Action!=NavigationAction.Stop,"modern subzone rejected");route.MapMode=c.MapMode=3;c.Zone=route.Zone;nav=new Navigator(route,c,false,false,0);sample.MapMode=3;Check(nav.Step(sample,0).Action==NavigationAction.Stop,"legacy fallback accepted a different zone");});
         Run("sample conversion retains unavailable and dangerous packet states", PacketConversion);
         Run("explicit corpse travel preserves real ghost state and rejects living travel", CorpsePurpose);
         Run("explicit vendor travel allows full bags but still rejects death and combat", VendorPurpose);
@@ -207,7 +208,7 @@ internal static class NavigationTests
     }
     private static void InvalidSamplesAndTime()
     {
-        Action<NavigationSample>[] faults = { s => s.X = Double.NaN, s => s.Y = 1.01, s => s.X = -0.1, s => s.Facing = Double.PositiveInfinity, s => s.MapId++, s => s.MapMode = 2, s => s.Zone = "Other zone", s => s.Zone = null };
+        Action<NavigationSample>[] faults = { s => s.X = Double.NaN, s => s.Y = 1.01, s => s.X = -0.1, s => s.Facing = Double.PositiveInfinity, s => s.MapId++, s => s.MapMode = 2, s => s.Zone = null };
         foreach (Action<NavigationSample> fault in faults)
         { Navigator n = New(Route(0.5, 0.2, 0.6, 0.5), 0); NavigationSample s = Sample(1, 0.5, 0.5, 0); fault(s); Equal(NavigationAction.Stop, n.Step(s, 0).Action, "invalid state stops"); }
         Navigator a = New(Route(0.5, 0.2, 0.6, 0.5), 0); a.Step(Sample(1, 0.5, 0.5, 0), 100); Equal(NavigationAction.Stop, a.Step(Sample(1, 0.5, 0.5, 0), 99).Action, "clock reversal on duplicate");

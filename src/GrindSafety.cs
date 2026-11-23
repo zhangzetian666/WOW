@@ -21,7 +21,7 @@ namespace WoWProbe
                 if(!backend.IsTargetForeground())Stop("Target window lost foreground during CLI operation.");
                 long now=clock();if(now<0||now<lastTime)Stop("CLI monotonic clock moved backwards.");lastTime=now;
                 var o=reader();if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0)Stop("CLI observations are unavailable, unknown or stale.");
-                if(o.MapId!=mapId||o.MapMode!=mapMode||!String.Equals(o.Zone,zone,StringComparison.Ordinal))Stop("CLI map identity changed.");
+                if(!MapIdentity.Matches(o.MapId,o.MapMode,o.Zone,mapId,mapMode,zone))Stop("CLI map identity changed.");
                 if(backend.IsEmergencyPressed())Stop("Emergency stop during CLI checks.");if(!backend.IsTargetForeground())Stop("Target window lost foreground during CLI checks.");
                 if(safety.Faulted)Stop("Input failure was latched during CLI checks: "+safety.Reason);
             }catch(Exception ex){stopped=true;reason=ex.Message;throw new InvalidOperationException(reason,ex);}

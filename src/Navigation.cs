@@ -181,7 +181,7 @@ namespace WoWProbe
             if(purpose==NavigationPurpose.CorpseRun)
             {if(!sample.Ghost)return "Corpse navigation requires the player's actual known ghost state.";}
             else if(sample.Dead||sample.Ghost||(purpose==NavigationPurpose.Patrol&&sample.BagFull))return "Dead, ghost or full-bag state stopped navigation.";
-            if (sample.MapId != route.MapId || sample.MapMode != route.MapMode || !String.Equals(sample.Zone, route.Zone, StringComparison.Ordinal))
+            if (!MapIdentity.Matches(sample.MapId,sample.MapMode,sample.Zone,route.MapId,route.MapMode,route.Zone))
                 return "Map identity, map mode or zone changed.";
             if (!NavigationMath.InRange(sample.X, 0, 1) || !NavigationMath.InRange(sample.Y, 0, 1) || !NavigationMath.Finite(sample.Facing))
                 return "Position or facing is invalid.";
@@ -283,7 +283,7 @@ namespace WoWProbe
             if (original == null) throw new ArgumentNullException("original");
             if (calibration == null) throw new ArgumentNullException("calibration");
             RouteDocument snapshot = original.Clone(); snapshot.Validate(); calibration.Validate();
-            if (calibration.MapId != snapshot.MapId || calibration.MapMode != snapshot.MapMode || !String.Equals(calibration.Zone, snapshot.Zone, StringComparison.Ordinal))
+            if (!MapIdentity.Matches(calibration.MapId,calibration.MapMode,calibration.Zone,snapshot.MapId,snapshot.MapMode,snapshot.Zone))
                 throw new ArgumentException("Navigation calibration does not match the route's map identity.");
             if (startIndex < 0 || startIndex > snapshot.Points.Count) throw new ArgumentOutOfRangeException("startIndex");
             if (loop)
