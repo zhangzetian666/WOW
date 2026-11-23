@@ -172,10 +172,11 @@ namespace WoWProbe
                 if(!rangedCombat&&o.InCombat&&o.PowerType==3&&o.Health<45&&now>=nextDefensive)
                 {nextDefensive=now+120000;return Cmd(QuickAction.Defensive,"血量低于45%，尝试9闪避；继续当前战斗。",57);}
                 if(o.MeleeEventsKnown&&o.MeleeHitToken==token&&o.MeleeHits!=meleeBaseline)meleeConfirmed=true;
+                if(meleeConfirmed&&escapeCombat){escapePhase=0;escapeCombat=false;combatEscapes=0;}
                 // Some clients register combat-log events without delivering them.
                 // This is a separate defensive contact fallback, not a claimed player swing.
                 if(!meleeConfirmed&&o.InCombat&&o.TargetVictimKnown&&o.TargetTargetsPlayer&&o.Health<contactHealth&&o.Health<=100&&contactHealth<=100)
-                {meleeConfirmed=true;combatCastAt=now;var contact=Cmd(QuickAction.None,"普攻事件未返回；当前怪物正在攻击本人且已观察到实际掉血，启用技能设置中的按键。",0);contact.Report=true;return contact;}
+                {meleeConfirmed=true;combatCastAt=now;escapePhase=0;escapeCombat=false;combatEscapes=0;var contact=Cmd(QuickAction.None,"普攻事件未返回；当前怪物正在攻击本人且已观察到实际掉血，启用技能设置中的按键。",0);contact.Report=true;return contact;}
                 if(o.CastEventsKnown&&o.CastSuccess!=combatCasts){combatCasts=o.CastSuccess;combatCastAt=now;combatEscapes=0;}
                 int configuredMask=0;foreach(char configured in openingKeys+loopKeys)configuredMask|=ActionBit(configured);
                 if(configuredMask!=0&&(o.KnownActionsMask&configuredMask)==configuredMask&&(o.ReadyActionsMask&o.UsableActionsMask&configuredMask)==0)combatCastAt=now;

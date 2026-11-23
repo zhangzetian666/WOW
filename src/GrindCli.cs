@@ -325,17 +325,8 @@ namespace WoWProbe
                                     {
                                         var activeCommand=command;
                                         input=new GrindInputGuard(backend,()=>{var fresh=read();if(!MeleeApproach.Valid(activeCommand.Token,fresh)||!QuickCombat.Matches(activeCommand,fresh))throw new InvalidOperationException("目标状态变化，停止当前按键。");return fresh;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
-                                        if(!meleeApproach.Verified(command.Token))
-                                        {
-                                            var original=read();Pulse(backend,37,60);Pause(250);var turned=read();Pulse(backend,70,80);Pause(350);var restored=read();
-                                            bool aligned=meleeApproach.Verify(command.Token,original,turned,restored);
-                                            write("F目标朝向核验："+original.Facing.ToString("F3")+"→"+turned.Facing.ToString("F3")+"→"+restored.Facing.ToString("F3")+"；恢复目标方向="+aligned);
-                                        }
-                                        if(meleeApproach.Verified(command.Token))
-                                        {
-                                            var from=read();Pulse(backend,QuickMovement.Forward,700);Pause(100);var to=read();
-                                            write("近战补足距离：已核验F恢复目标朝向，按↑700毫秒；位置="+from.X.ToString("F5")+","+from.Y.ToString("F5")+"→"+to.X.ToString("F5")+","+to.Y.ToString("F5"));
-                                        }
+                                        var from=read();Pulse(backend,QuickMovement.Forward,700);Pause(100);var to=read();
+                                        write("近战补足距离：沿本目标F实际接近时的朝向按↑700毫秒；位置="+from.X.ToString("F5")+","+from.Y.ToString("F5")+"→"+to.X.ToString("F5")+","+to.Y.ToString("F5"));
                                     }
                                 }
                                 if(command.Action==QuickAction.Face&&plan.RangedCombat&&!command.AllowApproach)CancelQuickMovement(backend);
