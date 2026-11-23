@@ -1,7 +1,7 @@
 using System;
 namespace WoWProbe
 {
-    // Holds only our W across scanning/steering ticks. The host still checks its
+    // Holds only our forward key across scanning/steering ticks. The host still checks its
     // normal foreground, map, heartbeat and cancellation guard every loop.
     public sealed class QuickForwardMotion
     {
@@ -14,9 +14,9 @@ namespace WoWProbe
         public void Start()
         {
             ensure();if(Held)return;
-            if(backend.IsKeyAlreadyDown(87))throw new InvalidOperationException("用户正在按W，不能接管持续前进。");
+            if(backend.IsKeyAlreadyDown(QuickMovement.Forward))throw new InvalidOperationException("用户正在按前进键↑，不能接管持续前进。");
             ensure();Held=true;
-            try{backend.KeyDown(87);}catch(Exception ex){safety.Fail("持续前进按键失败："+ex.Message);Stop();throw;}
+            try{backend.KeyDown(QuickMovement.Forward);}catch(Exception ex){safety.Fail("持续前进按键失败："+ex.Message);Stop();throw;}
         }
         public void Observe(FarmObservation o)
         {
@@ -32,7 +32,7 @@ namespace WoWProbe
         public void Stop()
         {
             if(!Held)return;Held=false;
-            try{backend.KeyUp(87);}catch(Exception ex){safety.Fail("持续前进释放失败："+ex.Message);throw;}
+            try{backend.KeyUp(QuickMovement.Forward);}catch(Exception ex){safety.Fail("持续前进释放失败："+ex.Message);throw;}
         }
     }
 }

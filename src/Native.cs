@@ -98,6 +98,13 @@ namespace WoWProbe
         [DllImport("user32.dll", CharSet=CharSet.Unicode)] static extern short VkKeyScanW(char ch);
         [DllImport("user32.dll")] static extern bool ClipCursor(IntPtr rect);
         public static int InputStructureSize { get { return Marshal.SizeOf(typeof(INPUT)); } }
+        public static string ForegroundDescription()
+        {
+            IntPtr handle=GetForegroundWindow();uint pid;GetWindowThreadProcessId(handle,out pid);
+            var title=new StringBuilder(256);GetWindowText(handle,title,title.Capacity);string process="unknown";
+            try{using(var p=Process.GetProcessById((int)pid))process=p.ProcessName;}catch{}
+            return process+" ["+pid+"] hwnd="+handle+" "+title;
+        }
 
         public static List<WindowInfo> Windows()
         {

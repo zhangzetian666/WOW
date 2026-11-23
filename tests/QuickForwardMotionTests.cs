@@ -4,17 +4,17 @@ class QuickForwardMotionTests
 {
     sealed class Backend:IInputBackend
     {
-        public bool Focus=true,Emergency,UserHeld,FailDown,FailUp;public int Downs,Ups;
-        public bool IsTargetForeground(){return Focus;}public bool IsEmergencyPressed(){return Emergency;}public bool IsKeyAlreadyDown(ushort k){return UserHeld;}
-        public void KeyDown(ushort k){Downs++;if(FailDown)throw new InvalidOperationException("partial down");}
-        public void KeyUp(ushort k){Ups++;if(FailUp)throw new InvalidOperationException("failed release");}
+        public bool Focus=true,Emergency,UserHeld,FailDown,FailUp;public int Downs,Ups;public ushort DownKey,UpKey,CheckedKey;
+        public bool IsTargetForeground(){return Focus;}public bool IsEmergencyPressed(){return Emergency;}public bool IsKeyAlreadyDown(ushort k){CheckedKey=k;return UserHeld;}
+        public void KeyDown(ushort k){DownKey=k;Downs++;if(FailDown)throw new InvalidOperationException("partial down");}
+        public void KeyUp(ushort k){UpKey=k;Ups++;if(FailUp)throw new InvalidOperationException("failed release");}
     }
     static FarmObservation O(){return new FarmObservation{Fresh=true,KnownCore=true,Health=100,ChatOpenKnown=true,CastingKnown=true};}
     static void Check(bool b){if(!b)throw new Exception("Continuous search movement differs.");}
     static int Main()
     {
         var b=new Backend();var latch=new InputFailureLatch();var m=new QuickForwardMotion(b,()=>{},latch);
-        m.Start();for(int i=0;i<100;i++){m.Observe(O());m.Start();}Check(m.Held&&b.Downs==1&&b.Ups==0);m.Stop();m.Stop();Check(b.Ups==1&&!m.Held);
+        m.Start();for(int i=0;i<100;i++){m.Observe(O());m.Start();}Check(m.Held&&b.Downs==1&&b.Ups==0);m.Stop();m.Stop();Check(b.Ups==1&&!m.Held);Check(b.DownKey==38&&b.UpKey==38&&b.CheckedKey==38);
         for(int fail=0;fail<10;fail++)
         {
             b=new Backend();m=new QuickForwardMotion(b,()=>{},new InputFailureLatch());m.Start();var o=O();

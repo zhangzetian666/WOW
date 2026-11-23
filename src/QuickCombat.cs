@@ -10,8 +10,8 @@ namespace WoWProbe
         public QuickAction Action; public ushort Key; public uint Token,IgnoredTarget; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement,PauseForward,CombatRecovery;public QuickRouteFollower RouteContext;
     }
 
-    // Nearby combat only. Prefer interaction at the observed target nameplate.
-    // A target binding alone does not prove that the character faces that target.
+    // Native target interaction; do not infer character bearing from camera space.
+    // A target selection or interaction binding alone does not prove movement.
     public sealed class QuickCombat
     {
         readonly uint map; readonly int mode; readonly string zone;
@@ -24,8 +24,6 @@ namespace WoWProbe
         string openingKeys,loopKeys;readonly QuickSkillRows skillRows;int loopIndex;
         bool openingPending;uint openingCast;int sliceRecovery;uint sliceCast;char retryFinisher;
         bool meleeConfirmed;uint meleeBaseline;
-        uint visuallyApproachedToken;
-        public void ConfirmVisualApproach(uint targetToken){if(targetToken!=0&&targetToken==token)visuallyApproachedToken=targetToken;}
         bool rangedMoving;long nextRangedReport;uint rangedTarget;
         int contactHealth=255;
         long lastDefenseScan=-10000;
@@ -189,12 +187,12 @@ namespace WoWProbe
                     {
                         if(!MouseLookInput.TurnObserved(escapeFacing,o.Facing))
                             return now<turnDeadline?Cmd(QuickAction.None,"等待确认角色实际转向，暂不前进。",0):Stop("右键转向后未观察到角色朝向变化，停止前进。");
-                        escapePhase=0;progressAt=now;nextFace=now+500;var forward=Cmd(QuickAction.DetourForward,"脱困：已确认转向，沿新方向短距离移动，再重新面向目标。",87);escapeCombat=false;return forward;
+                        escapePhase=0;progressAt=now;nextFace=now+500;var forward=Cmd(QuickAction.DetourForward,"脱困：已确认转向，沿新方向短距离移动，再重新面向目标。",QuickMovement.Forward);escapeCombat=false;return forward;
                     }
                 }
                 // The configured rogue loop needs energy. Waiting for a resource
                 // is not evidence of a blocked approach or a wrong facing.
-                if(!rangedCombat&&o.InCombat&&o.CastEventsKnown&&now-combatCastAt>=3500&&(o.PowerType!=3||o.Power>100||o.Power>=45))
+                if(!rangedCombat&&!meleeConfirmed&&o.InCombat&&o.CastEventsKnown&&now-combatCastAt>=3500&&(o.PowerType!=3||o.Power>100||o.Power>=45))
                 {
                     if(combatEscapes>=3){combatEscapes=0;combatCastAt=now+10000;}
                     else{combatEscapes++;combatCastAt=now;escapeCombat=true;escapePhase=1;return Cmd(QuickAction.BackOff,"战斗中持续无成功施法：后退换向并试走，绕开遮挡后重新面向攻击者。",83);}
@@ -204,7 +202,7 @@ namespace WoWProbe
                 {progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;progressAt=now;}
                 if(!rangedCombat&&!o.InCombat&&now-progressAt>=4500)
                 {
-                    if(visuallyApproachedToken!=token&&!o.TargetPositionKnown)return route!=null?AbandonChase(now,"当前目标位置无法确认，不沿未核实的朝向前进；返回路线继续寻怪。"):Stop("当前目标位置无法确认，请让怪物姓名板出现在画面内。");
+                    if(!o.TargetPositionKnown)return route!=null?AbandonChase(now,"交互后没有实际接近，返回已录路线继续寻找近处目标。"):Stop("交互后没有实际接近，请核对本角色移动设置。");
                     if(escapes>=2)return route!=null?AbandonChase(now,"两次脱困仍未接近目标，返回路线寻找下一只。"):Stop("连续两次换向仍无法接近怪物，停止以免持续顶住障碍。");
                     escapes++;escapePhase=1;progressAt=now;return Cmd(QuickAction.BackOff,"位置持续不变且未进入战斗：取消直走，后退后换向。",83);
                 }
@@ -217,7 +215,7 @@ namespace WoWProbe
                 if(approach&&!rangedMoving)nextFace=now;
                 if(rangedMoving&&!approach){rangedMoving=false;nextFace=long.MaxValue;return Cmd(QuickAction.RangedStop,"已进入技能距离，停止接近后攻击。",0);}
                 if(now>=nextFace)
-                {nextFace=rangedCombat&&!approach?long.MaxValue:now+1500;var face=Cmd(QuickAction.Face,rangedCombat?(approach?"远程目标尚未进入有效射程，核验画面目标后接近。":"远程：校正朝向，停稳后执行可用技能。"):"核验画面血条对应当前怪物，确认后右键接近。",0x46);face.AllowApproach=approach;rangedMoving=approach;return face;}
+                {nextFace=rangedCombat&&!approach?long.MaxValue:now+1500;var face=Cmd(QuickAction.Face,rangedCombat?(approach?"远程目标尚未进入有效射程，尝试F交互并核对实际位移。":"远程：F校正朝向，停稳后执行可用技能。"):meleeConfirmed?"已接触目标，F校正近战朝向。":"F：与当前目标交互，核对实际朝向和接近情况。",0x46);face.MeleeConfirmed=meleeConfirmed;face.AllowApproach=approach;rangedMoving=approach;return face;}
                 if(approach&&(o.ActionRangeKnownMask&rangedBit)!=0)return Cmd(QuickAction.None,"继续接近远程目标，等待进入有效射程。",0);
                 if(o.MeleeEventsKnown&&o.MeleeHitToken==token&&o.MeleeHits!=meleeBaseline)meleeConfirmed=true;
                 if(sliceRecovery==2&&o.CastEventsKnown&&o.CastSuccess!=sliceCast){sliceRecovery=3;}
@@ -254,7 +252,7 @@ namespace WoWProbe
                 return Cmd(QuickAction.None,"等待下一拍技能。",0);
             }
             if(ShouldAcquire(o,now))
-            {if(route!=null)route.Interrupt(o);token=o.TargetToken;visuallyApproachedToken=0;if(skillRows!=null){skillRows.Choose();this.openingKeys="";this.loopKeys=skillRows.Keys;}lockedTargetName=o.TargetName;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;meleeConfirmed=false;contactHealth=o.Health;meleeBaseline=o.MeleeHits;openingPending=false;sliceRecovery=0;opening=loopIndex=deadFrames=escapes=escapePhase=combatEscapes=0;escapeCombat=false;combatCastAt=now;combatCasts=o.CastSuccess;patrolPending=searchTurning=false;blockedWalks=searchEscapes=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName+(skillRows==null?"":"；随机技能行"+(skillRows.Selected+1)+"="+skillRows.Keys),0);}
+            {if(route!=null)route.Interrupt(o);token=o.TargetToken;if(skillRows!=null){skillRows.Choose();this.openingKeys="";this.loopKeys=skillRows.Keys;}lockedTargetName=o.TargetName;deathBase=o.TargetDeaths;creditBase=o.KillCredits;lockedName=o.NameHashKnown?o.TargetNameHash:0;missingTarget=missingCombatTarget=-1;reacquired=false;meleeConfirmed=false;contactHealth=o.Health;meleeBaseline=o.MeleeHits;openingPending=false;sliceRecovery=0;opening=loopIndex=deadFrames=escapes=escapePhase=combatEscapes=0;escapeCombat=false;combatCastAt=now;combatCasts=o.CastSuccess;patrolPending=searchTurning=false;blockedWalks=searchEscapes=0;looted=false;started=nextFace=nextSkill=progressAt=now;progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;scans=0;return Cmd(QuickAction.None,"锁定怪物："+o.TargetName+(skillRows==null?"":"；随机技能行"+(skillRows.Selected+1)+"="+skillRows.Keys),0);}
             if(route!=null&&!o.InCombat)
             {
                 if((route.SearchingNearby||!route.Returning)&&now>=nextScan){nextScan=now+1200;return Cmd(QuickAction.Scan,"移动中扫描附近怪物；附近无目标再前往巡航点。",9);}
@@ -290,9 +288,9 @@ namespace WoWProbe
             {
                 double desired=Math.Atan2(-(x-o.X)*1.5,-(y-o.Y));double delta=NavigationMath.Normalize(desired-o.Facing);
                 if(Math.Abs(delta)>.15){var turn=Cmd(QuickAction.Turn,"附近巡航：转向启动位置附近。",(ushort)(delta>0?37:39));turn.Hold=Math.Max(40,Math.Min(260,(int)(Math.Abs(delta)/5.85*1000)));return turn;}
-                var back=Cmd(QuickAction.Patrol,"持续巡航：行进中返回中心区域。",87);back.Hold=800;patrolPending=true;patrolCheckAt=now+800;patrolX=o.X;patrolY=o.Y;return back;
+                var back=Cmd(QuickAction.Patrol,"持续巡航：行进中返回中心区域。",QuickMovement.Forward);back.Hold=800;patrolPending=true;patrolCheckAt=now+800;patrolX=o.X;patrolY=o.Y;return back;
             }
-            if(!o.InCombat&&scans%2==0){nextScan=now+300;var walk=Cmd(QuickAction.Patrol,"持续前进并扫描；发现怪物后接近攻击。",87);walk.Hold=1000;patrolPending=true;patrolCheckAt=now+1000;patrolX=o.X;patrolY=o.Y;return walk;}
+            if(!o.InCombat&&scans%2==0){nextScan=now+300;var walk=Cmd(QuickAction.Patrol,"持续前进并扫描；发现怪物后接近攻击。",QuickMovement.Forward);walk.Hold=1000;patrolPending=true;patrolCheckAt=now+1000;patrolX=o.X;patrolY=o.Y;return walk;}
             return Cmd(QuickAction.Scan,"Tab：扫描附近怪物。",9);
         }
         public bool HasDeathEvidence(FarmObservation o,uint expected)

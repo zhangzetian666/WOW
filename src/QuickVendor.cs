@@ -21,7 +21,7 @@ namespace WoWProbe
         enum Phase {Outbound,Select,Open,WaitSale,Close,Return,Done}
         readonly QuickRoutePlan plan;readonly QuickVendorSettings settings;readonly RouteDocument outbound;RouteDocument returnVariant;public int OutboundChoice,ReturnChoice;
         public string RouteSummary {get{return "NPC去程="+QuickRandom.Label(OutboundChoice)+"；返程="+QuickRandom.Label(ReturnChoice);}}Navigator nav;Phase phase;
-        readonly RouteKeyBindings movement=new RouteKeyBindings{TurnLeft=37,TurnRight=39};
+        readonly RouteKeyBindings movement=new RouteKeyBindings{Forward=QuickMovement.Forward,TurnLeft=37,TurnRight=39};
         readonly System.Collections.Generic.HashSet<uint> rejected=new System.Collections.Generic.HashSet<uint>();
         public void ResumeAfterCombat(OperationObservation o,long now)
         {
@@ -97,7 +97,7 @@ namespace WoWProbe
                 if(detourPhase==1)detourFacing=f.Facing;
                 else if(!MouseLookInput.TurnObserved(detourFacing,f.Facing))return C(QuickVendorAction.Stop,"脱困转向后未确认朝向改变，停止盲目前进。");
                 var detour=C(QuickVendorAction.Key,detourPhase==1?"NPC路线受阻：转向换方向。":"NPC路线脱困：短距离试走，再接回原路线。");
-                detour.Key=(ushort)(detourPhase==1?39:87);detour.Hold=350;detourPhase=detourPhase==1?2:0;return detour;
+                detour.Key=(ushort)(detourPhase==1?39:QuickMovement.Forward);detour.Hold=350;detourPhase=detourPhase==1?2:0;return detour;
             }
             if(phase==Phase.Close&&closeAfterCombat){closeAfterCombat=false;var close=C(QuickVendorAction.Key,"反击结束，先关闭仍打开的商店再返回巡航。");close.Key=27;return close;}
             if(phase==Phase.Outbound||phase==Phase.Return)

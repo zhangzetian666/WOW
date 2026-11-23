@@ -58,7 +58,7 @@ namespace WoWProbe
         {
             int duration;ushort key;
             if(args.Length!=3||!Int32.TryParse(args[2],out duration)||duration<40||duration>1500)return 2;
-            switch(args[1]){case "forward":case "jump":key=87;break;case "back":key=83;break;case "left":key=37;break;case "right":key=39;break;case "strafeleft":key=65;break;case "straferight":key=68;break;default:return 2;}
+            switch(args[1]){case "forward":case "jump":key=QuickMovement.Forward;break;case "back":key=83;break;case "left":key=37;break;case "right":key=39;break;case "strafeleft":key=65;break;case "straferight":key=68;break;default:return 2;}
             var window=OpenTelemetry();var backend=new WindowsInputBackend(window,null);var o=Snapshot();
             Activate(window.Handle);
             input=new GrindInputGuard(backend,Snapshot,()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),new InputFailureLatch(),o.MapId,o.MapMode,o.Zone);
@@ -67,8 +67,8 @@ namespace WoWProbe
                 input.Ensure();
                 if(args[1]=="jump")
                 {
-                    if(backend.IsKeyAlreadyDown(87))throw new InvalidOperationException("用户正在按W。");
-                    try{backend.KeyDown(87);Pulse(backend,32,80);Pause(duration);}finally{backend.KeyUp(87);}
+                    if(backend.IsKeyAlreadyDown(QuickMovement.Forward))throw new InvalidOperationException("用户正在按前进键↑。");
+                    try{backend.KeyDown(QuickMovement.Forward);Pulse(backend,32,80);Pause(duration);}finally{backend.KeyUp(QuickMovement.Forward);}
                 }
                 else Pulse(backend,key,duration);
                 return 0;
@@ -116,6 +116,7 @@ namespace WoWProbe
             if(skipUnavailableSkin)skinning=false;
             var routeFollower=new QuickRouteFollower(plan,anchor);
             var engine = new QuickCombat(anchor, interval,skinning,routeFollower,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),false,plan.SkillRows,plan.RangedCombat);
+            var meleeApproach=new MeleeApproach();
             var safety = new InputFailureLatch();
             var stream=new QuickTelemetryStream(Snapshot,()=>clock.ElapsedMilliseconds,anchor);
             chatReader=stream.Read;
@@ -269,12 +270,12 @@ namespace WoWProbe
                         if(completedLoots+engine.Loots!=reportedLoots){reportedLoots=completedLoots+engine.Loots;write("已确认拾取窗口完成，累计拾取="+reportedLoots);}
                         if(completedSkins+engine.Skins!=reportedSkins){reportedSkins=completedSkins+engine.Skins;write("已确认剥皮成功，累计剥皮="+reportedSkins);}
                         if(command.Action==QuickAction.Stop){searchMotion.Stop();write(command.Reason);break;}
-                        if(command.Action==QuickAction.None){if(engine.IsResting&&!restMovementStopped){Pulse(backend,87,80);QuickRestPreparation.Wait(read,Pause);restMovementStopped=true;write("恢复等待：已停止移动，保留满血后继续的条件。");}if(command.Report)write(command.Reason);Pause(40);continue;}
+                        if(command.Action==QuickAction.None){if(engine.IsResting&&!restMovementStopped){Pulse(backend,QuickMovement.Forward,80);QuickRestPreparation.Wait(read,Pause);restMovementStopped=true;write("恢复等待：已停止移动，保留满血后继续的条件。");}if(command.Report)write(command.Reason);Pause(40);continue;}
                         bool keepMoving=!command.PauseForward&&(command.Action==QuickAction.Patrol||command.Action==QuickAction.RouteProbe||command.Action==QuickAction.Scan&&!observed.InCombat||command.Action==QuickAction.Turn&&!command.MouseTurn);
                         if(!keepMoving)searchMotion.Stop();
                         if(!QuickCombat.Matches(command,read())){searchMotion.Stop();CancelQuickMovement(backend);Pause(40);continue;}
                         write(command.Reason+" 窗口累计击杀="+killCounter.Total);
-                        if(command.Action==QuickAction.Skill&&!plan.RangedCombat&&autoAttackToken!=command.Token)
+                        if(command.Action==QuickAction.Face&&!plan.RangedCombat&&autoAttackToken!=command.Token)
                         {
                             input=guard();
                             try{if(plan.NoChatCombat){input=new GrindInputGuard(backend,()=>{var unit=read();if(!GrindRecoveryPolicy.CanAttack(unit)||unit.TargetToken!=command.Token||QuickCombat.Contested(unit))throw new InvalidOperationException("CLI chat target context changed.");return unit;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);Pulse(backend,QuickCombatHotkeys.Key(plan.StartAttackKey),80);}else ChatChecked(backend,"/startattack",()=>{var unit=read();return GrindRecoveryPolicy.CanAttack(unit)&&unit.TargetToken==command.Token&&!QuickCombat.Contested(unit);});}
@@ -312,32 +313,35 @@ namespace WoWProbe
                             {
                                 bool detour=command.Action==QuickAction.BackOff||command.Action==QuickAction.DetourTurn||command.Action==QuickAction.DetourForward;
                                 if(detour)CancelQuickMovement(backend);
-                                if((command.Action==QuickAction.Food||command.Action==QuickAction.Drink)&&!restMovementStopped){Pulse(backend,87,80);write("进食准备：停止移动，等待坐标连续稳定1秒。");QuickRestPreparation.Wait(read,Pause);restMovementStopped=true;}
+                                if((command.Action==QuickAction.Food||command.Action==QuickAction.Drink)&&!restMovementStopped){Pulse(backend,QuickMovement.Forward,80);write("进食准备：停止移动，等待坐标连续稳定1秒。");QuickRestPreparation.Wait(read,Pause);restMovementStopped=true;}
                                 if(command.RouteMovement&&command.Action==QuickAction.Turn&&!command.PauseForward)searchMotion.Start();
                                 int hold=command.Hold>0?command.Hold:command.Action==QuickAction.Turn?260:command.Action==QuickAction.BackOff?300:command.Action==QuickAction.DetourTurn?220:command.Action==QuickAction.DetourForward?600:80;
-                                var faceTarget=command.Action==QuickAction.Face?read():null;
-                                if(faceTarget!=null&&(!plan.RangedCombat||command.AllowApproach))
+                                var beforeFace=command.Action==QuickAction.Face?read():null;
+                                if(command.Action==QuickAction.Skill&&command.RangedSkill)RequireInput().Pulse(command.Key,hold,()=>command.InputStarted=true);else Pulse(backend,command.Key,hold);
+                                if(beforeFace!=null)
                                 {
-                                    System.Collections.Generic.List<Rectangle> bars;
-                                    using(var screen=Native.Capture(client))bars=VisualTargetBars.Find(screen);
-                                    bool found=false;
-                                    foreach(var box in bars)
+                                    Pause(250);var afterFace=read();write("原交互流程：F后朝向="+beforeFace.Facing.ToString("F3")+"→"+afterFace.Facing.ToString("F3")+"；位置="+beforeFace.X.ToString("F5")+","+beforeFace.Y.ToString("F5")+"→"+afterFace.X.ToString("F5")+","+afterFace.Y.ToString("F5"));
+                                    if(!plan.RangedCombat&&!command.MeleeConfirmed&&meleeApproach.Observe(command.Token,beforeFace,afterFace))
                                     {
-                                        var point=new Point(client.X+box.X+box.Width/2,client.Y+box.Y+box.Height/2);
-                                        input.Ensure();if(Native.ClientBounds(target)!=client||!client.Contains(point))throw new InvalidOperationException("目标状态变化，停止当前按键。");
-                                        Native.MoveMouse(point);Pause(240);var hovered=read();
-                                        if(!VisualTargetBars.HoverMatches(hovered,command.Token))continue;
-                                        input.Click(point,true,p=>{var fresh=read();if(!VisualTargetBars.HoverMatches(fresh,command.Token)||!QuickCombat.Matches(command,fresh))throw new InvalidOperationException("目标状态变化，停止当前按键。");return Native.ClientBounds(target)==client&&client.Contains(p);},Native.MoveMouse,Native.SendMouseButton);
-                                        engine.ConfirmVisualApproach(command.Token);autoAttackToken=command.Token;found=true;
-                                        write("画面血条核验通过，右键接近：目标="+faceTarget.TargetName+"；位置="+box+"。");break;
+                                        var activeCommand=command;
+                                        input=new GrindInputGuard(backend,()=>{var fresh=read();if(!MeleeApproach.Valid(activeCommand.Token,fresh)||!QuickCombat.Matches(activeCommand,fresh))throw new InvalidOperationException("目标状态变化，停止当前按键。");return fresh;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
+                                        if(!meleeApproach.Verified(command.Token))
+                                        {
+                                            var original=read();Pulse(backend,37,60);Pause(250);var turned=read();Pulse(backend,70,80);Pause(350);var restored=read();
+                                            bool aligned=meleeApproach.Verify(command.Token,original,turned,restored);
+                                            write("F目标朝向核验："+original.Facing.ToString("F3")+"→"+turned.Facing.ToString("F3")+"→"+restored.Facing.ToString("F3")+"；恢复目标方向="+aligned);
+                                        }
+                                        if(meleeApproach.Verified(command.Token))
+                                        {
+                                            var from=read();Pulse(backend,QuickMovement.Forward,700);Pause(100);var to=read();
+                                            write("近战补足距离：已核验F恢复目标朝向，按↑700毫秒；位置="+from.X.ToString("F5")+","+from.Y.ToString("F5")+"→"+to.X.ToString("F5")+","+to.Y.ToString("F5"));
+                                        }
                                     }
-                                    if(!found)write("画面候选血条"+bars.Count+"个，未核对到当前怪物；不盲点、不沿原方向直走。");
                                 }
-                                else if(command.Action==QuickAction.Skill&&command.RangedSkill)RequireInput().Pulse(command.Key,hold,()=>command.InputStarted=true);else Pulse(backend,command.Key,hold);
                                 if(command.Action==QuickAction.Face&&plan.RangedCombat&&!command.AllowApproach)CancelQuickMovement(backend);
                                 if(command.Action==QuickAction.Food||command.Action==QuickAction.Drink)engine.RestInputCompleted(clock.ElapsedMilliseconds,command.Action==QuickAction.Food);
-                                // F starts native approach/facing. Leave click-to-move active
-                                // between skills; subsequent observations enforce the chase leash.
+                                // Recheck target, contact and chase limits on the next frame;
+                                // an accepted interaction key is not movement evidence.
                             }
                         }
                         catch(InvalidOperationException ex)
@@ -359,16 +363,16 @@ namespace WoWProbe
                     write("已停止。窗口累计击杀："+killCounter.Total+"；拾取完成："+(completedLoots+engine.Loots)+"；剥皮成功："+(completedSkins+engine.Skins)+"。按键尝试不代表成功。");
                     
                 }
-                catch(Exception ex){write("停止："+ex.Message);throw;}
+                catch(Exception ex){write("停止："+ex.Message);if(ex.Message.IndexOf("foreground",StringComparison.OrdinalIgnoreCase)>=0)write("失焦时前台窗口："+Native.ForegroundDescription());throw;}
                 finally{try{searchMotion.Stop();}finally{try{CancelQuickMovement(backend);}finally{stream.Dispose();chatReader=null;input=null;}}}
             }
         }
 
         static void CancelQuickMovement(IInputBackend backend)
         {
-            if(!backend.IsTargetForeground()||backend.IsKeyAlreadyDown(87))return;
+            if(!backend.IsTargetForeground()||backend.IsKeyAlreadyDown(QuickMovement.Forward))return;
             try{var focus=ChatObservation();if(focus.ChatOpenKnown&&focus.ChatOpen)return;}catch{return;}
-            try{backend.KeyDown(87);}finally{backend.KeyUp(87);}
+            try{backend.KeyDown(QuickMovement.Forward);}finally{backend.KeyUp(QuickMovement.Forward);}
         }
 
         /// <summary>

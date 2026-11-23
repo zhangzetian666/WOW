@@ -94,12 +94,12 @@ namespace WoWProbe
                 if(work.Points.Count<2)return Command(QuickRecoveryAction.None,"已接近实际死亡点，等待尸体复活按钮和冷却，不与灵魂医者交互。");
                 navigator=new Navigator(work,calibration,false,false,0,NavigationPurpose.CorpseRun,120000){ForwardPulseLimit=3000};
             }
-            if(detourPhase!=0){if(detourPhase==1)detourFacing=f.Facing;else if(!MouseLookInput.TurnObserved(detourFacing,f.Facing))return Stop("跑尸脱困未确认朝向改变，停止盲目前进。");var move=Command(QuickRecoveryAction.Key,detourPhase==1?"跑尸受阻：转向换方向。":"跑尸脱困：短距离试走，再接回录制路线。");move.Key=(ushort)(detourPhase==1?39:87);move.Hold=350;detourPhase=detourPhase==1?2:0;return move;}
+            if(detourPhase!=0){if(detourPhase==1)detourFacing=f.Facing;else if(!MouseLookInput.TurnObserved(detourFacing,f.Facing))return Stop("跑尸脱困未确认朝向改变，停止盲目前进。");var move=Command(QuickRecoveryAction.Key,detourPhase==1?"跑尸受阻：转向换方向。":"跑尸脱困：短距离试走，再接回录制路线。");move.Key=(ushort)(detourPhase==1?39:QuickMovement.Forward);move.Hold=350;detourPhase=detourPhase==1?2:0;return move;}
             var n=navigator.Step(new NavigationSample{X=f.X,Y=f.Y,Facing=f.Facing,MapId=f.MapId,MapMode=f.MapMode,Zone=f.Zone,Sequence=f.Sequence,Fresh=f.Fresh,KnownCore=f.KnownCore,Ghost=f.PlayerGhost,Dead=f.PlayerDead,Combat=f.InCombat,ReadFailures=f.ReadFailures},now);
             if(n.Action==NavigationAction.Stop)return Stop("跑尸停止："+n.Reason);
             if(n.Action==NavigationAction.Jump||n.Action==NavigationAction.StrafeLeft){detourPhase=1;var back=Command(QuickRecoveryAction.Key,"跑尸前进无位移：后退后换方向脱困。");back.Key=83;back.Hold=250;return back;}
             if(n.Action==NavigationAction.None||n.Action==NavigationAction.Completed)return Command(QuickRecoveryAction.None,"等待复活距离及冷却就绪。");
-            ushort key=n.Action==NavigationAction.Forward?(ushort)87:n.Action==NavigationAction.TurnLeft?(ushort)37:n.Action==NavigationAction.TurnRight?(ushort)39:n.Action==NavigationAction.StrafeLeft?(ushort)65:n.Action==NavigationAction.StrafeRight?(ushort)68:(ushort)32;
+            ushort key=n.Action==NavigationAction.Forward?(ushort)QuickMovement.Forward:n.Action==NavigationAction.TurnLeft?(ushort)37:n.Action==NavigationAction.TurnRight?(ushort)39:n.Action==NavigationAction.StrafeLeft?(ushort)65:n.Action==NavigationAction.StrafeRight?(ushort)68:(ushort)32;
             var result=Command(QuickRecoveryAction.Key,"跑尸："+n.Reason);result.Key=key;result.Hold=n.HoldMilliseconds;return result;
         }
         public static bool Matches(QuickRecoveryCommand c,OperationObservation o)
