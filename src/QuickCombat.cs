@@ -7,7 +7,7 @@ namespace WoWProbe
     public sealed class QuickCommand
     {
         public bool AttackHostile;public bool MeleeConfirmed;public bool RangedSkill;public bool AllowApproach;public bool InputStarted;
-        public QuickAction Action; public ushort Key; public uint Token,IgnoredTarget; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement,PauseForward,CombatRecovery;public QuickRouteFollower RouteContext;
+        public QuickAction Action; public ushort Key; public uint Token;public HashSet<uint> IgnoredTargets; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement,PauseForward,CombatRecovery;public QuickRouteFollower RouteContext;
     }
 
     // Native target interaction; do not infer character bearing from camera space.
@@ -18,7 +18,7 @@ namespace WoWProbe
         readonly QuickRouteFollower route;
         readonly double x,y; readonly int interval;
         uint token,deathBase,lastKilled,creditBase,lockedName; int opening, sequence=-1, deadFrames, scans,corpseReselections,unconfirmedLosses;
-        uint skippedToken;long skipUntil;
+        readonly Dictionary<uint,long> skippedTargets=new Dictionary<uint,long>();
         readonly HashSet<uint> inspectedCorpses=new HashSet<uint>();
         string lockedTargetName;
         string openingKeys,loopKeys;readonly QuickSkillRows skillRows;int loopIndex;
@@ -265,7 +265,7 @@ namespace WoWProbe
             if(route!=null&&!o.InCombat)
             {
                 if((route.SearchingNearby||!route.Returning)&&now>=nextScan){nextScan=now+1200;return Cmd(QuickAction.Scan,"移动中扫描附近怪物；附近无目标再前往巡航点。",9);}
-                var movement=route.Step(o,now);movement.AttackHostile=attackHostile;movement.IgnoredTarget=now<skipUntil?skippedToken:0;return movement;
+                var movement=route.Step(o,now);movement.AttackHostile=attackHostile;movement.IgnoredTargets=new HashSet<uint>();foreach(var skip in skippedTargets)if(now<skip.Value)movement.IgnoredTargets.Add(skip.Key);return movement;
             }
             if(!o.InCombat&&searchTurning)
             {
@@ -320,11 +320,16 @@ namespace WoWProbe
         {return GrindRecoveryPolicy.CanAttack(o)&&(o.InCombat&&(!o.TargetVictimKnown||o.TargetTargetsPlayer)||(o.TargetReaction==4||includeHostile&&o.TargetReaction>=1&&o.TargetReaction<=3)&&!Contested(o));}
         public static bool Contested(FarmObservation o){return o!=null&&!(o.InCombat&&(!o.TargetVictimKnown||o.TargetTargetsPlayer))&&(o.TargetClaimKnown&&o.TargetClaimedByOther||o.TargetCombatKnown&&o.TargetInCombat&&(!o.TargetVictimKnown||!o.TargetTargetsPlayer));}
         public bool ShouldAcquire(FarmObservation o,long now)
-        {return CanAcquire(o)&&(o.InCombat||o.TargetToken!=skippedToken||now>=skipUntil)&&(route==null||route.MayAcquire(o));}
+        {long until;return CanAcquire(o)&&(o.InCombat||!skippedTargets.TryGetValue(o.TargetToken,out until)||now>=until)&&(route==null||route.MayAcquire(o));}
         public bool CanInspectCorpse(FarmObservation o)
         {return token==0&&!resting&&o!=null&&!o.InCombat&&!o.BagFull&&o.Health>=80&&(route==null||!route.Returning&&route.OnRoute(o));}
         QuickCommand AbandonChase(long now,string reason)
-        {skippedToken=token;skipUntil=now+15000;token=0;corpse=null;looted=false;escapePhase=0;escapeCombat=false;missingTarget=-1;nextScan=now;route.Resume();return Cmd(QuickAction.ReturnToRoute,reason,0);}
+        {
+            var expired=new List<uint>();foreach(var skip in skippedTargets)if(now>=skip.Value)expired.Add(skip.Key);foreach(uint key in expired)skippedTargets.Remove(key);
+            if(token!=0)skippedTargets[token]=now+30000;
+            if(skippedTargets.Count>64){uint oldest=0;long until=long.MaxValue;foreach(var skip in skippedTargets)if(skip.Value<until){oldest=skip.Key;until=skip.Value;}skippedTargets.Remove(oldest);}
+            token=0;corpse=null;looted=false;escapePhase=0;escapeCombat=false;missingTarget=-1;nextScan=now;route.Resume();return Cmd(QuickAction.ReturnToRoute,reason,0);
+        }
         QuickCommand ConfirmDeath(FarmObservation o,long now)
         {
             if(++deadFrames<2)return Cmd(QuickAction.None,"确认第二帧死亡证据。",0);
@@ -365,7 +370,7 @@ namespace WoWProbe
             if(c.Action==QuickAction.Skill&&c.RangedSkill&&!RangedKeyAllowed(c.Key,o,c.MeleeConfirmed,c.InputStarted))return false;
             if(!o.InCombat&&Contested(o)&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill||c.Action==QuickAction.RouteProbe))return false;
             if(c.Action==QuickAction.InterruptSkin)return o.InCombat&&(o.Casting||o.Channeling);
-            if(c.RouteMovement)return !o.InCombat&&!(CanAcquire(o,c.AttackHostile)&&c.RouteContext.MayAcquire(o)&&o.TargetToken!=c.IgnoredTarget);
+            if(c.RouteMovement)return !o.InCombat&&!(CanAcquire(o,c.AttackHostile)&&c.RouteContext.MayAcquire(o)&&(c.IgnoredTargets==null||!c.IgnoredTargets.Contains(o.TargetToken)));
             if(c.Action==QuickAction.ReturnToRoute)return c.RouteContext!=null&&c.RouteContext.Returning&&!o.InCombat;
             if(c.Action==QuickAction.RouteProbe)return c.RouteContext!=null&&!c.RouteContext.Returning&&!o.InCombat&&CanAcquire(o,c.AttackHostile)&&o.TargetToken==c.Token&&!o.TargetPositionKnown;
             if(c.RouteContext!=null&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill)&&!c.RouteContext.TargetAllowed(o))return false;
