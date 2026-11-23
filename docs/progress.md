@@ -569,3 +569,9 @@
 - QuickCheck通过（test-output/subzone-final-check.log）。新增丹莫罗到安威玛尔录制并创建NPC导航、错误分类且保留已录点、子区域间按键保护、现代/旧版导航身份测试；更新跑尸身份检查。用当前真实游戏读数执行录制起点只读验收成功（test-output/recording-live-acceptance.log），未发送游戏输入、未改写路线；完整实际录制和往返仍待用户验收。
 - 已部署并打开唯一客户端0.8.49，配置自动备份至新版测试/备份/config-before-0.8.49-20261123-232103。包含本轮随机技能/路线/休息补丁。完整回归运行中，结果补录后提交并同步main/chief。
 - 完整verify.ps1 -SkipDesktopSmoke通过（test-output/subzone-full.log）：C#全部底层套件、Lua51与WP1/WC3/WO4跨语言协议通过；桌面烟测未执行。最终同图子区域修复与前述所有补丁已原子同步至远程main和chief；之后chief保留本轮快照，当前工作分支为main。
+
+## 2026-11-23 — 按0.8.49源码更新README
+- 重写项目首页，补全当前功能、五行技能、21/11/6条路线选择、累计在线与休息规则、同图子区域修复、快速配置步骤、默认键位、配置/日志文件、构建命令和main/chief分支用途。
+- 按Program、AssemblyInfo、战斗/路线/NPC/定时休息代码与构建脚本核对，明确自动启动、无聊天模式适用范围、游戏端自动售卖依赖、OCR组件和真实验收边界；不把本地检查或录制起点只读验证写成完整实机通过。
+- 文档验证：README版本与AssemblyVersion一致（0.8.49），9处本地Markdown链接均有效，git diff --check通过。本次只改README和进度记录，未修改或重跑功能代码。
+- 本次文档提交同步main；chief继续保留f9acaca版本快照。下一步仍是用户实测NPC完整录制/往返、变体路线、定时下线上线及长时挂机。
