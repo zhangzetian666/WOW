@@ -568,4 +568,4 @@
 - NPC录制错误按采样过期、核心读取错误码、死亡/灵魂、实际地图变化和坐标越界分别提示，已录点保留。
 - QuickCheck通过（test-output/subzone-final-check.log）。新增丹莫罗到安威玛尔录制并创建NPC导航、错误分类且保留已录点、子区域间按键保护、现代/旧版导航身份测试；更新跑尸身份检查。用当前真实游戏读数执行录制起点只读验收成功（test-output/recording-live-acceptance.log），未发送游戏输入、未改写路线；完整实际录制和往返仍待用户验收。
 - 已部署并打开唯一客户端0.8.49，配置自动备份至新版测试/备份/config-before-0.8.49-20261123-232103。包含本轮随机技能/路线/休息补丁。完整回归运行中，结果补录后提交并同步main/chief。
-- 完整verify.ps1 -SkipDesktopSmoke通过（test-output/subzone-full.log）：C#全部底层套件、Lua51与WP1/WC3/WO4跨语言协议通过；桌面烟测未执行。最终同图子区域修复与前述所有补丁将同步至main和chief。
+- 完整verify.ps1 -SkipDesktopSmoke通过（test-output/subzone-full.log）：C#全部底层套件、Lua51与WP1/WC3/WO4跨语言协议通过；桌面烟测未执行。最终同图子区域修复与前述所有补丁已原子同步至远程main和chief；之后chief保留本轮快照，当前工作分支为main。
