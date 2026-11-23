@@ -146,7 +146,7 @@ namespace WoWProbe
                     write(anchor.ClickToMoveKnown?(anchor.ClickToMoveEnabled?"已核对当前角色：点击移动已启用。":"点击移动已关闭；远程技能仍可施放，靠近尸体拾取需另行核对移动设置。") :"当前插件未提供点击移动回读；请更新插件并/reload后核对。");
                     if(!plan.RangedCombat&&!anchor.MeleeEventsKnown)throw new InvalidOperationException("游戏尚未加载普攻命中检测。请在游戏输入 /reload 后重试，避免只普攻不放技能。");
                     if(skipUnavailableSkin)write("当前未确认剥皮技能绑定7，本轮跳过剥皮，继续打怪和拾取；配置好后重新开始即可启用。");
-                    if(savedTrip==null&&!vendorFirst&&!repairFirst&&!anchor.PlayerDead&&!anchor.PlayerGhost&&anchor.FoodCount<1)throw new InvalidOperationException("未确认食物键=有库存，请核对插件、栏位和食物数量后再开始。");
+                    if(anchor.FoodCount==0)write("食物库存为0，允许开始；低血量时原地自然恢复，恢复后继续。");
                     RouteDocument recoveryRoute=null;
                     string recoveryPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-corpse-route.json");
                     if(File.Exists(recoveryPath))
@@ -268,7 +268,7 @@ namespace WoWProbe
                         if(completedLoots+engine.Loots!=reportedLoots){reportedLoots=completedLoots+engine.Loots;write("已确认拾取窗口完成，累计拾取="+reportedLoots);}
                         if(completedSkins+engine.Skins!=reportedSkins){reportedSkins=completedSkins+engine.Skins;write("已确认剥皮成功，累计剥皮="+reportedSkins);}
                         if(command.Action==QuickAction.Stop){searchMotion.Stop();write(command.Reason);break;}
-                        if(command.Action==QuickAction.None){if(command.Report)write(command.Reason);Pause(40);continue;}
+                        if(command.Action==QuickAction.None){if(engine.IsResting&&!restMovementStopped){Pulse(backend,87,80);QuickRestPreparation.Wait(read,Pause);restMovementStopped=true;write("恢复等待：已停止移动，保留满血后继续的条件。");}if(command.Report)write(command.Reason);Pause(40);continue;}
                         bool keepMoving=!command.PauseForward&&(command.Action==QuickAction.Patrol||command.Action==QuickAction.RouteProbe||command.Action==QuickAction.Scan&&!observed.InCombat||command.Action==QuickAction.Turn&&!command.MouseTurn);
                         if(!keepMoving)searchMotion.Stop();
                         if(!QuickCombat.Matches(command,read())){searchMotion.Stop();CancelQuickMovement(backend);Pause(40);continue;}
