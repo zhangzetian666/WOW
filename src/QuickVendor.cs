@@ -87,7 +87,7 @@ namespace WoWProbe
             if(o.Farm.InCombat&&!AvoidCombat)return C(QuickVendorAction.None,"先处理攻击者，暂缓售卖行程。");
             if(sequence==o.Sequence)return C(QuickVendorAction.None,"等待商人状态更新。");sequence=o.Sequence;
             var f=o.Farm;
-            if(AvoidCombat&&!stealthExitRequested&&now>=nextStealth)
+            if(!plan.RangedCombat&&AvoidCombat&&!stealthExitRequested&&now>=nextStealth)
             {
                 if(phase==Phase.Outbound&&(f.StealthKnown?!f.Stealthed:!stealthRequested)&&!f.InCombat)
                 {nextStealth=now+3000;var stealth=C(QuickVendorAction.Stealth,"零耐久修理：按Q进入潜行，沿未完成路线前往NPC。");stealth.Key=81;return stealth;}
@@ -108,7 +108,7 @@ namespace WoWProbe
             if(phase==Phase.Select)
             {
                 if(!o.FreeSlotsKnown||!o.InventoryEventsKnown||!o.MerchantKnown)return C(QuickVendorAction.Stop,"商人或背包事件不可读，不能确认售卖。");
-                if(Npc(f)&&AvoidCombat&&(f.StealthKnown?f.Stealthed:stealthRequested&&!stealthExitRequested)){if(now<nextStealth)return C(QuickVendorAction.None,"等待退出潜行状态后与NPC交互。");nextStealth=now+3000;var exit=C(QuickVendorAction.Stealth,"已抵达NPC，按Q退出潜行后交互修理。");exit.Key=81;return exit;}
+                if(!plan.RangedCombat&&Npc(f)&&AvoidCombat&&(f.StealthKnown?f.Stealthed:stealthRequested&&!stealthExitRequested)){if(now<nextStealth)return C(QuickVendorAction.None,"等待退出潜行状态后与NPC交互。");nextStealth=now+3000;var exit=C(QuickVendorAction.Stealth,"已抵达NPC，按Q退出潜行后交互修理。");exit.Key=81;return exit;}
                 if(Npc(f)){token=f.TargetToken;hash=f.TargetNameHash;free=o.FreeSlots;revision=o.InventoryRevision;opened=o.MerchantOpened;phase=Phase.Open;stateAt=now;var c=C(QuickVendorAction.Key,"与已核验的非玩家NPC交互。");c.Key=70;return c;}
                 if(now<nextSelect)return C(QuickVendorAction.None,"等待选择附近商人。");if(++attempts>8)return C(QuickVendorAction.Stop,"未选中商人；请填写NPC名称或核对坐标。");nextSelect=now+1500;var select=C(QuickVendorAction.Select,"在商人坐标选择附近友方NPC。");select.Text=settings.Name.Length>0?"/targetexact "+settings.Name:"/targetfriend";return select;
             }

@@ -6,7 +6,7 @@ namespace WoWProbe
     public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin, Vanish, StealthEnter, StealthExit, StealthHold }
     public sealed class QuickCommand
     {
-        public bool AttackHostile;public bool MeleeConfirmed;
+        public bool AttackHostile;public bool MeleeConfirmed;public bool RangedSkill;
         public QuickAction Action; public ushort Key; public uint Token,IgnoredTarget; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement,PauseForward,CombatRecovery;public QuickRouteFollower RouteContext;
     }
 
@@ -28,7 +28,7 @@ namespace WoWProbe
         long lastDefenseScan=-10000;
         readonly int restBelow;readonly ushort drinkKey;
         readonly bool permitFullBags;readonly bool attackHostile;
-        public void RestInputCompleted(long now,bool ateFood=false){if(resting){restHoldUntil=now+10000;if(ateFood&&!foodStealth)enterStealthPending=true;}}
+        public void RestInputCompleted(long now,bool ateFood=false){if(resting){restHoldUntil=now+10000;if(ateFood&&!foodStealth&&!rangedCombat)enterStealthPending=true;}}
         public bool IsStealthRecovery {get{return foodStealth||vanishHolding;}}
         public bool IsResting {get{return resting;}}
         public bool HasActiveWork {get{return token!=0||resting||vanishHolding;}}
@@ -48,19 +48,19 @@ namespace WoWProbe
         bool escapeCombat;int combatEscapes;long combatCastAt;uint combatCasts;
         double escapeFacing;long turnDeadline;
         bool patrolPending,searchTurning;double patrolX,patrolY,searchFacing;int blockedWalks,searchEscapes;long searchDeadline,patrolCheckAt;
-        readonly bool skinning;QuickCorpse corpse;int creditedLoots,creditedSkins;
+        readonly bool skinning,rangedCombat;QuickCorpse corpse;int creditedLoots,creditedSkins;
         public int Loots {get;private set;}public int Skins {get;private set;}
         public int Kills { get; private set; }
         public QuickCombat(FarmObservation initial,int interval):this(initial,interval,false){}
         public QuickCombat(FarmObservation initial,int interval,bool skinning):this(initial,interval,skinning,null){}
         public QuickCombat(FarmObservation initial,int interval,bool skinning,QuickRouteFollower route)
             :this(initial,interval,skinning,route,"242223","2"){}
-        public QuickCombat(FarmObservation initial,int interval,bool skinning,QuickRouteFollower route,string openingKeys,string loopKeys,int restBelow=80,ushort drinkKey=0,bool permitFullBags=false,string[] skillRows=null)
+        public QuickCombat(FarmObservation initial,int interval,bool skinning,QuickRouteFollower route,string openingKeys,string loopKeys,int restBelow=80,ushort drinkKey=0,bool permitFullBags=false,string[] skillRows=null,bool rangedCombat=false)
         {
             if(initial==null||!initial.Fresh||!initial.KnownCore)throw new InvalidOperationException("需要连续有效的插件数据。");
             if(interval<100||interval>5000)throw new ArgumentOutOfRangeException("interval");
             this.skillRows=skillRows==null?null:new QuickSkillRows(skillRows);this.openingKeys=CleanKeys(openingKeys,true);this.loopKeys=CleanKeys(loopKeys,false);
-            this.permitFullBags=permitFullBags;this.attackHostile=route!=null&&route.Plan.AttackHostile;
+            this.rangedCombat=rangedCombat;this.permitFullBags=permitFullBags;this.attackHostile=route!=null&&route.Plan.AttackHostile;
             if(restBelow<30||restBelow>95)throw new ArgumentOutOfRangeException("restBelow");if(drinkKey!=0&&!((drinkKey>=48&&drinkKey<=57)||drinkKey==187||drinkKey==189))throw new ArgumentException("Invalid drink key.");this.restBelow=restBelow;this.drinkKey=drinkKey;
             map=initial.MapId;mode=initial.MapMode;zone=initial.Zone;x=initial.X;y=initial.Y;this.interval=interval;this.skinning=skinning;this.route=route;
         }
@@ -98,7 +98,7 @@ namespace WoWProbe
                 else if(now-vanishAt<6000){vanishSafeAt=-1;}
                 else {vanishAt=vanishSafeAt=-1;}
             }
-            if(!vanishLatched&&o.InCombat&&o.Health>0&&o.Health<15&&o.PowerType==3&&(route==null||route.Plan.UseRogueVanish))
+            if(!rangedCombat&&!vanishLatched&&o.InCombat&&o.Health>0&&o.Health<15&&o.PowerType==3&&(route==null||route.Plan.UseRogueVanish))
             {vanishLatched=true;vanishFailedBase=o.CastFailed;vanishAt=now;vanishSafeAt=-1;return Cmd(QuickAction.Vanish,"血量低于15%，优先按6尝试消失。",54);}
             if(urgentDefenseScan){urgentDefenseScan=false;if(o.InCombat)return Cmd(QuickAction.Scan,"剥皮中断后立即选择附近攻击者。",9);}
             bool lockedDead=token!=0&&(HasDeathEvidence(o,token)||o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken==token&&o.TargetDeadKnown&&o.TargetDead);
@@ -166,7 +166,7 @@ namespace WoWProbe
                 }
                 deadFrames=0;
                 if(!o.TargetCanAttack)return Stop("目标不再可攻击。");
-                if(o.InCombat&&o.PowerType==3&&o.Health<45&&now>=nextDefensive)
+                if(!rangedCombat&&o.InCombat&&o.PowerType==3&&o.Health<45&&now>=nextDefensive)
                 {nextDefensive=now+120000;return Cmd(QuickAction.Defensive,"血量低于45%，尝试9闪避；继续当前战斗。",57);}
                 if(o.MeleeEventsKnown&&o.MeleeHitToken==token&&o.MeleeHits!=meleeBaseline)meleeConfirmed=true;
                 // Some clients register combat-log events without delivering them.
@@ -187,7 +187,7 @@ namespace WoWProbe
                 }
                 // The configured rogue loop needs energy. Waiting for a resource
                 // is not evidence of a blocked approach or a wrong facing.
-                if(o.InCombat&&o.CastEventsKnown&&now-combatCastAt>=3500&&(o.PowerType!=3||o.Power>100||o.Power>=45))
+                if(!rangedCombat&&o.InCombat&&o.CastEventsKnown&&now-combatCastAt>=3500&&(o.PowerType!=3||o.Power>100||o.Power>=45))
                 {
                     if(combatEscapes>=3){combatEscapes=0;combatCastAt=now+10000;}
                     else{combatEscapes++;combatCastAt=now;escapeCombat=true;escapePhase=1;return Cmd(QuickAction.BackOff,"战斗中持续无成功施法：后退换向并试走，绕开遮挡后重新面向攻击者。",83);}
@@ -195,19 +195,19 @@ namespace WoWProbe
                 double moved=(o.X-progressX)*(o.X-progressX)+(o.Y-progressY)*(o.Y-progressY);
                 if(moved>=0.00000009||o.CastEventsKnown&&o.CastSuccess!=progressCasts)
                 {progressX=o.X;progressY=o.Y;progressCasts=o.CastSuccess;progressAt=now;}
-                if(!o.InCombat&&now-progressAt>=4500)
+                if(!rangedCombat&&!o.InCombat&&now-progressAt>=4500)
                 {
                     if(escapes>=2)return route!=null?AbandonChase(now,"两次脱困仍未接近目标，返回路线寻找下一只。"):Stop("连续两次换向仍无法接近怪物，停止以免持续顶住障碍。");
                     escapes++;escapePhase=1;progressAt=now;return Cmd(QuickAction.BackOff,"位置持续不变且未进入战斗：取消直走，后退后换向。",83);
                 }
                 if(!o.InCombat&&now-started>=45000)return Stop("单怪45秒未确认击杀，停止并检查朝向、距离和伤害。");
                 if(now>=nextFace)
-                {nextFace=now+1500;return Cmd(QuickAction.Face,"F：让游戏面向并接近锁定怪物。",0x46);}
+                {nextFace=rangedCombat?long.MaxValue:now+1500;return Cmd(QuickAction.Face,rangedCombat?"远程：F校正目标朝向，随后停止移动并施放技能。":"F：让游戏面向并接近锁定怪物。",0x46);}
                 if(o.MeleeEventsKnown&&o.MeleeHitToken==token&&o.MeleeHits!=meleeBaseline)meleeConfirmed=true;
                 if(sliceRecovery==2&&o.CastEventsKnown&&o.CastSuccess!=sliceCast){sliceRecovery=3;}
                 if(sliceRecovery==1&&o.CastEventsKnown&&o.CastSuccess!=sliceCast)sliceRecovery=0;
                 if(openingPending&&o.CastEventsKnown&&o.CastSuccess!=openingCast){opening++;openingPending=false;}
-                if(!meleeConfirmed&&(o.MeleeEventsKnown||!o.RangeKnown||!o.TargetInRange))return Cmd(QuickAction.None,"保持普通攻击并接近，等待本角色首次普攻击中当前怪物后开始技能。",0);
+                if(!rangedCombat&&!meleeConfirmed&&(o.MeleeEventsKnown||!o.RangeKnown||!o.TargetInRange))return Cmd(QuickAction.None,"保持普通攻击并接近，等待本角色首次普攻击中当前怪物后开始技能。",0);
                 if(now>=nextSkill)
                 {
                     nextSkill=now+interval;
@@ -218,9 +218,9 @@ namespace WoWProbe
                     else if(sliceRecovery==3){digit=retryFinisher;if(opening<openingKeys.Length&&openingKeys[opening]==retryFinisher){openingPending=o.CastEventsKnown;openingCast=o.CastSuccess;}}
                     else if(opening<openingKeys.Length){digit=openingKeys[opening];if(o.CastEventsKnown){openingPending=true;openingCast=o.CastSuccess;}else opening++;}
                     else digit=loopKeys[(loopIndex++)%loopKeys.Length];
-                    if((digit=='4'||digit=='5')&&o.CastEventsKnown){retryFinisher=digit;sliceRecovery=1;sliceCast=o.CastSuccess;}
+                    if(!rangedCombat&&(digit=='4'||digit=='5')&&o.CastEventsKnown){retryFinisher=digit;sliceRecovery=1;sliceCast=o.CastSuccess;}
                     ushort key=(ushort)(digit=='='?187:digit=='-'?189:digit);
-                    var skill=Cmd(QuickAction.Skill,rebuilding?(retryFinisher=='5'?"破甲未确认成功，先补2邪恶攻击，确认成功后再试5。":"切割未确认成功，先补2邪恶攻击，确认成功后再试4。"):"尝试技能键 "+(char)key+"，不冒充施法成功。",key);skill.MeleeConfirmed=meleeConfirmed;return skill;
+                    var skill=Cmd(QuickAction.Skill,rebuilding?(retryFinisher=='5'?"破甲未确认成功，先补2邪恶攻击，确认成功后再试5。":"切割未确认成功，先补2邪恶攻击，确认成功后再试4。"):"尝试技能键 "+(char)key+"，不冒充施法成功。",key);skill.MeleeConfirmed=meleeConfirmed;skill.RangedSkill=rangedCombat;return skill;
                 }
                 return Cmd(QuickAction.None,"等待下一拍技能。",0);
             }
@@ -314,7 +314,7 @@ namespace WoWProbe
             if(c.Action==QuickAction.StealthEnter||c.Action==QuickAction.StealthHold)return !o.InCombat;
             if(c.Action==QuickAction.StealthExit)return !o.InCombat&&o.Health==100;
             if(c.Action==QuickAction.Vanish)return o.InCombat&&o.Health>0&&o.Health<15&&o.PowerType==3;
-            if(c.Action==QuickAction.Skill&&!c.MeleeConfirmed&&(!o.RangeKnown||!o.TargetInRange))return false;
+            if(c.Action==QuickAction.Skill&&!c.RangedSkill&&!c.MeleeConfirmed&&(!o.RangeKnown||!o.TargetInRange))return false;
             if(!o.InCombat&&Contested(o)&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill||c.Action==QuickAction.RouteProbe))return false;
             if(c.Action==QuickAction.InterruptSkin)return o.InCombat&&(o.Casting||o.Channeling);
             if(c.RouteMovement)return !o.InCombat&&!(CanAcquire(o,c.AttackHostile)&&c.RouteContext.MayAcquire(o)&&o.TargetToken!=c.IgnoredTarget);

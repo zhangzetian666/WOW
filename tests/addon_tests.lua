@@ -788,6 +788,15 @@ test("interaction binding is live character evidence and accepts either binding 
     env.GetBindingKey=function()error("unavailable")end;eq(wp.BuildCombatPacket(wp.BuildPacket())[120],0)
     env.GetBindingKey=function()return {}end;eq(wp.BuildCombatPacket(wp.BuildPacket())[120],0)
 end)
+test("click to move reports only supported current CVar values",function()
+    local env=combatEnvironment();local wp=load(env)
+    for _,value in ipairs({"0","1","", "unexpected"}) do
+        env.GetCVar=function(name) if name=="autoInteract" then return value end end
+        eq(wp.BuildCombatPacket(wp.BuildPacket())[121],value=="1" and 3 or value=="0" and 1 or 0)
+    end
+    env.GetCVar=nil;eq(wp.BuildCombatPacket(wp.BuildPacket())[121],0)
+    env.GetCVar=function()error("unavailable")end;eq(wp.BuildCombatPacket(wp.BuildPacket())[121],0)
+end)
 test("target ownership flags skip claimed mobs and distinguish the player's attacker",function()
     local env=combatEnvironment();env.UnitIsTapDenied=function()return true end
     env.UnitAffectingCombat=function(unit)return unit=="target" end

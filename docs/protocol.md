@@ -62,3 +62,7 @@ Schedule allows only W,S,A,D,Q,E,TAB,F,1,2,3,4,5,8,9,SPACE; delay 5000ms; hold 6
 字节119（从0计数）使用0＝未知、1＝已知但F不在INTERACTTARGET的主/副键位、3＝已知且F为其中之一；其他值拒绝。插件每帧只读GetBindingKey，API缺失、异常或返回类型不支持时保留未知，不修改游戏绑定。字节120–125仍须为0，校验和规则不变。
 
 新客户端兼容旧插件的119＝0并提示无法核验。新插件需配套0.8.50及以上客户端；旧客户端会按保留位规则拒绝新增数据。升级应同时更新客户端和插件，再在游戏内重新加载插件。FarmObservation的InteractBindingKnown/InteractBindingCorrect不依赖当前是否有目标。
+
+## WC3 点击移动设置（客户端0.8.51 / 插件0.5.8）
+
+字节120＝0未知、1关闭、3启用，其他值拒绝；121–125仍须为0。只接受GetCVar("autoInteract")返回字符串"0"或"1"，API异常、缺失或不支持的值视为未知。FarmObservation的ClickToMoveKnown/ClickToMoveEnabled独立于目标状态。新客户端兼容旧插件的零值；插件0.5.8需配套客户端0.8.51及以上。设置启用不是发生实际位移的证据。
