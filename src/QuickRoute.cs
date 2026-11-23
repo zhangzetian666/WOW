@@ -156,6 +156,11 @@ namespace WoWProbe
             for(int i=0;i<Plan.Route.Points.Count-1;i++){var w=Plan.Route.Points[i];double d=NavigationMath.Distance(o.X-w.X,o.Y-w.Y,Plan.Calibration.AxisScale);if(d<distance){distance=d;nearest=i;}}
             returnX=Plan.Route.Points[nearest].X;returnY=Plan.Route.Points[nearest].Y;TargetIndex=nearest+1;Returning=Joining=true;suspended=false;progressAt=targetAt=-1;escapePhase=0;
         }
+        public bool TryRejoin(FarmObservation o)
+        {
+            if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||o.PlayerDead||o.PlayerGhost||o.InCombat||!Plan.MapMatches(o)||!NavigationMath.InRange(o.X,0,1)||!NavigationMath.InRange(o.Y,0,1)||!NavigationMath.Finite(o.Facing)||ReturningFromService)return false;
+            SearchingNearby=false;JoinNearest(o);return true;
+        }
         public bool InCombatArea(FarmObservation o){return o!=null&&Plan.MapMatches(o)&&Plan.WithinCombatArea(o.X,o.Y);}
         public void ObserveCombat(FarmObservation o)
         {if(o!=null&&o.InCombat&&Plan.MapMatches(o)&&NavigationMath.InRange(o.X,0,1)&&NavigationMath.InRange(o.Y,0,1)){double d=Plan.DistanceToRoute(o.X,o.Y);if(d<=.1)defenseRadius=Math.Max(defenseRadius,d+.002);}}

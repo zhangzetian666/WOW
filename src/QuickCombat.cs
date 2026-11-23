@@ -78,7 +78,15 @@ namespace WoWProbe
             if(o.BagFull&&!o.InCombat&&!permitFullBags)return Stop("背包已满。");
             if(o.Health<0||o.Health>100)return Stop("生命值不可读，不能确认恢复完成。");
             if(!MapIdentity.Matches(o.MapId,o.MapMode,o.Zone,map,mode,zone))return Stop("地图发生变化。");
-            if(route!=null){route.TickNearbySearch(o,now,token==0&&!resting);route.ObserveCombat(o);if(!route.CanOperate(o))return Stop("角色超出巡航及追怪范围，停止追击。");}
+            if(route!=null)
+            {
+                route.TickNearbySearch(o,now,token==0&&!resting);route.ObserveCombat(o);
+                if(!route.CanOperate(o))
+                {
+                    if(route.TryRejoin(o))return AbandonChase(now,"追怪越过范围边界，放弃当前目标并前往最近巡航点继续。");
+                    return Stop("角色超出巡航及追怪范围，当前状态无法确认返回路线。");
+                }
+            }
             else if(Double.IsNaN(o.X)||Double.IsNaN(o.Y)||Math.Abs(o.X-x)>0.04||Math.Abs(o.Y-y)>0.04)return Stop("离开启动位置四坐标点范围，停止追击。");
             if(token!=0&&!looted&&!o.InCombat&&now-started>=45000)return route!=null?AbandonChase(now,"45秒仍未进入战斗，放弃当前目标并继续巡航。"):Stop("单怪45秒未确认击杀，停止并检查朝向、距离和伤害。");
             if(resting&&(o.FoodCount==0||o.PowerType==0&&drinkKey==0))naturalRecovery=true;
@@ -316,7 +324,7 @@ namespace WoWProbe
         public bool CanInspectCorpse(FarmObservation o)
         {return token==0&&!resting&&o!=null&&!o.InCombat&&!o.BagFull&&o.Health>=80&&(route==null||!route.Returning&&route.OnRoute(o));}
         QuickCommand AbandonChase(long now,string reason)
-        {skippedToken=token;skipUntil=now+15000;token=0;corpse=null;missingTarget=-1;nextScan=now;route.Resume();return Cmd(QuickAction.ReturnToRoute,reason,0);}
+        {skippedToken=token;skipUntil=now+15000;token=0;corpse=null;looted=false;escapePhase=0;escapeCombat=false;missingTarget=-1;nextScan=now;route.Resume();return Cmd(QuickAction.ReturnToRoute,reason,0);}
         QuickCommand ConfirmDeath(FarmObservation o,long now)
         {
             if(++deadFrames<2)return Cmd(QuickAction.None,"确认第二帧死亡证据。",0);
