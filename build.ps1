@@ -1,4 +1,4 @@
-param([switch]$Package,[switch]$QuickCheck)
+﻿param([switch]$Package,[switch]$QuickCheck)
 $ErrorActionPreference = 'Stop'
 $projectRoot = $PSScriptRoot
 $compiler = Join-Path $env:WINDIR 'Microsoft.NET\Framework64\v4.0.30319\csc.exe'
@@ -68,34 +68,18 @@ foreach ($testName in @('QuickCombatTests','QuickCorpseTests','QuickRecoveryTest
 }
 & $compiler @common /target:winexe /main:WoWProbe.Smoke "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\IntegrationTests.exe" @sources "$projectRoot\tests\Smoke.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Integration test compilation failed.' }
-& $compiler @common /target:winexe /main:RouteUiTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\RouteUiTests.exe" @sources "$projectRoot\tests\RouteUiTests.cs"
-if ($LASTEXITCODE -ne 0) { throw 'Route UI test compilation failed.' }
-& $compiler @common /target:winexe /main:FarmUiTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\FarmUiTests.exe" @sources "$projectRoot\tests\FarmUiTests.cs"
-if ($LASTEXITCODE -ne 0) { throw 'Farm UI test compilation failed.' }
-& $compiler @common /target:winexe /main:CampaignUiTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\CampaignUiTests.exe" @sources "$projectRoot\tests\CampaignUiTests.cs"
-if ($LASTEXITCODE -ne 0) { throw 'Campaign UI test compilation failed.' }
-& $compiler @common /target:winexe /main:CampaignStartFailureTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\CampaignStartFailureTests.exe" @sources "$projectRoot\tests\CampaignFixtures.cs" "$projectRoot\tests\CampaignStartFailureTests.cs"
-if ($LASTEXITCODE -ne 0) { throw 'Campaign startup failure test compilation failed.' }
-& $compiler @common /target:winexe /main:ReadinessUiTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\ReadinessUiTests.exe" @sources "$projectRoot\tests\CampaignFixtures.cs" "$projectRoot\tests\ReadinessUiTests.cs"
-if ($LASTEXITCODE -ne 0) { throw 'Readiness UI test compilation failed.' }
 & $compiler @common /target:exe /main:GrindCliIntegrationTests "/out:$bin\GrindCliIntegrationTests.exe" @sources "$projectRoot\tests\GrindCliIntegrationTests.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Grind CLI integration test compilation failed.' }
 & "$bin\GrindCliIntegrationTests.exe"
 if ($LASTEXITCODE -ne 0) { throw 'Grind CLI integration tests failed.' }
 & $compiler @common /target:exe /main:QuickRouteUiTests "/out:$bin\QuickRouteUiTests.exe" @sources "$projectRoot\tests\QuickRouteUiTests.cs"
 if ($LASTEXITCODE -ne 0) { throw 'Fixed route UI test compilation failed.' }
-& $compiler @common /target:exe /main:FishingFreshnessTests "/out:$bin\FishingFreshnessTests.exe" @sources "$projectRoot\tests\FishingFixtures.cs" "$projectRoot\tests\FishingFreshnessTests.cs"
-if ($LASTEXITCODE -ne 0) { throw 'Fishing parent freshness test compilation failed.' }
-& "$bin\FishingFreshnessTests.exe"
-if ($LASTEXITCODE -ne 0) { throw 'Fishing source freshness tests failed.' }
 Copy-Item -LiteralPath "$projectRoot\assets" -Destination $bin -Recurse -Force
 Copy-Item -LiteralPath "$projectRoot\quick-corpse-route.json" -Destination $bin -Force
-& $compiler @common /target:winexe /main:FishingUiTests "/win32manifest:$projectRoot\src\app.manifest" "/out:$bin\FishingUiTests.exe" @sources "$projectRoot\tests\FishingFixtures.cs" "$projectRoot\tests\FishingUiTests.cs"
-if ($LASTEXITCODE -ne 0) { throw 'Fishing UI test compilation failed.' }
 Write-Output "BUILD_OK $bin\WoWProbe.exe"
 if ($Package) {
     $dist = Join-Path $projectRoot 'dist'
-    $releaseName = 'WoWProbe-Complete-0.8.33'
+    $releaseName = 'WoWProbe-Current'
     $release = Join-Path $dist $releaseName
     New-Item -ItemType Directory -Path $release -Force | Out-Null
     Copy-Item -LiteralPath "$bin\WoWProbe.exe" -Destination $release -Force

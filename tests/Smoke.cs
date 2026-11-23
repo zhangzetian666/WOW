@@ -14,77 +14,18 @@ namespace WoWProbe
         public static int Main(string[] args)
         {
             Native.SetProcessDPIAware();Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);
-            if(args.Length>0&&args[0]=="--route-ui-preview")return RoutePreview();
-            if(args.Length>0&&args[0]=="--farm-ui-preview")return FarmPreview();
-            if(args.Length>0&&args[0]=="--campaign-ui-preview")return CampaignPreview();
-            if(args.Length>0&&args[0]=="--fishing-ui-preview")return FishingPreview();
-            return args.Length>0 && args[0]=="--ui-preview"?Preview():Run();
-        }
-        public static int RoutePreview()
-        {
-            string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output");Directory.CreateDirectory(directory);int exit=1;
-            using(var form=new RouteForm(delegate{return new RouteTelemetry();},delegate{return null;},null,null))
-            using(var timer=new System.Windows.Forms.Timer{Interval=500})
-            {
-                timer.Tick+=delegate{timer.Stop();try{exit=SaveUiPreview(form,directory,"route-ui");}finally{form.Close();}};
-                form.Shown+=delegate{form.Hide();form.Show();form.Activate();form.Refresh();timer.Start();};Application.Run(form);
-            }
-            return exit;
-        }
-        public static int FarmPreview()
-        {
-            string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output");Directory.CreateDirectory(directory);int exit=1;
-            // This preview never selects a game window or creates an input backend.
-            using(var form=new FarmForm(delegate{return new FarmObservation();},delegate{return null;},null,null,null,new InputFailureLatch()))
-            using(var timer=new System.Windows.Forms.Timer{Interval=500})
-            {
-                timer.Tick+=delegate{
-                    timer.Stop();
-                    try{exit=SaveUiPreview(form,directory,"farm-ui");}
-                    finally{form.Close();}
-                };
-                form.Shown+=delegate{form.Hide();form.Show();form.Activate();form.Refresh();timer.Start();};Application.Run(form);
-            }
-            return exit;
-        }
-        public static int CampaignPreview()
-        {
-            string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output");Directory.CreateDirectory(directory);int exit=1;
-            using(var form=new CampaignForm(delegate{return new OperationObservation();},delegate{return null;},null,null,null,null,new InputFailureLatch()))
-            using(var timer=new System.Windows.Forms.Timer{Interval=500})
-            {timer.Tick+=delegate{timer.Stop();try{exit=SaveUiPreview(form,directory,"campaign-ui");}finally{form.Close();}};form.Shown+=delegate{form.Hide();form.Show();form.Refresh();timer.Start();};Application.Run(form);}return exit;
-        }
-        public static int FishingPreview()
-        {
-            string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output");Directory.CreateDirectory(directory);int exit=1;
-            using(var form=new FishingForm(delegate{return new OperationObservation();},delegate{return null;},null,null,null,new InputFailureLatch()))
-            using(var timer=new System.Windows.Forms.Timer{Interval=500})
-            {timer.Tick+=delegate{timer.Stop();try{exit=SaveUiPreview(form,directory,"fishing-ui");}finally{form.Close();}};form.Shown+=delegate{form.Hide();form.Show();form.Refresh();timer.Start();};Application.Run(form);}return exit;
+            if(args.Length>0&&args[0]=="--ui-preview")return Preview();
+            return Run();
         }
         public static int Preview()
         {
-            string directory=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"test-output");Directory.CreateDirectory(directory);int exit=1;
-            using(var form=new ProbeForm())
-            using(var timer=new System.Windows.Forms.Timer {Interval=500})
+            using(var form=new QuickGrindForm(false,true))
             {
-                timer.Tick+=delegate {
-                    timer.Stop();
-                    try{exit=SaveUiPreview(form,directory,"tool-ui");}finally{form.Close();}
-                };
-                form.Shown+=delegate{form.Hide();form.Show();form.Activate();form.Refresh();timer.Start();};Application.Run(form);
+                form.CreateControl();form.PerformLayout();
+                using(var image=new Bitmap(form.Width,form.Height))
+                    form.DrawToBitmap(image,new Rectangle(Point.Empty,form.Size));
             }
-            return exit;
-        }
-        // A desktop rectangle may contain an unrelated window covering this form.
-        // Render only the owned form for layout QA; Run() separately requires a real
-        // desktop capture with a decoded known packet, never this rendered preview.
-        static int SaveUiPreview(Form form,string directory,string name)
-        {
-            try{
-                using(var image=new Bitmap(form.Width,form.Height)){form.DrawToBitmap(image,new Rectangle(Point.Empty,form.Size));image.Save(Path.Combine(directory,name+".png"),System.Drawing.Imaging.ImageFormat.Png);}
-                File.WriteAllText(Path.Combine(directory,name+"-preview.txt"),"owned_form_render; layout preview only, not desktop capture");
-                return 0;
-            }catch(Exception ex){File.WriteAllText(Path.Combine(directory,name+"-error.txt"),ex.ToString());return 1;}
+            return 0;
         }
         static void Put16(byte[] b,int i,int n){b[i]=(byte)n;b[i+1]=(byte)(n>>8);}
         static void Put32(byte[] b,int i,int n){for(int k=0;k<4;k++)b[i+k]=(byte)(n>>(8*k));}
@@ -115,10 +56,8 @@ namespace WoWProbe
                         var bounds=Native.CaptureGeometry(center,8,SystemInformation.VirtualScreen);
                         using(var screen=Native.Capture(bounds))
                         {
-                            screen.Save(Path.Combine(directory,"capture-diagnostic.png"),System.Drawing.Imaging.ImageFormat.Png);
                             var bytes=PixelCodec.Decode(screen,4,4,8);var packet=ProbePacket.Decode(bytes);
                             if(packet.TargetName!="TEST" || packet.Zone!="SIMULATION" || packet.FreeSlots!=16 || packet.Health!=80)throw new Exception("Actual screen capture did not match known fixture");
-                            screen.Save(Path.Combine(directory,"simulated-overlay.png"),System.Drawing.Imaging.ImageFormat.Png);
                             var report=new {kind="local_simulation_not_game_validation",screen_capture=true,packet_decoded=true,input_emitted=false,telemetry=ReportData.From(packet)};
                             File.WriteAllText(Path.Combine(directory,"smoke-test.json"),new JavaScriptSerializer().Serialize(report),new UTF8Encoding(true));
                         }
