@@ -146,7 +146,7 @@ namespace WoWProbe
             if(token==0&&!o.InCombat&&deferredCorpses.Count>0)
             {var pending=deferredCorpses.Pop();token=pending.Token;corpse=pending.Corpse;creditedLoots=pending.Loots;creditedSkins=pending.Skins;looted=true;corpse.Resume(o,now);return AdvanceCorpse(o,now);}
             if(now>=corpseBlockedUntil&&token==0&&CanInspectCorpse(o)&&o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken!=0&&!o.TargetIsPlayer&&o.TargetDeadKnown&&o.TargetDead&&(o.LootKnown&&o.Lootable||skinning&&o.SkinKnown&&o.Skinnable)&&!inspectedCorpses.Contains(o.TargetToken)&&(route==null||route.TargetAllowed(o)))
-            {if(route!=null)route.Interrupt(o);token=o.TargetToken;inspectedCorpses.Add(token);looted=true;started=now;corpse=new QuickCorpse(token,skinning,o,now,true,o.TargetName,route!=null&&route.Plan.SkinWithInteract,route!=null&&route.Plan.NoChatCombat);creditedLoots=creditedSkins=0;return AdvanceCorpse(o,now);}
+            {if(route!=null)route.Interrupt(o);token=o.TargetToken;inspectedCorpses.Add(token);looted=true;started=now;corpse=new QuickCorpse(token,skinning,o,now,true,o.TargetName,route!=null&&route.Plan.SkinWithInteract,route!=null&&route.Plan.NoChatCombat,route==null?"F8":route.Plan.LastTargetKey);creditedLoots=creditedSkins=0;return AdvanceCorpse(o,now);}
             if(token!=0)
             {
                 if(looted&&corpse!=null)return AdvanceCorpse(o,now);
@@ -336,7 +336,7 @@ namespace WoWProbe
             if(!looted)
             {
                 Kills++;lastKilled=token;corpseReselections=unconfirmedLosses=0;looted=true;lootUntil=now+1600;
-                corpse=new QuickCorpse(token,skinning,o,now,false,lockedTargetName,route!=null&&route.Plan.SkinWithInteract,route!=null&&route.Plan.NoChatCombat);creditedLoots=creditedSkins=0;
+                corpse=new QuickCorpse(token,skinning,o,now,false,lockedTargetName,route!=null&&route.Plan.SkinWithInteract,route!=null&&route.Plan.NoChatCombat,route==null?"F8":route.Plan.LastTargetKey);creditedLoots=creditedSkins=0;
             }
             return AdvanceCorpse(o,now);
         }

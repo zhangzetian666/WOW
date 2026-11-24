@@ -6,7 +6,7 @@ namespace WoWProbe
     {
         readonly uint token;readonly bool skinning;long started;readonly string targetName;
         uint opened,closed,skinBase,failedBase;long lootAt,skinAt;bool selected,lootIssued,skinIssued,skinSelected;
-        readonly bool approach,interactSkin,hotkeysOnly;bool approached;
+        readonly bool approach,interactSkin,hotkeysOnly;readonly string lastTargetKey;bool approached;
         long selectionAt;int selectionAttempts;
         long combatSince=-1,settledSince=-1;bool settled;int lastHealth;
         public bool Interrupted {get;private set;}
@@ -16,17 +16,17 @@ namespace WoWProbe
             :this(token,skinning,initial,now,false){}
         public QuickCorpse(uint token,bool skinning,FarmObservation initial,long now,bool approach)
             :this(token,skinning,initial,now,approach,initial==null?"":initial.TargetName){}
-        public QuickCorpse(uint token,bool skinning,FarmObservation initial,long now,bool approach,string targetName,bool interactSkin=false,bool hotkeysOnly=false)
-        {if(token==0||initial==null)throw new ArgumentException("A verified corpse identity is required.");this.token=token;this.skinning=skinning;this.approach=approach;this.targetName=targetName;this.interactSkin=interactSkin;this.hotkeysOnly=hotkeysOnly;started=now;settledSince=initial.InCombat?-1:now;lastHealth=initial.Health;opened=initial.LootOpened;closed=initial.LootClosed;}
-        QuickCommand C(QuickAction action,string reason,ushort key){return new QuickCommand{Action=action,Token=token,Reason=reason,Key=key,SelectName=action==QuickAction.CorpseSelect&&resumed?targetName:null};}
+        public QuickCorpse(uint token,bool skinning,FarmObservation initial,long now,bool approach,string targetName,bool interactSkin=false,bool hotkeysOnly=false,string lastTargetKey="F8")
+        {if(token==0||initial==null)throw new ArgumentException("A verified corpse identity is required.");this.token=token;this.skinning=skinning;this.approach=approach;this.targetName=targetName;this.interactSkin=interactSkin;this.hotkeysOnly=hotkeysOnly;this.lastTargetKey=lastTargetKey;started=now;settledSince=initial.InCombat?-1:now;lastHealth=initial.Health;opened=initial.LootOpened;closed=initial.LootClosed;}
+        QuickCommand C(QuickAction action,string reason,ushort key){return new QuickCommand{Action=action,Token=token,Reason=reason,Key=key,SelectName=action==QuickAction.CorpseSelect&&resumed&&!hotkeysOnly?targetName:null};}
         bool resumed;
         public void Resume(FarmObservation o,long now)
         {Interrupted=false;resumed=true;started=now;combatSince=-1;settled=false;settledSince=o.InCombat?-1:now;lastHealth=o.Health;opened=o.LootOpened;closed=o.LootClosed;selected=lootIssued=skinIssued=skinSelected=approached=false;selectionAttempts=0;}
         QuickCommand Select(long now,bool skin)
         {
-            if(selectionAttempts==0){selectionAt=now;selectionAttempts=resumed?2:1;return C(QuickAction.CorpseSelect,skin?"拾取完成后重选同一尸体，核对剥皮条件。":"重选上一目标，核对已击杀尸体后再拾取。",0);}
+            if(selectionAttempts==0){selectionAt=now;selectionAttempts=resumed?2:1;return C(QuickAction.CorpseSelect,hotkeysOnly?"按"+lastTargetKey+"选中上一个目标，核对原尸体后再"+(skin?"剥皮。":"拾取。"):(skin?"拾取完成后重选同一尸体，核对剥皮条件。":"重选上一目标，核对已击杀尸体后再拾取。"),0);}
             if(!hotkeysOnly&&selectionAttempts==1&&now-selectionAt>=1000&&!String.IsNullOrWhiteSpace(targetName)){selectionAttempts=2;selectionAt=now;var c=C(QuickAction.CorpseSelect,"上一目标重选未成功，按完整名字重选并核对原尸体身份。",0);c.SelectName=targetName;return c;}
-            if(now-selectionAt>=3000)return Finish(skin?"拾取已确认，但无法重选原尸体；不计剥皮成功。":"无法重新取得原尸体，跳过拾取/剥皮，不冒充成功。");
+            if(now-selectionAt>=3000)return Finish(hotkeysOnly?lastTargetKey+"未能选回原尸体，未发送F拾取/剥皮。请检查游戏绑定为“选中上一个目标”（不是上一个敌人目标）；尸体消失也会导致失败。":(skin?"拾取已确认，但无法重选原尸体；不计剥皮成功。":"无法重新取得原尸体，跳过拾取/剥皮，不冒充成功。"));
             return C(QuickAction.None,"等待原尸体重新选中，不继续寻怪。",0);
         }
         QuickCommand Finish(string reason){Done=true;var c=C(QuickAction.None,reason,0);c.Report=true;return c;}
