@@ -16,7 +16,7 @@ namespace WoWProbe
         readonly CheckBox timedBreaks=new CheckBox{Text="定时下线休息：2小时加随机时长，休息13/15/18分钟后上线",AutoSize=true,Checked=true};
         readonly NumericUpDown routeVariation=N(.01m,.2m,.06m,2);int variationSeed=20261123;
         readonly ComboBox combatStyle=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,Width=160};
-        readonly CheckBox rogueVanish=new CheckBox{Text="盗贼保命：低于15%按6消失，脱战3秒后吃食物",Checked=true,AutoSize=true};
+        readonly CheckBox rogueVanish=new CheckBox{Text="盗贼恢复：进食后Q潜行；低于15%按6消失，成功脱战后保持潜行回血",Checked=true,AutoSize=true};
         readonly CheckBox attackHostile=new CheckBox{Text="主动攻击红名怪（不勾选只主动打黄名怪）",AutoSize=true};
         readonly CheckBox noChatCombat=new CheckBox{Text="战斗、拾取、剥皮使用快捷键，不开聊天框（先绑定以下按键）",AutoSize=true,Checked=true};
         readonly CheckBox skinWithInteract=new CheckBox{Text="使用F交互剥皮（取消勾选则按7剥皮）",AutoSize=true,Checked=true};

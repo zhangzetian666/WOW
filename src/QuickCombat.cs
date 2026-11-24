@@ -29,7 +29,7 @@ namespace WoWProbe
         long lastDefenseScan=-10000;
         readonly int restBelow;readonly ushort drinkKey;
         readonly bool permitFullBags;readonly bool attackHostile;
-        public void RestInputCompleted(long now,bool ateFood=false){if(resting){restHoldUntil=now+10000;if(ateFood&&!foodStealth&&!rangedCombat)enterStealthPending=true;}}
+        public void RestInputCompleted(long now,bool ateFood=false){if(resting){restHoldUntil=now+10000;if(ateFood&&!foodStealth&&foodStealthAllowed)enterStealthPending=true;}}
         public bool IsStealthRecovery {get{return foodStealth||vanishHolding;}}
         public bool IsResting {get{return resting;}}
         public bool HasActiveWork {get{return token!=0||resting||vanishHolding;}}
@@ -40,7 +40,7 @@ namespace WoWProbe
         readonly Stack<DeferredCorpse> deferredCorpses=new Stack<DeferredCorpse>();
         long last=-1, nextSkill, nextFace, nextScan, started, lootUntil;
         bool stopped, looted,initialRest=true,resting,food,drink,reacquired;
-        long corpseBlockedUntil;bool foodStealth,enterStealthPending,vanishHolding;
+        long corpseBlockedUntil;bool foodStealth,foodStealthAllowed,enterStealthPending,vanishHolding;
         bool urgentDefenseScan;uint vanishFailedBase;bool vanishLatched;long vanishAt=-1,vanishSafeAt=-1;
         long restHoldUntil,restStarted,nextRestReport,missingCombatTarget=-1,missingTarget=-1,nextDefensive;bool naturalRecovery;
         long foodProgressAt,drinkProgressAt;int restHealth,restPower,foodRetries,drinkRetries;
@@ -124,7 +124,7 @@ namespace WoWProbe
                 bool mana=o.PowerType==0;
                 if(mana&&(o.Power<0||o.Power>100))return Stop("法力值不可读，不能确认饮水完成。");
                 if(!resting&&!o.InCombat&&(o.Health<(initialRest?99:restBelow)||mana&&o.Power<(initialRest?99:restBelow)))
-                {resting=true;naturalRecovery=o.FoodCount==0||mana&&drinkKey==0;nextRestReport=now;restStarted=now;restHoldUntil=now+10000;food=drink=false;foodProgressAt=drinkProgressAt=now;restHealth=o.Health;restPower=o.Power;foodRetries=drinkRetries=0;if(route!=null)route.Interrupt(o);}
+                {resting=true;foodStealthAllowed=!rangedCombat&&o.PowerType==3&&(route==null||route.Plan.UseRogueVanish);naturalRecovery=o.FoodCount==0||mana&&drinkKey==0;nextRestReport=now;restStarted=now;restHoldUntil=now+10000;food=drink=false;foodProgressAt=drinkProgressAt=now;restHealth=o.Health;restPower=o.Power;foodRetries=drinkRetries=0;if(route!=null)route.Interrupt(o);}
                 if(resting&&o.InCombat){foodStealth=enterStealthPending=false;resting=false;initialRest=true;food=drink=false;if(o.Casting||o.Channeling)return Cmd(QuickAction.InterruptSkin,"吃喝期间受到攻击，停止恢复施法并优先反击。",27);}
                 if(resting)
                 {
