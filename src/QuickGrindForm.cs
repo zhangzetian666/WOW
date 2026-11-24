@@ -15,7 +15,7 @@ namespace WoWProbe
         readonly Button repair=new Button{Text="自动修理",AutoSize=true};
         readonly TextBox log=new TextBox{Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,Dock=DockStyle.Fill};
         readonly Label cadence=new Label{Text="技能与间隔见上方“技能设置”",AutoSize=true};
-        readonly CheckBox skinning=new CheckBox{Text="击杀及路边尸体剥皮（7键）",AutoSize=true,Checked=true};
+        readonly CheckBox skinning=new CheckBox{Text="击杀及路边尸体剥皮（F或7）",AutoSize=true,Checked=true};
         readonly QuickRouteEditor routeEditor=new QuickRouteEditor();
         readonly CheckBox autoResume=new CheckBox{Text="异常每30秒重试；人为中断空闲恢复",AutoSize=true,Checked=true};
         readonly NumericUpDown idleSeconds=new NumericUpDown{Minimum=5,Maximum=3600,Value=30,Width=70};
@@ -30,7 +30,7 @@ namespace WoWProbe
         public QuickGrindForm(bool autoStart,bool passivePreview=false)
         {
             this.passivePreview=passivePreview;
-            Text="固定路线自动打怪 · 随机路线与定时休息版 0.8.69";Size=new Size(1080,820);MinimumSize=new Size(960,700);Font=new Font("Microsoft YaHei UI",10);StartPosition=FormStartPosition.CenterScreen;
+            Text="固定路线自动打怪 · 随机路线与定时休息版 0.8.70";Size=new Size(1080,820);MinimumSize=new Size(960,700);Font=new Font("Microsoft YaHei UI",10);StartPosition=FormStartPosition.CenterScreen;
             if(passivePreview){StartPosition=FormStartPosition.Manual;Location=new Point(-20000,-20000);}
             var layout=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=4,ColumnCount=1,Padding=new Padding(12)};
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute,70));layout.RowStyles.Add(new RowStyle(SizeType.Percent,70));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,88));layout.RowStyles.Add(new RowStyle(SizeType.Percent,30));Controls.Add(layout);

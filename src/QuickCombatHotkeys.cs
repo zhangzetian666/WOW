@@ -16,7 +16,7 @@ namespace WoWProbe
             if(action==QuickAction.ReturnToRoute)return Key(plan.StopAttackKey);
             if(action==QuickAction.Scan)return 9;
             if(action==QuickAction.Loot||action==QuickAction.CorpseApproach)return 70;
-            if(action==QuickAction.Skin)return 55;
+            if(action==QuickAction.Skin)return (ushort)(plan.SkinWithInteract?70:55);
             throw new ArgumentException("Unsupported hotkey action.");
         }
     }

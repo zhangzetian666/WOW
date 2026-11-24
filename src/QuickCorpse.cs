@@ -6,7 +6,7 @@ namespace WoWProbe
     {
         readonly uint token;readonly bool skinning;long started;readonly string targetName;
         uint opened,closed,skinBase,failedBase;long lootAt,skinAt;bool selected,lootIssued,skinIssued,skinSelected;
-        readonly bool approach;bool approached;
+        readonly bool approach,interactSkin,hotkeysOnly;bool approached;
         long selectionAt;int selectionAttempts;
         long combatSince=-1,settledSince=-1;bool settled;int lastHealth;
         public bool Interrupted {get;private set;}
@@ -16,8 +16,8 @@ namespace WoWProbe
             :this(token,skinning,initial,now,false){}
         public QuickCorpse(uint token,bool skinning,FarmObservation initial,long now,bool approach)
             :this(token,skinning,initial,now,approach,initial==null?"":initial.TargetName){}
-        public QuickCorpse(uint token,bool skinning,FarmObservation initial,long now,bool approach,string targetName)
-        {if(token==0||initial==null)throw new ArgumentException("A verified corpse identity is required.");this.token=token;this.skinning=skinning;this.approach=approach;this.targetName=targetName;started=now;settledSince=initial.InCombat?-1:now;lastHealth=initial.Health;opened=initial.LootOpened;closed=initial.LootClosed;}
+        public QuickCorpse(uint token,bool skinning,FarmObservation initial,long now,bool approach,string targetName,bool interactSkin=false,bool hotkeysOnly=false)
+        {if(token==0||initial==null)throw new ArgumentException("A verified corpse identity is required.");this.token=token;this.skinning=skinning;this.approach=approach;this.targetName=targetName;this.interactSkin=interactSkin;this.hotkeysOnly=hotkeysOnly;started=now;settledSince=initial.InCombat?-1:now;lastHealth=initial.Health;opened=initial.LootOpened;closed=initial.LootClosed;}
         QuickCommand C(QuickAction action,string reason,ushort key){return new QuickCommand{Action=action,Token=token,Reason=reason,Key=key,SelectName=action==QuickAction.CorpseSelect&&resumed?targetName:null};}
         bool resumed;
         public void Resume(FarmObservation o,long now)
@@ -25,7 +25,7 @@ namespace WoWProbe
         QuickCommand Select(long now,bool skin)
         {
             if(selectionAttempts==0){selectionAt=now;selectionAttempts=resumed?2:1;return C(QuickAction.CorpseSelect,skin?"拾取完成后重选同一尸体，核对剥皮条件。":"重选上一目标，核对已击杀尸体后再拾取。",0);}
-            if(selectionAttempts==1&&now-selectionAt>=1000&&!String.IsNullOrWhiteSpace(targetName)){selectionAttempts=2;selectionAt=now;var c=C(QuickAction.CorpseSelect,"上一目标重选未成功，按完整名字重选并核对原尸体身份。",0);c.SelectName=targetName;return c;}
+            if(!hotkeysOnly&&selectionAttempts==1&&now-selectionAt>=1000&&!String.IsNullOrWhiteSpace(targetName)){selectionAttempts=2;selectionAt=now;var c=C(QuickAction.CorpseSelect,"上一目标重选未成功，按完整名字重选并核对原尸体身份。",0);c.SelectName=targetName;return c;}
             if(now-selectionAt>=3000)return Finish(skin?"拾取已确认，但无法重选原尸体；不计剥皮成功。":"无法重新取得原尸体，跳过拾取/剥皮，不冒充成功。");
             return C(QuickAction.None,"等待原尸体重新选中，不继续寻怪。",0);
         }
@@ -79,9 +79,10 @@ namespace WoWProbe
                 if(!skinning)return Finish(lootConfirmed?"拾取已确认，继续下一只。":"尸体已无可拾取物，继续下一只。");
                 if(!o.SkinKnown)return Finish("尸体的可剥皮状态不可读，跳过剥皮。");
                 if(!o.Skinnable)return Finish("该尸体不可剥皮，继续下一只。");
-                if(!o.SkinBindingKnown||!o.SkinBindingCorrect||!o.SkinSuccessKnown||!o.CastEventsKnown)return Finish("剥皮键7或剥皮成功事件未就绪，跳过剥皮。");
+                bool binding=interactSkin?o.InteractBindingKnown&&o.InteractBindingCorrect:o.SkinBindingKnown&&o.SkinBindingCorrect;
+                if(!binding||!o.SkinSuccessKnown||!o.CastEventsKnown)return Finish("剥皮按键或剥皮成功事件未就绪，跳过剥皮。");
                 skinIssued=true;skinAt=now;skinBase=o.SkinSuccess;failedBase=o.CastFailed;
-                return C(QuickAction.Skin,"同一尸体已拾取完且可剥皮，直接按快捷键7剥皮，不输入聊天命令。",55);
+                return C(QuickAction.Skin,interactSkin?"同一尸体已拾取完且可剥皮，按F交互剥皮，等待成功事件。":"同一尸体已拾取完且可剥皮，直接按快捷键7剥皮，不输入聊天命令。",(ushort)(interactSkin?70:55));
             }
             if(!lootIssued){lootIssued=true;lootAt=now;return C(QuickAction.Loot,"对同一已死亡怪物按F拾取，等待窗口事件确认。",70);}
             if(now-lootAt>=5000)return Finish("拾取未确认，不执行剥皮；继续下一只。");

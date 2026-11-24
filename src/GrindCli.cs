@@ -108,11 +108,11 @@ namespace WoWProbe
             if(plan==null)throw new InvalidOperationException("请先手动配置固定打怪巡航路线，再点击开始。");plan.Validate(true);plan=plan.Clone();
             string vendorCheckpointPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-npc-progress.json");
             var savedTrip=QuickVendorCheckpoint.Load(vendorCheckpointPath);
-            if(savedTrip!=null){savedTrip.Plan.RangedCombat=plan.RangedCombat;savedTrip.Plan.SkillRows=plan.SkillRows;savedTrip.Plan.RandomRoutes=plan.RandomRoutes;savedTrip.Plan.RouteVariation=plan.RouteVariation;savedTrip.Plan.RandomRouteSeed=plan.RandomRouteSeed;savedTrip.Plan.TimedBreaks=plan.TimedBreaks;savedTrip.Plan.Validate(true);plan=savedTrip.Plan.Clone();}
+            if(savedTrip!=null){savedTrip.Plan.NoChatCombat=plan.NoChatCombat;savedTrip.Plan.SkinWithInteract=plan.SkinWithInteract;savedTrip.Plan.StartAttackKey=plan.StartAttackKey;savedTrip.Plan.LastTargetKey=plan.LastTargetKey;savedTrip.Plan.StopAttackKey=plan.StopAttackKey;savedTrip.Plan.RangedCombat=plan.RangedCombat;savedTrip.Plan.SkillRows=plan.SkillRows;savedTrip.Plan.RandomRoutes=plan.RandomRoutes;savedTrip.Plan.RouteVariation=plan.RouteVariation;savedTrip.Plan.RandomRouteSeed=plan.RandomRouteSeed;savedTrip.Plan.TimedBreaks=plan.TimedBreaks;savedTrip.Plan.Validate(true);plan=savedTrip.Plan.Clone();}
             WindowInfo window = OpenTelemetry();Native.RequireInputIntegrity(window.ProcessId);
             Action<string> nativeReport=report;var backend = new WindowsInputBackend(window, message=>nativeReport(message));
             FarmObservation anchor = Snapshot();
-            bool skipUnavailableSkin=skinning&&(!anchor.SkinBindingKnown||!anchor.SkinBindingCorrect);
+            bool skipUnavailableSkin=skinning&&(plan.SkinWithInteract?(!anchor.InteractBindingKnown||!anchor.InteractBindingCorrect):(!anchor.SkinBindingKnown||!anchor.SkinBindingCorrect));
             if(skipUnavailableSkin)skinning=false;
             var routeFollower=new QuickRouteFollower(plan,anchor);
             var engine = new QuickCombat(anchor, interval,skinning,routeFollower,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),false,plan.SkillRows,plan.RangedCombat);
@@ -146,7 +146,7 @@ namespace WoWProbe
                     if(!plan.RangedCombat&&anchor.ClickToMoveKnown&&!anchor.ClickToMoveEnabled)throw new InvalidOperationException("当前游戏未启用“点击移动”(autoInteract)，F不能承担自动接近。请在游戏控制设置中启用后重试。");
                     write(anchor.ClickToMoveKnown?(anchor.ClickToMoveEnabled?"已核对当前角色：点击移动已启用。":"点击移动已关闭；远程技能仍可施放，靠近尸体拾取需另行核对移动设置。") :"当前插件未提供点击移动回读；请更新插件并/reload后核对。");
                     if(!plan.RangedCombat&&!anchor.MeleeEventsKnown)throw new InvalidOperationException("游戏尚未加载普攻命中检测。请在游戏输入 /reload 后重试，避免只普攻不放技能。");
-                    if(skipUnavailableSkin)write("当前未确认剥皮技能绑定7，本轮跳过剥皮，继续打怪和拾取；配置好后重新开始即可启用。");
+                    if(skipUnavailableSkin)write("当前所选剥皮按键尚未确认，本轮跳过剥皮，继续打怪和拾取；请检查F交互或7剥皮技能设置。");
                     if(anchor.FoodCount==0)write("食物库存为0，允许开始；低血量时原地自然恢复，恢复后继续。");
                     RouteDocument recoveryRoute=null;
                     string recoveryPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-corpse-route.json");
@@ -158,7 +158,7 @@ namespace WoWProbe
                     else write("跑尸按实际死亡点导航，不要求另行录制墓地路线。");
                     if(recoveryRoute!=null&&plan.RandomRoutes)QuickRouteVariants.Export(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"random-routes"),"corpse",QuickRouteVariants.For(plan,recoveryRoute,5));
                     if(recoveryRoute!=null)write("已加载跑尸路线；沿已录路点返回，再接近本轮死亡点，不与灵魂医者交互。");
-                    write(plan.NoChatCombat?"战斗无聊天模式：开始攻击="+plan.StartAttackKey+"，上一个目标="+plan.LastTargetKey+"，停止攻击="+plan.StopAttackKey+"；拾取F、剥皮7。":"战斗命令模式；可在技能设置配置快捷键后启用无聊天模式。");
+                    write(plan.NoChatCombat?"战斗无聊天模式：开始攻击="+plan.StartAttackKey+"，上一个目标="+plan.LastTargetKey+"，停止攻击="+plan.StopAttackKey+"；拾取F、剥皮"+(plan.SkinWithInteract?"F交互":"7技能键")+"。":"战斗命令模式；可在技能设置配置快捷键后启用无聊天模式。");
                     write(plan.Vendor.Enabled?"包满自动前往售卖NPC，确认空位恢复后返回；修理按独立设置执行。":"未启用售卖NPC；包满将停止，请在自动售卖页填写商人坐标。");
                     write(plan.RangedCombat?"战斗类型：远程英雄，按射程接近并执行可用技能；不等待近战命中，不执行盗贼专用按键。":"战斗类型：近战英雄，确认接触后执行技能行。");
                     if(plan.RangedCombat)write("远程动作回读：射程已知="+anchor.ActionRangeKnownMask+"，射程内="+anchor.ActionsInRangeMask+"，自动射击开启="+anchor.RepeatingMask+"，远程栏="+anchor.RangedActionsMask+"，近战栏="+anchor.MeleeActionsMask+"；全零时请更新插件并/reload。");
