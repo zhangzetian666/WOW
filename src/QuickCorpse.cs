@@ -5,7 +5,7 @@ namespace WoWProbe
     public sealed class QuickCorpse
     {
         readonly uint token;readonly bool skinning;long started;readonly string targetName;
-        uint opened,closed,skinBase,failedBase;long lootAt,skinAt;bool selected,lootIssued,skinIssued,skinSelected;
+        uint opened,closed,skinBase,failedBase;long lootAt,skinAt,lastLootInput;int lootAttempts;bool selected,lootIssued,skinIssued,skinSelected;
         readonly bool approach,interactSkin,hotkeysOnly;readonly string lastTargetKey;bool approached;
         long selectionAt;int selectionAttempts;
         long combatSince=-1,settledSince=-1;bool settled;int lastHealth;
@@ -60,6 +60,8 @@ namespace WoWProbe
             if(lootIssued&&!lootConfirmed)
             {
                 if(now-lootAt>=5000)return Finish("拾取未确认，不执行剥皮；继续下一只。");
+                if(same&&o.LootEventsKnown&&o.LootOpened==opened&&!(o.LootKnown&&!o.Lootable)&&!o.Casting&&!o.Channeling&&lootAttempts<3&&now-lastLootInput>=1500)
+                {lootAttempts++;lastLootInput=now;return C(QuickAction.Loot,"尚未出现拾取窗口，对同一尸体再次按F（第"+lootAttempts+"次，最多3次）；仍以窗口事件确认。",70);}
                 return C(QuickAction.None,"等待拾取窗口开启和关闭后再剥皮。",0);
             }
             if(!same)
@@ -84,7 +86,7 @@ namespace WoWProbe
                 skinIssued=true;skinAt=now;skinBase=o.SkinSuccess;failedBase=o.CastFailed;
                 return C(QuickAction.Skin,interactSkin?"同一尸体已拾取完且可剥皮，按F交互剥皮，等待成功事件。":"同一尸体已拾取完且可剥皮，直接按快捷键7剥皮，不输入聊天命令。",(ushort)(interactSkin?70:55));
             }
-            if(!lootIssued){lootIssued=true;lootAt=now;return C(QuickAction.Loot,"对同一已死亡怪物按F拾取，等待窗口事件确认。",70);}
+            if(!lootIssued){lootIssued=true;lootAt=lastLootInput=now;lootAttempts=1;return C(QuickAction.Loot,"对同一已死亡怪物按F拾取，等待窗口事件确认。",70);}
             if(now-lootAt>=5000)return Finish("拾取未确认，不执行剥皮；继续下一只。");
             return C(QuickAction.None,"等待拾取窗口开启和关闭。",0);
         }
