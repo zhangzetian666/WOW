@@ -52,6 +52,12 @@ namespace WoWProbe
         }
 
         internal static FarmObservation ReadTelemetry() { return Snapshot(); }
+        internal static FarmObservation ReadRecordingPoint()
+        {
+            bool reusable=false;
+            try{reusable=located&&target!=null&&Native.ClientBounds(target)==client;}catch(Exception){}
+            return QuickRecordingTelemetry.Read(reusable,Snapshot,()=>{OpenTelemetry();},ms=>Thread.Sleep(ms));
+        }
         internal static void FocusGameWindow(){var window=FindWowWindow();if(window!=null)Activate(window.Handle);}
 
         public static int Move(string[] args)

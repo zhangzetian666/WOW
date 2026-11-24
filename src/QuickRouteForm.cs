@@ -88,7 +88,7 @@ namespace WoWProbe
         {
             bool active=RecordingServiceRoute;foreach(TabPage page in tabs.TabPages)page.Enabled=!active||page.Text=="自动售卖"&&vendorRoute.IsRecording||page.Text=="自动修理"&&repairRoute.IsRecording||page.Text=="跑尸路线"&&corpseRoute.IsRecording;
             vendorEnabled.Enabled=repairEnabled.Enabled=!active;
-            if(!active)Preview();if(ServiceRecordingChanged!=null)ServiceRecordingChanged();
+            if(!active){Preview();AutoExport();}if(ServiceRecordingChanged!=null)ServiceRecordingChanged();
         }
         TabPage ServiceTab(bool repair)
         {
@@ -140,7 +140,7 @@ namespace WoWProbe
             info.Text="随机路线已保存到："+dir;
         }
         void ExportVariants(){var p=ReadPlan(false);p.RandomRoutes=true;ExportAvailable(p);}
-        void AutoExport(){try{ExportAvailable(ReadEditor());}catch(Exception ex){info.Text="原路线已保存；随机路线生成失败："+ex.Message;}}
+        void AutoExport(){if(RecordingServiceRoute)return;try{ExportAvailable(ReadEditor());}catch(Exception ex){info.Text="原路线已保存；随机路线生成失败："+ex.Message;}}
 
         void Preview()
         {
@@ -156,7 +156,7 @@ namespace WoWProbe
             else
             {
                 var form=FindForm();bool visible=form!=null&&form.Visible;
-                try{if(visible)form.Hide();GrindCli.FocusGameWindow();GrindCli.OpenTelemetry();o=GrindCli.ReadTelemetry();}
+                try{if(visible)form.Hide();GrindCli.FocusGameWindow();o=GrindCli.ReadRecordingPoint();}
                 finally{if(visible&&!form.IsDisposed){form.Show();form.Activate();}}
             }
             if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||(ghost?o.PlayerDead&&!o.PlayerGhost:o.PlayerDead||o.PlayerGhost)||o.InCombat||!NavigationMath.InRange(o.X,0,1)||!NavigationMath.InRange(o.Y,0,1))throw new InvalidOperationException(ghost?"请在存活或灵魂状态、脱战时录制跑尸路线。":"未读到新鲜、存活且脱战的角色坐标，未保存巡航点。");return o;

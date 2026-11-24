@@ -26,8 +26,11 @@ namespace WoWProbe
         {
             if(now<0||now<lastTime)throw new InvalidOperationException("录制时钟异常。");lastTime=now;Check(o);
             var p=points[points.Count-1];double distance=NavigationMath.Distance(o.X-p.X,o.Y-p.Y,plan.Calibration.AxisScale);
-            double sampleDistance=ghost?NavigationMath.Distance(o.X-sampleX,o.Y-sampleY,plan.Calibration.AxisScale):distance;
-            if(sampleDistance>Math.Max(.004,(now-lastGood)/1000.0*plan.Calibration.ForwardUnitsPerSecond*2+.001)||now-lastGood>3000&&sampleDistance>.001)throw new InvalidOperationException("坐标采样中断或发生跳跃，请回到最后录点；未保存跨越障碍的直线。");
+            double sampleDistance=NavigationMath.Distance(o.X-sampleX,o.Y-sampleY,plan.Calibration.AxisScale);
+            long gap=now-lastGood;double limit=Math.Max(.004,gap/1000.0*plan.Calibration.ForwardUnitsPerSecond*2+.001);
+            string location=String.Format(System.Globalization.CultureInfo.InvariantCulture,"最后有效坐标({0:F3}, {1:F3})，当前({2:F3}, {3:F3})；已录{4}点保留。",sampleX*100,sampleY*100,o.X*100,o.Y*100,points.Count);
+            if(sampleDistance>limit)throw new InvalidOperationException("单次坐标位移过大："+(sampleDistance*100).ToString("F3")+"坐标点，超过本次允许的"+(limit*100).ToString("F3")+"。"+location+"请回到最后有效坐标继续补录。");
+            if(gap>3000&&sampleDistance>.001)throw new InvalidOperationException("连续"+(gap/1000.0).ToString("F1")+"秒未收到有效采样，期间移动"+(sampleDistance*100).ToString("F3")+"坐标点。"+location+"请露出游戏色块，回到最后有效坐标继续补录；到NPC后站定再结束。");
             if(!endpoint&&sequence==o.Sequence)return false;sequence=o.Sequence;lastGood=now;sampleX=o.X;sampleY=o.Y;
             if(ghost&&!endpoint&&now-lastPoint<6000)return false;
             if(distance<(endpoint?1e-8:.00035))return false;Add(o);lastPoint=now;return true;
@@ -40,6 +43,20 @@ namespace WoWProbe
             var s=settings.Clone();s.Points=Snapshot();s.RouteComplete=true;s.Enabled=true;s.X=o.X;s.Y=o.Y;
             if(o.TargetExists&&o.TargetIdentityKnown&&!o.TargetIsPlayer&&o.AttackabilityKnown&&!o.TargetCanAttack&&o.TargetDeadKnown&&!o.TargetDead)s.Name=o.TargetName;
             s.RequireRoute();return s;
+        }
+    }
+    public static class QuickRecordingTelemetry
+    {
+        // Reuse a located grid at finish; opening the full locator again can
+        // turn a normal UI handoff into a false multi-second recording gap.
+        public static FarmObservation Read(bool located,Func<FarmObservation> capture,Action initialize,Action<int> wait)
+        {
+            if(located)for(int i=0;i<4;i++)
+            {
+                var o=capture();if(o!=null&&o.Fresh&&o.KnownCore&&o.ReadFailures==0)return o;
+                if(i<3)wait(120);
+            }
+            initialize();return capture();
         }
     }
     public static class QuickServicePaths

@@ -39,7 +39,14 @@ namespace WoWProbe
         void RecordSample()
         {
             if(recording==null)return;
-            try{if(recording.Observe(sample(),clock.ElapsedMilliseconds)){points=recording.Snapshot();RefreshRows();if(clock.ElapsedMilliseconds-lastSave>=1000){save();lastSave=clock.ElapsedMilliseconds;}}}
+            try
+            {
+                bool added=recording.Observe(sample(),clock.ElapsedMilliseconds);
+                if(added)points=recording.Snapshot();
+                var form=FindForm();bool draw=form==null||form.WindowState!=FormWindowState.Minimized;
+                if(draw&&(added||grid.Rows.Count!=points.Count))RefreshRows();
+                if(added&&clock.ElapsedMilliseconds-lastSave>=1000){save();lastSave=clock.ElapsedMilliseconds;}
+            }
             catch(Exception e){status.Text="采样暂停："+e.Message;}
         }
         void EndRecording()
