@@ -3,12 +3,12 @@ namespace WoWProbe
 {
     public static class QuickCombatHotkeys
     {
-        public static ushort Key(string text)
+        public static ushort Key(string text,string fieldName=null)
         {
             string s=(text??"").Trim().ToUpperInvariant();int n;
             if(s.Length==1&&((s[0]>='0'&&s[0]<='9')||(s[0]>='A'&&s[0]<='Z')))return s[0];
             if(s.Length>1&&s[0]=='F'&&Int32.TryParse(s.Substring(1),out n)&&n>=1&&n<=11)return (ushort)(111+n);
-            throw new FormatException("快捷键请填写单个字母、数字或F1–F11；F12保留急停。");
+            throw new FormatException((String.IsNullOrEmpty(fieldName)?"快捷键":"“"+fieldName+"”单键框")+"请填写单个字母、数字或F1–F11；F12保留急停。技能顺序（如242223）请填在下方“技能行1–5”，技能行支持多个按键。");
         }
         public static ushort ActionKey(QuickAction action,QuickRoutePlan plan)
         {

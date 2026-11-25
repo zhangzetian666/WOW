@@ -18,6 +18,14 @@ class QuickRouteTests
     static void Target(FarmObservation o){o.TargetExists=o.TargetIdentityKnown=o.AttackabilityKnown=o.TargetCanAttack=o.TargetDeadKnown=true;o.TargetToken=8;o.TargetReaction=4;}
     static int Main()
     {
+        Test("skill sequences stay valid while invalid single key fields identify their own label",()=>{
+            var p=Plan();p.SkillRows=new[]{"242223","123","212","321","22"};p.OpeningKeys="242223";p.ValidateSkills();
+            foreach(string field in new[]{"开始攻击","选上一个目标","停止攻击"}){
+                p=Plan();p.SkillRows=new[]{"242223","","","",""};
+                if(field=="开始攻击")p.StartAttackKey="242223";else if(field=="选上一个目标")p.LastTargetKey="242223";else p.StopAttackKey="242223";
+                bool rejected=false;try{p.ValidateSkills();}catch(FormatException ex){rejected=ex.Message.Contains("“"+field+"”单键框")&&ex.Message.Contains("技能行1–5");}Check(rejected);
+            }
+        });
         Test("food stealth requires both energy and enabled rogue setting irrespective of melee mode",()=>{
             foreach(bool enabled in new[]{false,true})foreach(int powerType in new[]{0,3,255}){
                 var p=Plan();p.UseRogueVanish=enabled;var o=O();o.PowerType=powerType;o.Power=100;o.Health=25;
