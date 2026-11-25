@@ -9,6 +9,16 @@ namespace WoWProbe
         public RouteDocument Outbound,Path,ReturnVariant;public int OutboundChoice,ReturnChoice;
         public int Next;
         public bool Returning,Repair,Emergency,StealthRequested;
+        public bool ObsoleteEmergencyRepair(QuickRoutePlan current,FarmObservation f)
+        {
+            // A completed repair invalidates an old automatic outbound task,
+            // but never discards a return path, a manual task or a full-bag trip.
+            return Repair&&Emergency&&!Returning&&Plan!=null&&current!=null&&
+                f!=null&&f.Fresh&&f.KnownCore&&f.ReadFailures==0&&!f.PlayerDead&&!f.PlayerGhost&&
+                Plan.MapMatches(f)&&current.MapMatches(f)&&GearOperational(f)&&!f.BagFull;
+        }
+        public static bool GearOperational(FarmObservation f)
+        {return f!=null&&f.GearKnown&&!f.GearRed&&f.Durability>0&&f.Durability<=10000;}
         public static QuickVendorCheckpoint Load(string path)
         {if(!File.Exists(path))return null;return new JavaScriptSerializer().Deserialize<QuickVendorCheckpoint>(File.ReadAllText(path));}
         public static void Save(string path,QuickVendorCheckpoint value)

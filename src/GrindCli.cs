@@ -114,10 +114,12 @@ namespace WoWProbe
             if(plan==null)throw new InvalidOperationException("请先手动配置固定打怪巡航路线，再点击开始。");plan.Validate(true);plan=plan.Clone();
             string vendorCheckpointPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-npc-progress.json");
             var savedTrip=QuickVendorCheckpoint.Load(vendorCheckpointPath);
-            if(savedTrip!=null){savedTrip.Plan.NoChatCombat=plan.NoChatCombat;savedTrip.Plan.SkinWithInteract=plan.SkinWithInteract;savedTrip.Plan.StartAttackKey=plan.StartAttackKey;savedTrip.Plan.LastTargetKey=plan.LastTargetKey;savedTrip.Plan.StopAttackKey=plan.StopAttackKey;savedTrip.Plan.RangedCombat=plan.RangedCombat;savedTrip.Plan.SkillRows=plan.SkillRows;savedTrip.Plan.RandomRoutes=plan.RandomRoutes;savedTrip.Plan.RouteVariation=plan.RouteVariation;savedTrip.Plan.RandomRouteSeed=plan.RandomRouteSeed;savedTrip.Plan.TimedBreaks=plan.TimedBreaks;savedTrip.Plan.Validate(true);plan=savedTrip.Plan.Clone();}
             WindowInfo window = OpenTelemetry();Native.RequireInputIntegrity(window.ProcessId);
             Action<string> nativeReport=report;var backend = new WindowsInputBackend(window, message=>nativeReport(message));
             FarmObservation anchor = Snapshot();
+            bool obsoleteRepair=savedTrip!=null&&savedTrip.ObsoleteEmergencyRepair(plan,anchor);
+            if(obsoleteRepair){QuickVendorCheckpoint.Save(vendorCheckpointPath,null);savedTrip=null;}
+            if(savedTrip!=null){savedTrip.Plan.UseRogueVanish=plan.UseRogueVanish;savedTrip.Plan.NoChatCombat=plan.NoChatCombat;savedTrip.Plan.SkinWithInteract=plan.SkinWithInteract;savedTrip.Plan.StartAttackKey=plan.StartAttackKey;savedTrip.Plan.LastTargetKey=plan.LastTargetKey;savedTrip.Plan.StopAttackKey=plan.StopAttackKey;savedTrip.Plan.RangedCombat=plan.RangedCombat;savedTrip.Plan.SkillRows=plan.SkillRows;savedTrip.Plan.RandomRoutes=plan.RandomRoutes;savedTrip.Plan.RouteVariation=plan.RouteVariation;savedTrip.Plan.RandomRouteSeed=plan.RandomRouteSeed;savedTrip.Plan.TimedBreaks=plan.TimedBreaks;savedTrip.Plan.Validate(true);plan=savedTrip.Plan.Clone();}
             bool skipUnavailableSkin=skinning&&(plan.SkinWithInteract?(!anchor.InteractBindingKnown||!anchor.InteractBindingCorrect):(!anchor.SkinBindingKnown||!anchor.SkinBindingCorrect));
             if(skipUnavailableSkin)skinning=false;
             var routeFollower=new QuickRouteFollower(plan,anchor);
@@ -142,6 +144,7 @@ namespace WoWProbe
                 try
                 {
                     write("固定路线："+plan.Route.Name+"，路点"+plan.Route.Points.Count+"，按顺序循环；允许偏离"+(plan.CorridorWidth*100).ToString("F2")+"坐标点。");
+                    if(obsoleteRepair)write("已取消过期零耐久修理行程：当前最低装备耐久="+(anchor.Durability/100.0).ToString("F2")+"%，无红装且背包未满；按当前巡航方案继续，位于NPC途中时沿录制路线返回。");
                     QuickRoutePlan.Save(prefix+"-patrol.json",plan);
                     if(breakSchedule!=null)write(breakSchedule.Summary);
                     if(plan.RandomRoutes){string variants=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"random-routes");QuickRouteVariants.Export(variants,"patrol",QuickRouteVariants.For(plan,plan.Route,20));if(plan.Vendor.RouteComplete)QuickRouteVariants.Export(variants,"npc",QuickRouteVariants.For(plan,QuickRouteVariants.Service(plan,plan.Vendor),10));}
@@ -241,13 +244,13 @@ namespace WoWProbe
                         }
                         bool brokenGear=observed.GearKnown&&observed.GearRed&&observed.Durability==0;
                         if(brokenGear&&plan.Vendor.Enabled){plan.Repair=plan.Vendor.Clone();plan.Repair.Enabled=true;}
-                        if(vendorTrip==null&&savedTrip!=null){vendorTrip=new QuickVendorEngine(savedTrip,ReadOperations());write("恢复"+vendorTrip.RouteSummary);vendorFirst=repairFirst=false;write("已恢复未完成NPC行程，从保存的下一未到达路点继续，不返回起点。");}
+                        if(vendorTrip==null&&savedTrip!=null){vendorTrip=new QuickVendorEngine(savedTrip,ReadOperations());write("恢复"+vendorTrip.RouteSummary);vendorFirst=repairFirst=false;write("已恢复未完成NPC行程，从保存的下一未到达路点继续，不返回起点。背包满="+observed.BagFull+"，耐久="+observed.Durability+"，当前零耐久="+brokenGear+"，已在返程="+savedTrip.Returning);}
                         bool needRepair=plan.Repair.Enabled&&(repairFirst||brokenGear);
                         if(!observed.BagFull)suppressFullBagSale=false;
                         if(vendorTrip==null&&!engine.IsStealthRecovery&&(!observed.InCombat||brokenGear)&&!observed.Casting&&!observed.Channeling&&(needRepair||plan.Vendor.Enabled&&(vendorFirst||observed.BagFull&&!suppressFullBagSale)))
                         {
                             searchMotion.Stop();CancelQuickMovement(backend);routeFollower.Interrupt(observed);vendorTrip=new QuickVendorEngine(plan,ReadOperations(),needRepair,!vendorFirst&&!repairFirst,brokenGear);write(vendorTrip.RouteSummary);if(brokenGear)autoAttackToken=uint.MaxValue;if(needRepair)repairFirst=false;else vendorFirst=false;completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;
-                            engine=new QuickCombat(observed,interval,skinning,null,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),true,plan.SkillRows,plan.RangedCombat);vendorDefending=!vendorTrip.AvoidCombat&&observed.Health<plan.RestBelowPercent;write(needRepair?"装备损坏或手动修理：前往已配置修理NPC，实际修复后返回巡航。":"开始售卖行程：前往已配置NPC坐标，确认清包后返回巡航。");
+                            engine=new QuickCombat(observed,interval,skinning,null,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),true,plan.SkillRows,plan.RangedCombat);vendorDefending=!vendorTrip.AvoidCombat&&observed.Health<plan.RestBelowPercent;write(needRepair?(brokenGear?"装备零耐久触发修理：前往NPC。":"手动修理请求：前往NPC。"):observed.BagFull?"背包已满触发售卖：前往NPC，装备耐久正常也需要清包。":"手动售卖请求：前往NPC。");
                         }
                         if(vendorTrip!=null)
                         {
