@@ -7,8 +7,65 @@ class QuickCombatTests
     static void Check(bool condition){if(!condition)throw new Exception("Unexpected combat behavior");}
     static FarmObservation Observation(){return new FarmObservation{TargetPositionKnown=true,TargetX=.3203,TargetY=.4703,Health=100,Fresh=true,KnownCore=true,MapId=1432,MapMode=1,Zone="TEST",X=.32,Y=.47,Facing=1,CastingKnown=true,TargetExists=true,TargetIdentityKnown=true,TargetToken=123,TargetName="怪物",NameHashKnown=true,TargetNameHash=1,AttackabilityKnown=true,TargetCanAttack=true,TargetDeadKnown=true,TargetReaction=4};}
     static QuickCommand Step(QuickCombat e,FarmObservation o,long time){o.Sequence++;return e.Step(o,time);}
+    static QuickCombat Hunter(FarmObservation o,QuickHunterState state=null,bool ranged=false)
+    {return new QuickCombat(o,750,false,null,"4563","4563",80,0,false,null,ranged,true,state);}
     static int Main()
     {
+        Test("game too far feedback rolls back failed hunter key and forbids repeats until movement and range agree",()=>{
+            var o=Observation();o.ActionRangeKnownMask=o.ActionsInRangeMask=63;
+            var e=new QuickCombat(o,750,false,null,"56","3",80,0,false,null,true,true);Step(e,o,0);Step(e,o,40);
+            var c=Step(e,o,100);Check(c.Key==53);e.HunterInputCompleted(c);
+            o.RangeErrorActive=true;c=Step(e,o,200);Check(c.Action==QuickAction.Face&&c.AllowApproach&&c.Reason.Contains("距离太远"));
+            for(int t=300;t<=2700;t+=100){if(t==2300)o.RangeErrorActive=false;Check(Step(e,o,t).Action!=QuickAction.Skill);}
+            o.X+=.0002;Check(Step(e,o,2800).Action==QuickAction.RangedStop);c=Step(e,o,2900);Check(c.Key==53);e.HunterInputCompleted(c);
+            Step(e,o,3600);c=Step(e,o,3700);Check(c.Key==54);o.RangeErrorActive=true;Check(!QuickCombat.Matches(c,o));
+            o.InCombat=o.TargetVictimKnown=o.TargetTargetsPlayer=true;Step(e,o,3800);c=Step(e,o,3900);Check(c.Key==49&&c.HunterDefense);
+        });
+        Test("hunter resurrection waits for full recovery then acknowledges one aspect key across engines",()=>{
+            var o=Observation();o.PlayerGhost=true;var state=new QuickHunterState();state.Observe(o);o.PlayerGhost=false;o.Health=30;o.FoodCount=10;
+            var e=Hunter(o,state);Check(Step(e,o,0).Action==QuickAction.Food);e.RestInputCompleted(1500,true);
+            o.Health=100;Check(Step(e,o,11000).Action==QuickAction.None&&e.IsResting);Check(Step(e,o,11500).Action==QuickAction.None&&!e.IsResting);
+            var buff=Step(e,o,11600);Check(buff.Action==QuickAction.HunterAspect&&buff.Key==56&&QuickCombat.Matches(buff,o));
+            o.Health=99;Check(!QuickCombat.Matches(buff,o));o.Health=100;o.InCombat=true;Check(!QuickCombat.Matches(buff,o));o.InCombat=false;
+            e=Hunter(o,state);Check(Step(e,o,0).Action==QuickAction.HunterAspect);e.HunterInputCompleted(buff);Check(!e.HunterRecoveryPending&&Step(e,o,100).Action!=QuickAction.HunterAspect);
+            o.PlayerDead=true;state.Observe(o);Check(state.AspectPending);
+        });
+        Test("hunter disabled and ordinary startup never issue post resurrection aspect",()=>{
+            var o=Observation();var state=new QuickHunterState();Check(Step(Hunter(o,state),o,0).Action!=QuickAction.HunterAspect);
+            o.PlayerDead=true;state.Observe(o);o.PlayerDead=false;var e=new QuickCombat(o,750,false,null,"","2",80,0,false,null,false,false,state);
+            Check(!e.HunterRecoveryPending&&Step(e,o,0).Action!=QuickAction.HunterAspect);
+        });
+        Test("hunter under direct attack skips all remaining opening keys and cycles one two",()=>{
+            foreach(bool ranged in new[]{false,true}){
+                var o=Observation();o.ActionRangeKnownMask=o.ActionsInRangeMask=63;var e=Hunter(o,null,ranged);Step(e,o,0);Step(e,o,40);
+                var first=Step(e,o,100);Check(first.Key==52);e.HunterInputCompleted(first);
+                o.InCombat=o.TargetVictimKnown=o.TargetTargetsPlayer=true;Check(Step(e,o,200).Report);
+                var keys="";for(int t=300;t<4500;t+=100){var c=Step(e,o,t);if(c.Action==QuickAction.Skill){Check(c.HunterDefense&&QuickCombat.Matches(c,o));keys+=(char)c.Key;e.HunterInputCompleted(c);}}
+                Check(keys.StartsWith("1212"));Check(keys.IndexOf('4')<0&&keys.IndexOf('5')<0&&keys.IndexOf('6')<0&&keys.IndexOf('3')<0);
+            }
+        });
+        Test("hunter drops unissued opening on health loss and does not confuse pet combat with self attack",()=>{
+            var o=Observation();o.ActionRangeKnownMask=o.ActionsInRangeMask=63;o.InCombat=o.TargetVictimKnown=true;var e=Hunter(o);Step(e,o,0);Step(e,o,40);var c=Step(e,o,100);Check(c.Key==52&&!c.HunterDefense);
+            o.TargetVictimKnown=false;o.Health=95;Check(!QuickCombat.Matches(c,o));Check(Step(e,o,200).Report);c=Step(e,o,300);Check(c.Key==49&&c.HunterDefense);
+            o.Casting=true;Check(Step(e,o,400).Action==QuickAction.InterruptSkin);
+        });
+        Test("hunter checks each current skill range without skipping five six three or advancing a cancelled input",()=>{
+            var o=Observation();o.ActionRangeKnownMask=63;o.ActionsInRangeMask=8;var e=Hunter(o);Step(e,o,0);Step(e,o,40);
+            var c=Step(e,o,100);Check(c.Key==52);e.HunterInputCompleted(c);
+            long t=200;
+            foreach(char key in "563"){
+                c=Step(e,o,t);Check(c.Action==QuickAction.Face&&c.AllowApproach);
+                c=Step(e,o,t+200);Check(c.Action==QuickAction.None);
+                int bit=1<<(key-'1');o.ActionsInRangeMask|=bit;Check(Step(e,o,t+300).Action==QuickAction.RangedStop);
+                c=Step(e,o,t+1000);Check(c.HunterSkill&&c.Key==key&&QuickCombat.Matches(c,o));
+                o.ActionsInRangeMask&=~bit;Check(!QuickCombat.Matches(c,o));o.ActionsInRangeMask|=bit;
+                e.HunterInputCompleted(c);t+=1100;
+            }
+        });
+        Test("hunter unreadable required range holds the same skill and incoming attack replaces it",()=>{
+            var o=Observation();var e=new QuickCombat(o,750,false,null,"5","5",80,0,false,null,false,true);Step(e,o,0);Check(Step(e,o,100).Action==QuickAction.None);
+            o.InCombat=o.TargetVictimKnown=o.TargetTargetsPlayer=true;Step(e,o,200);var c=Step(e,o,300);Check(c.Key==49&&c.HunterDefense);
+        });
         Test("contact cancels a queued combat detour before any turn or forward escape",()=>{for(int kind=0;kind<2;kind++){var o=Observation();o.InCombat=o.CastEventsKnown=o.MeleeEventsKnown=true;var e=new QuickCombat(o,750,false,null,"","2");Step(e,o,0);Step(e,o,40);Check(Step(e,o,3500).Action==QuickAction.BackOff);if(kind==0){o.MeleeHitToken=o.TargetToken;o.MeleeHits++;}else{o.TargetVictimKnown=o.TargetTargetsPlayer=true;o.Health=97;}bool skill=false;for(int t=3600;t<5000;t+=100){var c=Step(e,o,t);Check(c.Action!=QuickAction.BackOff&&c.Action!=QuickAction.DetourTurn&&c.Action!=QuickAction.DetourForward);if(c.Action==QuickAction.Skill)skill=true;}Check(skill);}});
         Test("interact binding alone never authorizes an assumed forward direction",()=>{var o=Observation();o.TargetPositionKnown=false;var e=new QuickCombat(o,750);Step(e,o,0);Check(Step(e,o,40).Action==QuickAction.Face);for(int t=500;t<=4000;t+=500){var c=Step(e,o,t);Check(c.Key!=QuickMovement.Forward);}Check(Step(e,o,4500).Action==QuickAction.Stop);});
         Test("a configured skill cooling down is not treated as a facing obstruction",()=>{var o=Observation();o.InCombat=o.CastEventsKnown=true;o.KnownActionsMask=o.UsableActionsMask=2;var e=new QuickCombat(o,750,false,null,"","2");Step(e,o,0);for(int t=500;t<=12000;t+=500){var c=Step(e,o,t);Check(c.Action!=QuickAction.BackOff&&c.Action!=QuickAction.DetourTurn&&c.Action!=QuickAction.DetourForward);}});

@@ -57,8 +57,8 @@ class QuickRouteUiTests
                 var grid=(DataGridView)typeof(QuickRouteEditor).GetField("grid",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(editor);
                 grid.Rows[1].Cells[1].Value="51.25";var plan=editor.ReadPlan(false);
                 if(plan.Route.Points.Count!=5||plan.Route.Points[1].X!=.5125||!plan.Route.Loop)throw new Exception("Manual percent coordinates did not round-trip.");
-                plan.SkillRows=new[]{"23","32","22","33","232"};plan.RangedCombat=true;plan.NoChatCombat=plan.SkinWithInteract=true;plan.RandomRoutes=plan.TimedBreaks=true;editor.Bind(plan);var newSettings=editor.ReadPlan(false);
-                if(!newSettings.NoChatCombat||!newSettings.SkinWithInteract)throw new Exception("No-chat and interaction skin settings did not round-trip through the UI.");
+                plan.SkillRows=new[]{"23","32","22","33","232"};plan.RangedCombat=true;plan.HunterMode=true;plan.NoChatCombat=plan.SkinWithInteract=true;plan.RandomRoutes=plan.TimedBreaks=true;editor.Bind(plan);var newSettings=editor.ReadPlan(false);
+                if(!newSettings.HunterMode||!newSettings.NoChatCombat||!newSettings.SkinWithInteract)throw new Exception("No-chat and interaction skin settings did not round-trip through the UI.");
                 if(newSettings.SkillRows.Length!=5||newSettings.SkillRows[4]!="232"||!newSettings.RandomRoutes||!newSettings.TimedBreaks||!newSettings.RangedCombat)throw new Exception("Combat style, random rows and session settings did not round-trip through the UI.");
                 bool rejected=false;try{editor.ReadPlan(true);}catch(InvalidOperationException){rejected=true;}if(!rejected)throw new Exception("Imported calibration was implicitly confirmed.");
                 var vendorX=(NumericUpDown)typeof(QuickRouteEditor).GetField("vendorX",BindingFlags.Instance|BindingFlags.NonPublic).GetValue(editor);vendorX.Value=51.25m;

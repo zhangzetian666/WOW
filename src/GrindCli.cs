@@ -108,8 +108,9 @@ namespace WoWProbe
             MouseLookInput.Run(dx,dy,ensure,held,()=>Native.SendMouseButton(true,false),()=>Native.SendMouseButton(true,true),Native.MoveMouseRelative,ms=>Pause(ms));
         }
 
-        internal static void RunQuick(int seconds, int interval, Func<bool> cancelled, Action<string> report,bool skinning=false,QuickRoutePlan plan=null,bool vendorFirst=false,bool repairFirst=false,QuickKillCounter killCounter=null,QuickBreakSchedule breakSchedule=null)
+        internal static void RunQuick(int seconds, int interval, Func<bool> cancelled, Action<string> report,bool skinning=false,QuickRoutePlan plan=null,bool vendorFirst=false,bool repairFirst=false,QuickKillCounter killCounter=null,QuickBreakSchedule breakSchedule=null,QuickHunterState hunterState=null)
         {
+            if(hunterState==null)hunterState=new QuickHunterState();
             if(killCounter==null)killCounter=new QuickKillCounter();killCounter.BeginRun();
             if(plan==null)throw new InvalidOperationException("请先手动配置固定打怪巡航路线，再点击开始。");plan.Validate(true);plan=plan.Clone();
             string vendorCheckpointPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-npc-progress.json");
@@ -119,11 +120,11 @@ namespace WoWProbe
             FarmObservation anchor = Snapshot();
             bool obsoleteRepair=savedTrip!=null&&savedTrip.ObsoleteEmergencyRepair(plan,anchor);
             if(obsoleteRepair){QuickVendorCheckpoint.Save(vendorCheckpointPath,null);savedTrip=null;}
-            if(savedTrip!=null){savedTrip.Plan.UseRogueVanish=plan.UseRogueVanish;savedTrip.Plan.NoChatCombat=plan.NoChatCombat;savedTrip.Plan.SkinWithInteract=plan.SkinWithInteract;savedTrip.Plan.StartAttackKey=plan.StartAttackKey;savedTrip.Plan.LastTargetKey=plan.LastTargetKey;savedTrip.Plan.StopAttackKey=plan.StopAttackKey;savedTrip.Plan.RangedCombat=plan.RangedCombat;savedTrip.Plan.SkillRows=plan.SkillRows;savedTrip.Plan.RandomRoutes=plan.RandomRoutes;savedTrip.Plan.RouteVariation=plan.RouteVariation;savedTrip.Plan.RandomRouteSeed=plan.RandomRouteSeed;savedTrip.Plan.TimedBreaks=plan.TimedBreaks;savedTrip.Plan.Validate(true);plan=savedTrip.Plan.Clone();}
+            if(savedTrip!=null){savedTrip.Plan.HunterMode=plan.HunterMode;savedTrip.Plan.UseRogueVanish=plan.UseRogueVanish;savedTrip.Plan.NoChatCombat=plan.NoChatCombat;savedTrip.Plan.SkinWithInteract=plan.SkinWithInteract;savedTrip.Plan.StartAttackKey=plan.StartAttackKey;savedTrip.Plan.LastTargetKey=plan.LastTargetKey;savedTrip.Plan.StopAttackKey=plan.StopAttackKey;savedTrip.Plan.RangedCombat=plan.RangedCombat;savedTrip.Plan.SkillRows=plan.SkillRows;savedTrip.Plan.RandomRoutes=plan.RandomRoutes;savedTrip.Plan.RouteVariation=plan.RouteVariation;savedTrip.Plan.RandomRouteSeed=plan.RandomRouteSeed;savedTrip.Plan.TimedBreaks=plan.TimedBreaks;savedTrip.Plan.Validate(true);plan=savedTrip.Plan.Clone();}
             bool skipUnavailableSkin=skinning&&(plan.SkinWithInteract?(!anchor.InteractBindingKnown||!anchor.InteractBindingCorrect):(!anchor.SkinBindingKnown||!anchor.SkinBindingCorrect));
             if(skipUnavailableSkin)skinning=false;
             var routeFollower=new QuickRouteFollower(plan,anchor);
-            var engine = new QuickCombat(anchor, interval,skinning,routeFollower,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),false,plan.SkillRows,plan.RangedCombat);
+            var engine = new QuickCombat(anchor, interval,skinning,routeFollower,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),false,plan.SkillRows,plan.RangedCombat,plan.HunterMode,hunterState);
             var meleeApproach=new MeleeApproach();
             var safety = new InputFailureLatch();
             var stream=new QuickTelemetryStream(Snapshot,()=>clock.ElapsedMilliseconds,anchor);
@@ -148,6 +149,8 @@ namespace WoWProbe
                     QuickRoutePlan.Save(prefix+"-patrol.json",plan);
                     if(breakSchedule!=null)write(breakSchedule.Summary);
                     if(plan.RandomRoutes){string variants=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"random-routes");QuickRouteVariants.Export(variants,"patrol",QuickRouteVariants.For(plan,plan.Route,20));if(plan.Vendor.RouteComplete)QuickRouteVariants.Export(variants,"npc",QuickRouteVariants.For(plan,QuickRouteVariants.Service(plan,plan.Vendor),10));}
+                    if(plan.HunterMode&&(!anchor.ExtendedActionRanges||!anchor.RangeErrorSupported))throw new InvalidOperationException("猎人模式需要新版射程数据，请在游戏输入/reload加载0.5.13插件后开始。");
+                    if(plan.HunterMode)write("猎人模式：复活后恢复满血按8；受袭切换1、2，5/6/3按当前技能射程接近。");
                     if(anchor.BagFull&&!plan.Vendor.Enabled)throw new InvalidOperationException("背包已满，请先填写并启用售卖NPC坐标。");
                     if(!anchor.ChatOpenKnown||anchor.ChatOpen)throw new InvalidOperationException("请先关闭聊天输入框，并确认新版插件已加载。");
                     if(anchor.InteractBindingKnown&&!anchor.InteractBindingCorrect)throw new InvalidOperationException(GrindInputGuard.InteractBindingError);
@@ -206,6 +209,7 @@ namespace WoWProbe
                             input=guard();Thread.Sleep(80);continue;
                         }
                         if(observationLostAt>=0){observationLostAt=-1;write("游戏状态已恢复，继续核验当前动作。");}
+                        hunterState.Observe(observed);
                         searchMotion.Observe(observed);
                         if(breakSchedule!=null&&breakSchedule.RequestLogout(observed.InCombat,observed.PlayerDead||observed.PlayerGhost||recovery!=null,observed.Casting||observed.Channeling)){searchMotion.Stop();CancelQuickMovement(backend);breakSchedule.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-session.json"),true);write("已脱战，转入定时下线流程；NPC断点保留。");return;}
                         if(observed.Sequence!=frameSequence)
@@ -229,7 +233,7 @@ namespace WoWProbe
                             read();var op=ReadOperations();var rc=recovery.Step(op,clock.ElapsedMilliseconds);
                             if(rc.Action==QuickRecoveryAction.Stop)throw new InvalidOperationException(rc.Reason);
                             if(rc.Action==QuickRecoveryAction.Complete)
-                            {completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;routeFollower.Resume();engine=new QuickCombat(observed,interval,skinning,routeFollower,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),false,plan.SkillRows,plan.RangedCombat);autoAttackToken=0;recovery=null;write(rc.Reason);input=guard();continue;}
+                            {completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;routeFollower.Resume();engine=new QuickCombat(observed,interval,skinning,routeFollower,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),false,plan.SkillRows,plan.RangedCombat,plan.HunterMode,hunterState);autoAttackToken=0;recovery=null;write(rc.Reason);input=guard();continue;}
                             if(rc.Action==QuickRecoveryAction.None){Thread.Sleep(60);continue;}
                             write(rc.Reason);
                             input=new GrindInputGuard(backend,()=>{var f=read();if(!QuickRecovery.Matches(rc,ReadOperations()))throw new InvalidOperationException("复活动作状态变化。");return f;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
@@ -247,23 +251,23 @@ namespace WoWProbe
                         if(vendorTrip==null&&savedTrip!=null){vendorTrip=new QuickVendorEngine(savedTrip,ReadOperations());write("恢复"+vendorTrip.RouteSummary);vendorFirst=repairFirst=false;write("已恢复未完成NPC行程，从保存的下一未到达路点继续，不返回起点。背包满="+observed.BagFull+"，耐久="+observed.Durability+"，当前零耐久="+brokenGear+"，已在返程="+savedTrip.Returning);}
                         bool needRepair=plan.Repair.Enabled&&(repairFirst||brokenGear);
                         if(!observed.BagFull)suppressFullBagSale=false;
-                        if(vendorTrip==null&&!engine.IsStealthRecovery&&(!observed.InCombat||brokenGear)&&!observed.Casting&&!observed.Channeling&&(needRepair||plan.Vendor.Enabled&&(vendorFirst||observed.BagFull&&!suppressFullBagSale)))
+                        if(vendorTrip==null&&!engine.HunterRecoveryPending&&!engine.IsStealthRecovery&&(!observed.InCombat||brokenGear)&&!observed.Casting&&!observed.Channeling&&(needRepair||plan.Vendor.Enabled&&(vendorFirst||observed.BagFull&&!suppressFullBagSale)))
                         {
                             searchMotion.Stop();CancelQuickMovement(backend);routeFollower.Interrupt(observed);vendorTrip=new QuickVendorEngine(plan,ReadOperations(),needRepair,!vendorFirst&&!repairFirst,brokenGear);write(vendorTrip.RouteSummary);if(brokenGear)autoAttackToken=uint.MaxValue;if(needRepair)repairFirst=false;else vendorFirst=false;completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;
-                            engine=new QuickCombat(observed,interval,skinning,null,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),true,plan.SkillRows,plan.RangedCombat);vendorDefending=!vendorTrip.AvoidCombat&&observed.Health<plan.RestBelowPercent;write(needRepair?(brokenGear?"装备零耐久触发修理：前往NPC。":"手动修理请求：前往NPC。"):observed.BagFull?"背包已满触发售卖：前往NPC，装备耐久正常也需要清包。":"手动售卖请求：前往NPC。");
+                            engine=new QuickCombat(observed,interval,skinning,null,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),true,plan.SkillRows,plan.RangedCombat,plan.HunterMode,hunterState);vendorDefending=!vendorTrip.AvoidCombat&&observed.Health<plan.RestBelowPercent;write(needRepair?(brokenGear?"装备零耐久触发修理：前往NPC。":"手动修理请求：前往NPC。"):observed.BagFull?"背包已满触发售卖：前往NPC，装备耐久正常也需要清包。":"手动售卖请求：前往NPC。");
                         }
-                        if(vendorTrip!=null)
+                        if(vendorTrip!=null&&!engine.HunterRecoveryPending)
                         {
                             bool wasAvoiding=vendorTrip.AvoidCombat;vendorTrip.PrioritizeBrokenGear(observed);
                             if(vendorTrip.AvoidCombat){vendorDefending=false;if(!wasAvoiding||autoAttackToken!=0){input=guard();if(plan.NoChatCombat)Pulse(backend,QuickCombatHotkeys.Key(plan.StopAttackKey),80);else ChatChecked(backend,"/stopattack",null);autoAttackToken=0;write("装备零耐久：停止缠斗，沿售卖路线持续前往NPC修理。");}}
-                            if(observed.InCombat&&!vendorDefending&&!vendorTrip.AvoidCombat){engine=new QuickCombat(observed,interval,skinning,null,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),true,plan.SkillRows,plan.RangedCombat);vendorDefending=true;write("售卖途中受到攻击，优先处理攻击者。");}
-                            if(vendorDefending&&!observed.InCombat&&!engine.HasActiveWork&&observed.Health>=plan.RestBelowPercent){completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;engine=new QuickCombat(observed,interval,skinning,null,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),true,plan.SkillRows,plan.RangedCombat);vendorTrip.ResumeAfterCombat(ReadOperations(),clock.ElapsedMilliseconds);vendorDefending=false;}
+                            if(observed.InCombat&&!vendorDefending&&!vendorTrip.AvoidCombat){engine=new QuickCombat(observed,interval,skinning,null,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),true,plan.SkillRows,plan.RangedCombat,plan.HunterMode,hunterState);vendorDefending=true;write("售卖途中受到攻击，优先处理攻击者。");}
+                            if(vendorDefending&&!observed.InCombat&&!engine.HasActiveWork&&observed.Health>=plan.RestBelowPercent){completedKills+=engine.Kills;completedLoots+=engine.Loots;completedSkins+=engine.Skins;engine=new QuickCombat(observed,interval,skinning,null,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),true,plan.SkillRows,plan.RangedCombat,plan.HunterMode,hunterState);vendorTrip.ResumeAfterCombat(ReadOperations(),clock.ElapsedMilliseconds);vendorDefending=false;}
                             if(!vendorDefending)
                             {
                                 var vc=vendorTrip.Step(ReadOperations(),clock.ElapsedMilliseconds);
                                 savedTrip=vendorTrip.Checkpoint;QuickVendorCheckpoint.Save(vendorCheckpointPath,savedTrip);
                                 if(vc.Action==QuickVendorAction.Stop)throw new InvalidOperationException(vc.Reason);
-                                if(vc.Action==QuickVendorAction.Complete){suppressFullBagSale=observed.BagFull;vendorTrip=null;routeFollower.Resume();routeFollower.BeginNearbySearch(observed,clock.ElapsedMilliseconds);engine=new QuickCombat(observed,interval,skinning,routeFollower,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),suppressFullBagSale,plan.SkillRows,plan.RangedCombat);write(vc.Reason);autoAttackToken=0;continue;}
+                                if(vc.Action==QuickVendorAction.Complete){suppressFullBagSale=observed.BagFull;vendorTrip=null;routeFollower.Resume();routeFollower.BeginNearbySearch(observed,clock.ElapsedMilliseconds);engine=new QuickCombat(observed,interval,skinning,routeFollower,plan.OpeningKeys,plan.LoopKeys,plan.RestBelowPercent,QuickCombat.ConfiguredKey(plan.DrinkKey),suppressFullBagSale,plan.SkillRows,plan.RangedCombat,plan.HunterMode,hunterState);write(vc.Reason);autoAttackToken=0;continue;}
                                 if(vc.Action==QuickVendorAction.None){Pause(60);continue;}
                                 write(vc.Reason);var activeVendor=vendorTrip;
                                 input=new GrindInputGuard(backend,()=>{var f=read();if(!activeVendor.Matches(vc,ReadOperations(),vc.Action==QuickVendorAction.Select))throw new InvalidOperationException("商人操作状态变化。");return f;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
@@ -284,7 +288,7 @@ namespace WoWProbe
                         if(!keepMoving)searchMotion.Stop();
                         if(!QuickCombat.Matches(command,read())){searchMotion.Stop();CancelQuickMovement(backend);Pause(40);continue;}
                         write(command.Reason+" 窗口累计击杀="+killCounter.Total);
-                        if(command.Action==QuickAction.Face&&!plan.RangedCombat&&autoAttackToken!=command.Token)
+                        if(command.Action==QuickAction.Face&&!plan.HunterMode&&!plan.RangedCombat&&autoAttackToken!=command.Token)
                         {
                             input=guard();
                             try{if(plan.NoChatCombat){input=new GrindInputGuard(backend,()=>{var unit=read();if(!GrindRecoveryPolicy.CanAttack(unit)||unit.TargetToken!=command.Token||QuickCombat.Contested(unit))throw new InvalidOperationException("CLI chat target context changed.");return unit;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);Pulse(backend,QuickCombatHotkeys.Key(plan.StartAttackKey),80);}else ChatChecked(backend,"/startattack",()=>{var unit=read();return GrindRecoveryPolicy.CanAttack(unit)&&unit.TargetToken==command.Token&&!QuickCombat.Contested(unit);});}
@@ -321,16 +325,16 @@ namespace WoWProbe
                             else
                             {
                                 bool detour=command.Action==QuickAction.BackOff||command.Action==QuickAction.DetourTurn||command.Action==QuickAction.DetourForward;
-                                if(detour)CancelQuickMovement(backend);
+                                if(detour||command.Action==QuickAction.HunterAspect)CancelQuickMovement(backend);
                                 if((command.Action==QuickAction.Food||command.Action==QuickAction.Drink)&&!restMovementStopped){Pulse(backend,QuickMovement.Forward,80);write("进食准备：停止移动，等待坐标连续稳定1秒。");QuickRestPreparation.Wait(read,Pause);restMovementStopped=true;}
                                 if(command.RouteMovement&&command.Action==QuickAction.Turn&&!command.PauseForward)searchMotion.Start();
                                 int hold=command.Hold>0?command.Hold:command.Action==QuickAction.Turn?260:command.Action==QuickAction.BackOff?300:command.Action==QuickAction.DetourTurn?220:command.Action==QuickAction.DetourForward?600:80;
                                 var beforeFace=command.Action==QuickAction.Face?read():null;
-                                if(command.Action==QuickAction.Skill&&command.RangedSkill)RequireInput().Pulse(command.Key,hold,()=>command.InputStarted=true);else Pulse(backend,command.Key,hold);
+                                if(command.Action==QuickAction.Skill&&(command.RangedSkill||command.HunterSkill))RequireInput().Pulse(command.Key,hold,()=>command.InputStarted=true);else Pulse(backend,command.Key,hold);
                                 if(beforeFace!=null)
                                 {
                                     Pause(250);var afterFace=read();write("原交互流程：F后朝向="+beforeFace.Facing.ToString("F3")+"→"+afterFace.Facing.ToString("F3")+"；位置="+beforeFace.X.ToString("F5")+","+beforeFace.Y.ToString("F5")+"→"+afterFace.X.ToString("F5")+","+afterFace.Y.ToString("F5"));
-                                    if(!plan.RangedCombat&&!command.MeleeConfirmed&&meleeApproach.Observe(command.Token,beforeFace,afterFace))
+                                    if((!plan.RangedCombat||command.AllowApproach)&&!command.MeleeConfirmed&&meleeApproach.Observe(command.Token,beforeFace,afterFace))
                                     {
                                         var activeCommand=command;
                                         input=new GrindInputGuard(backend,()=>{var fresh=read();if(!MeleeApproach.Valid(activeCommand.Token,fresh)||!QuickCombat.Matches(activeCommand,fresh))throw new InvalidOperationException("目标状态变化，停止当前按键。");return fresh;},()=>clock.ElapsedMilliseconds,ms=>Thread.Sleep(ms),safety,anchor.MapId,anchor.MapMode,anchor.Zone);
@@ -338,7 +342,8 @@ namespace WoWProbe
                                         write("近战补足距离：沿本目标F实际接近时的朝向按↑700毫秒；位置="+from.X.ToString("F5")+","+from.Y.ToString("F5")+"→"+to.X.ToString("F5")+","+to.Y.ToString("F5"));
                                     }
                                 }
-                                if(command.Action==QuickAction.Face&&plan.RangedCombat&&!command.AllowApproach)CancelQuickMovement(backend);
+                                if(command.Action==QuickAction.Face&&(plan.RangedCombat||plan.HunterMode)&&!command.AllowApproach)CancelQuickMovement(backend);
+                                if(command.HunterSkill||command.Action==QuickAction.HunterAspect)engine.HunterInputCompleted(command);
                                 if(command.Action==QuickAction.Food||command.Action==QuickAction.Drink)engine.RestInputCompleted(clock.ElapsedMilliseconds,command.Action==QuickAction.Food);
                                 // Recheck target, contact and chase limits on the next frame;
                                 // an accepted interaction key is not movement evidence.

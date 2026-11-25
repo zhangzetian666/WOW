@@ -7,6 +7,7 @@ namespace WoWProbe
 {
     public sealed class QuickGrindForm:Form
     {
+        readonly QuickHunterState hunterState=new QuickHunterState();
         readonly QuickKillCounter killCounter=new QuickKillCounter();
         readonly Label killTotal=new Label{Text="窗口累计击杀：0",AutoSize=true};
         readonly Button start=new Button{Text="开始自动打怪",AutoSize=true};
@@ -30,7 +31,7 @@ namespace WoWProbe
         public QuickGrindForm(bool autoStart,bool passivePreview=false)
         {
             this.passivePreview=passivePreview;
-            Text="固定路线自动打怪 · 随机路线与定时休息版 0.8.76";Size=new Size(1080,820);MinimumSize=new Size(960,700);Font=new Font("Microsoft YaHei UI",10);StartPosition=FormStartPosition.CenterScreen;
+            Text="固定路线自动打怪 · 随机路线与定时休息版 0.8.78";Size=new Size(1080,820);MinimumSize=new Size(960,700);Font=new Font("Microsoft YaHei UI",10);StartPosition=FormStartPosition.CenterScreen;
             if(passivePreview){StartPosition=FormStartPosition.Manual;Location=new Point(-20000,-20000);}
             var layout=new TableLayoutPanel{Dock=DockStyle.Fill,RowCount=4,ColumnCount=1,Padding=new Padding(12)};
             layout.RowStyles.Add(new RowStyle(SizeType.Absolute,70));layout.RowStyles.Add(new RowStyle(SizeType.Percent,70));layout.RowStyles.Add(new RowStyle(SizeType.Absolute,88));layout.RowStyles.Add(new RowStyle(SizeType.Percent,30));Controls.Add(layout);
@@ -53,7 +54,7 @@ namespace WoWProbe
             resume.Cancel();resumeVendor=vendorFirst;resumeRepair=repairFirst;
             QuickRoutePlan plan;try{if(vendorFirst)routeEditor.EnableAutoVendor();if(repairFirst)routeEditor.EnableAutoRepair();plan=routeEditor.ReadPlan(false);plan.Calibration.Confirmed=true;QuickRoutePlan.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-patrol.json"),plan);if(plan.TimedBreaks&&breakSchedule==null)breakSchedule=QuickBreakSchedule.Load(breakPath);}catch(Exception e){Append("未开始："+e.Message);return;}
             cancelled=false;start.Enabled=vendor.Enabled=repair.Enabled=cadence.Enabled=skinning.Enabled=routeEditor.Enabled=false;stop.Enabled=true;int interval=plan.SkillIntervalMs;bool useSkin=skinning.Checked;
-            worker=new Thread(()=>{string failure=null;try{var schedule=plan.TimedBreaks?breakSchedule:null;if(schedule!=null)schedule.Activate(QuickBreakSchedule.ClockNow);do{GrindCli.FocusGameWindow();if(schedule!=null&&schedule.Phase!="Online")GrindCli.ResumeScheduledBreak(schedule,plan,()=>cancelled,Append,breakPath);if(cancelled)break;GrindCli.RunQuick(0,interval,()=>cancelled,Append,useSkin,plan,vendorFirst,repairFirst,killCounter,schedule);vendorFirst=repairFirst=false;}while(!cancelled&&schedule!=null&&schedule.Phase!="Online");}catch(Exception ex){failure=ex.Message;Append("中断："+ex.Message);}finally{if(breakSchedule!=null){breakSchedule.Pause(QuickBreakSchedule.ClockNow);try{breakSchedule.Save(breakPath,true);}catch(Exception ex){Append("休息计时保存失败："+ex.Message);}}if(!IsDisposed)BeginInvoke((Action)(()=>{worker=null;start.Enabled=vendor.Enabled=repair.Enabled=cadence.Enabled=skinning.Enabled=routeEditor.Enabled=true;if(!cancelled&&!closeWhenStopped&&autoResume.Checked)resume.Interrupted(failure,resumeClock.ElapsedMilliseconds);stop.Enabled=resume.Pending;if(resume.Pending)Append("已进入自动监测，30秒后重试；人为操作中断需空闲"+idleSeconds.Value+"秒。停止/F12取消。");if(closeWhenStopped)Close();}));}});worker.IsBackground=true;worker.Start();
+            worker=new Thread(()=>{string failure=null;try{var schedule=plan.TimedBreaks?breakSchedule:null;if(schedule!=null)schedule.Activate(QuickBreakSchedule.ClockNow);do{GrindCli.FocusGameWindow();if(schedule!=null&&schedule.Phase!="Online")GrindCli.ResumeScheduledBreak(schedule,plan,()=>cancelled,Append,breakPath);if(cancelled)break;GrindCli.RunQuick(0,interval,()=>cancelled,Append,useSkin,plan,vendorFirst,repairFirst,killCounter,schedule,hunterState);vendorFirst=repairFirst=false;}while(!cancelled&&schedule!=null&&schedule.Phase!="Online");}catch(Exception ex){failure=ex.Message;Append("中断："+ex.Message);}finally{if(breakSchedule!=null){breakSchedule.Pause(QuickBreakSchedule.ClockNow);try{breakSchedule.Save(breakPath,true);}catch(Exception ex){Append("休息计时保存失败："+ex.Message);}}if(!IsDisposed)BeginInvoke((Action)(()=>{worker=null;start.Enabled=vendor.Enabled=repair.Enabled=cadence.Enabled=skinning.Enabled=routeEditor.Enabled=true;if(!cancelled&&!closeWhenStopped&&autoResume.Checked)resume.Interrupted(failure,resumeClock.ElapsedMilliseconds);stop.Enabled=resume.Pending;if(resume.Pending)Append("已进入自动监测，30秒后重试；人为操作中断需空闲"+idleSeconds.Value+"秒。停止/F12取消。");if(closeWhenStopped)Close();}));}});worker.IsBackground=true;worker.Start();
         }
     }
 }

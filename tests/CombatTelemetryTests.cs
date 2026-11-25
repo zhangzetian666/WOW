@@ -23,6 +23,17 @@ class CombatTelemetryTests
     static void Reject(Action<byte[]> change) { var b=Extra();change(b);Checksum(b);try{Decode(b);}catch(TargetInvocationException e){if(e.InnerException is FormatException)return;throw;}throw new Exception("Invalid WC3 packet accepted"); }
     static int Main(string[] args)
     {
+        Test("WC3 v3 reports target scoped range feedback without changing hover flags",delegate{
+            var b=Extra();b[3]=3;b[6]=1;U32(b,8,123);b[125]=4;Checksum(b);var o=Observe(ProbePacket.Decode(Core()),Decode(b),true);
+            Equal(Get(o,"RangeErrorSupported"),true,"v3 capability");Equal(Get(o,"RangeErrorActive"),true,"too far feedback");Equal(Get(o,"TargetHoverKnown"),false,"independent hover");
+            Reject(v=>{v[3]=3;v[125]=4;});Reject(v=>{v[3]=2;v[6]=1;U32(v,8,123);v[125]=4;});
+        });
+        Test("WC3 v2 adds independent five and six ranges while v1 remains readable",delegate{
+            var b=Extra();b[3]=2;b[123]=48;b[124]=32;Checksum(b);var o=Observe(ProbePacket.Decode(Core()),Decode(b),true);
+            Equal(Get(o,"ExtendedActionRanges"),true,"v2 capability");Equal(Get(o,"ActionRangeKnownMask"),48,"both readable");Equal(Get(o,"ActionsInRangeMask"),32,"six only in range");Equal(Get(o,"RangedActionsMask"),0,"range extension is not action type");
+            o=Observe(ProbePacket.Decode(Core()),Decode(Extra()),true);Equal(Get(o,"ExtendedActionRanges"),false,"v1 supported");
+            Reject(v=>{v[3]=2;v[124]=16;});Reject(v=>{v[3]=2;v[123]=64;});
+        });
         Test("target hover needs identity and does not invent geometry",delegate{var b=Extra();b[6]=1;U32(b,8,123);b[125]=3;Checksum(b);var o=Observe(ProbePacket.Decode(Core()),Decode(b),true);Equal(Get(o,"TargetHoverKnown"),true,"hover known");Equal(Get(o,"TargetHovered"),true,"same target");Equal(Get(o,"PortraitKnown"),false,"no rectangle invented");b[125]=1;Checksum(b);Equal(Get(Decode(b),"TargetHovered"),false,"known mismatch");Reject(x=>x[125]=1);Reject(x=>x[125]=2);});
         Test("per-action range and repeat state decode independently and reject contradictory masks",delegate{var b=Extra();b[121]=0x46;b[122]=0x4f;b[123]=4;b[124]=3;Checksum(b);var o=Observe(ProbePacket.Decode(Core()),Decode(b),true);Equal(Get(o,"ActionRangeKnownMask"),6,"range known");Equal(Get(o,"ActionsInRangeMask"),4,"in range");Equal(Get(o,"RepeatingMask"),4,"active auto shot");Equal(Get(o,"RangedActionsMask"),4,"ranged type");Equal(Get(o,"MeleeActionsMask"),3,"melee type");Reject(x=>x[121]=0x40);Reject(x=>x[122]=0x40);Reject(x=>{x[123]=4;x[124]=4;});Reject(x=>x[123]=16);Reject(x=>x[125]=1);});
         Test("click to move distinguishes unknown disabled and enabled without a target",delegate{foreach(int flags in new[]{0,1,3}){var b=Extra();b[120]=(byte)flags;Checksum(b);var o=Observe(ProbePacket.Decode(Core()),Decode(b),true);Equal(Get(o,"ClickToMoveKnown"),flags!=0,"known");Equal(Get(o,"ClickToMoveEnabled"),flags==3,"enabled");}Reject(x=>x[120]=2);Reject(x=>x[120]=4);});

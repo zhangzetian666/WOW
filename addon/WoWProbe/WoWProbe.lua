@@ -529,7 +529,7 @@ function P.BuildCombatPacket(core)
     local caps,flags,extra=0,0,0
     local exists=has(core[126],8) and has(core[7],8)
     if not exists and P.portraitPanel then P.portraitPanel:Hide() end
-    put(0,87);put(1,67);put(2,51);put(3,1);u16(4,core[5]+core[6]*256)
+    put(0,87);put(1,67);put(2,51);put(3,3);u16(4,core[5]+core[6]*256)
     put(16,P.rangeSlot);norm(12,nil);norm(14,nil)
     if exists then
         local guid,token=section("identity",function()
@@ -651,6 +651,24 @@ function P.BuildCombatPacket(core)
     if known~=0 then caps=caps+128 end
     put(17,known);put(18,ready);put(19,usable)
     put(121,rangeKnown+16*inRange);put(122,repeatKnown+16*repeating);put(123,ranged);put(124,melee)
+    -- WC3 v2 retains all v1 offsets. Bits 4/5 of these bytes report
+    -- range knowledge/value for physical keys 5/6 on the current action page.
+    local extraKnown,extraRange=0,0
+    if exists then for i=5,6 do
+        local slot=actionSlot(i)
+        if slot then
+            local value=section("actionRange"..i,function()
+                local ok,v=call("IsActionInRange",IsActionInRange,slot,"target")
+                if ok then local b,k=strictBool(v,false);if k then return b end end
+            end)
+            if value~=nil then local bit=2^(i-1);extraKnown=extraKnown+bit;if value then extraRange=extraRange+bit end end
+        end
+    end end
+    put(123,ranged+extraKnown);put(124,melee+extraRange)
+    local rangeNow,rangeClock=rawTime()
+    if exists and P.trackedTargetToken and rangeClock and P.rangeErrorToken==P.trackedTargetToken and P.rangeErrorUntil and rangeNow<P.rangeErrorUntil then
+        put(125,p[126]+4)
+    end
     local events=P.eventRegistration or {};local counters=P.counters
     if events.UNIT_FLAGS and events.UNIT_HEALTH then
         extra=extra+32;u32(57,P.lastDeathToken or 0);u32(61,P.targetDeaths or 0)
@@ -898,7 +916,7 @@ local function printLine(text)
 end
 function P.ResetDiagnostics()
     local visible = type(WoWProbeDB) == "table" and WoWProbeDB.visible ~= false
-    WoWProbeDB = { schema = 1, addonVersion = "0.5.11", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
+    WoWProbeDB = { schema = 1, addonVersion = "0.5.13", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
     readClient(); captureBindings(); captureAPIs(); if P.panel then P.ScalePanel() end
 end
 function P.Command(command)
@@ -1036,7 +1054,7 @@ function P.Initialize()
     WoWProbeDB = old; WoWProbeDB.visible = visible
     if integer(old.rangeSlot,4) and old.rangeSlot>=1 then P.rangeSlot=old.rangeSlot end
     WoWProbeDB.previousSession = previous
-    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.11"
+    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.13"
     WoWProbeDB.errors, WoWProbeDB.bindings, WoWProbeDB.capabilities = {}, {}, {}
     readClient(); captureBindings(); captureAPIs()
     local ok, reason = pcall(createPanel)
@@ -1117,10 +1135,16 @@ function P.OnEvent(_, event, ...)
         local first, second = ...
         local message = type(second) == "string" and second or first
         if type(ERR_INV_FULL) == "string" and message == ERR_INV_FULL then P.bagFullUntil = rawTime() + 5 end
+        local tooFar=type(message)=="string" and (message==SPELL_FAILED_OUT_OF_RANGE or message==ERR_OUT_OF_RANGE or message==ERR_SPELL_OUT_OF_RANGE or message=="距离太远。" or message=="距离太远" or message=="距离不足。" or message=="距离不足")
+        if tooFar then
+            local now,clockKnown=rawTime();local ok,guid=call("UnitGUID",UnitGUID,"target");local token=ok and P.HashUTF8(guid)
+            if clockKnown and token then P.rangeErrorToken=token;P.rangeErrorUntil=now+2 end
+        end
     elseif event == "UPDATE_BINDINGS" then captureBindings()
     elseif event == "UI_SCALE_CHANGED" or event == "DISPLAY_SIZE_CHANGED" then P.ScalePanel()
     elseif event == "PLAYER_ENTERING_WORLD" then
         P.merchantOpen, P.lootOpen, P.bagFullUntil = false, false, nil
+        P.rangeErrorUntil,P.rangeErrorToken=nil,nil
         P.merchantKnown, P.lootKnown = false, false
         P.ScalePanel()
     elseif event == "PLAYER_LOGOUT" then captureBindings(); update() end

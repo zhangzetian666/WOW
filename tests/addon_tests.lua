@@ -427,7 +427,7 @@ test("WC3 keeps unknown APIs unknown and never requests legacy target coordinate
     local env=environment(); env.GetPlayerMapPosition=function(unit) eq(unit,"player"); return 0.2,0.4 end
     local wp=load(env); assert(type(wp.BuildCombatPacket)=="function","WC3 builder missing")
     local p=wp.BuildCombatPacket(wp.BuildPacket())
-    eq(#p,128); eq(p[1],87);eq(p[2],67);eq(p[3],51);eq(p[4],1)
+    eq(#p,128); eq(p[1],87);eq(p[2],67);eq(p[3],51);eq(p[4],3)
     eq(p[7],0);eq(p[8],0);eq(word(p,12),65535);eq(word(p,14),65535)
     eq(p[18],0);eq(p[19],0);eq(p[20],0)
 end)
@@ -449,6 +449,25 @@ test("WC3 hover identity is independent of restricted nameplate geometry",functi
     env.UnitIsUnit=function()return false end;p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[126],1)
     env.UnitIsUnit=function()error("restricted identity")end;p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[126],0)
     env.UnitIsUnit=nil;p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[126],0)
+end)
+
+test("WC3 v3 captures actual too far UI feedback only for the current target and expires it",function()
+    local env=combatEnvironment();env.SPELL_FAILED_OUT_OF_RANGE="Out of range."
+    local wp=load(env);wp.OnEvent(nil,"UI_ERROR_MESSAGE",7,env.SPELL_FAILED_OUT_OF_RANGE)
+    local p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[126],4),true)
+    env.UnitGUID=function()return "Creature-other"end;p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[126],4),false)
+    env.UnitGUID=function()return "Creature-0-1-2-3-456-000001"end;env.timeNow=env.timeNow+2.1
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[126],4),false)
+    wp.OnEvent(nil,"UI_ERROR_MESSAGE","Other error");p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[126],4),false)
+end)
+
+test("WC3 v2 reads paged keys five six and keeps unknown range separate",function()
+    local env=combatEnvironment();env.ActionButton5={action=17};env.ActionButton6={action=18}
+    env.IsActionInRange=function(slot)return slot==18 and 1 or 0 end
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket())
+    eq(p[4],3);eq(math.floor(p[124]/16),3);eq(math.floor(p[125]/16),2)
+    env.IsActionInRange=function(slot)if slot==17 then return nil else return 0 end end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(math.floor(p[124]/16),2);eq(math.floor(p[125]/16),0)
 end)
 
 test("WC3 reports each paged action range, active auto repeat, and ranged or melee type",function()

@@ -18,6 +18,12 @@ class QuickRouteTests
     static void Target(FarmObservation o){o.TargetExists=o.TargetIdentityKnown=o.AttackabilityKnown=o.TargetCanAttack=o.TargetDeadKnown=true;o.TargetToken=8;o.TargetReaction=4;}
     static int Main()
     {
+        Test("hunter setting persists in plans recordings clones and defaults off for legacy files",()=>{
+            var p=Plan();Check(!p.HunterMode);p.HunterMode=true;Check(p.Clone().HunterMode);var file=Path.GetTempFileName();try{
+                QuickRoutePlan.Save(file,p);Check(QuickRoutePlan.Load(file).HunterMode);QuickRoutePlan.SaveRecording(file,p);Check(QuickRoutePlan.LoadRecording(file).HunterMode);
+                File.WriteAllText(file,File.ReadAllText(file).Replace("\"HunterMode\":true,",""));Check(!QuickRoutePlan.LoadRecording(file).HunterMode);
+            }finally{File.Delete(file);}
+        });
         Test("skill sequences stay valid while invalid single key fields identify their own label",()=>{
             var p=Plan();p.SkillRows=new[]{"242223","123","212","321","22"};p.OpeningKeys="242223";p.ValidateSkills();
             foreach(string field in new[]{"开始攻击","选上一个目标","停止攻击"}){
