@@ -23,6 +23,12 @@ class CombatTelemetryTests
     static void Reject(Action<byte[]> change) { var b=Extra();change(b);Checksum(b);try{Decode(b);}catch(TargetInvocationException e){if(e.InnerException is FormatException)return;throw;}throw new Exception("Invalid WC3 packet accepted"); }
     static int Main(string[] args)
     {
+        Test("WC3 v6 accepts absent dead pet evidence without claiming it is summoned",delegate{
+            var b=Extra();b[3]=6;b[125]=40;Checksum(b);var o=Observe(ProbePacket.Decode(Core()),Decode(b),true);
+            Equal(Get(o,"PetCallFeedbackSupported"),true,"call feedback schema");Equal(Get(o,"PetStateKnown"),true,"known");Equal(Get(o,"PetExists"),false,"not present");Equal(Get(o,"PetDead"),true,"dead pet");
+            b[3]=5;b[125]=8;Checksum(b);Equal(Get(Decode(b),"PetCallFeedbackSupported"),false,"v5 retained");
+            Reject(v=>{v[3]=5;v[125]=40;});Reject(v=>{v[3]=6;v[125]=32;});
+        });
         Test("WC3 v5 pet state is independent of enemy selection and distinguishes absent alive dead and unknown",delegate{
             foreach(byte flags in new byte[]{0,8,24,56}){
                 var b=Extra();b[3]=5;b[125]=flags;Checksum(b);var o=Observe(ProbePacket.Decode(Core()),Decode(b),true);

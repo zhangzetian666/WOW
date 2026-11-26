@@ -2,7 +2,7 @@
 ## Title: WoWProbe
 ## Notes: Read-only WP1, WC3 combat and WO4 recovery/inventory panels. No protected actions.
 ## Author: WoWProbe
-## Version: 0.5.15
+## Version: 0.5.16
 ## SavedVariables: WoWProbeDB
 WoWProbe.lua
 Operations.lua

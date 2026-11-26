@@ -18,11 +18,15 @@ class QuickRouteTests
     static void Target(FarmObservation o){o.TargetExists=o.TargetIdentityKnown=o.AttackabilityKnown=o.TargetCanAttack=o.TargetDeadKnown=true;o.TargetToken=8;o.TargetReaction=4;}
     static int Main()
     {
+        Test("command pet revival needs only summon key while legacy defaults keep key mode",()=>{
+            var p=Plan();Check(!p.RevivePetWithCommand);p.RevivePetAfterDeath=p.RevivePetWithCommand=true;p.RevivePetKey="";p.SummonPetKey="E";p.ValidateSkills();Check(p.Clone().RevivePetWithCommand);
+            string file=Path.GetTempFileName();try{QuickRoutePlan.Save(file,p);var loaded=QuickRoutePlan.Load(file);Check(loaded.RevivePetWithCommand&&loaded.RevivePetKey==""&&loaded.SummonPetKey=="E");}finally{File.Delete(file);}
+        });
         Test("pet recovery option and key survive plan draft clone and legacy imports independently of hunter combat",()=>{
-            var p=Plan();Check(!p.RevivePetAfterDeath);p.RevivePetAfterDeath=true;p.RevivePetKey="e";Check(p.Clone().RevivePetKey=="e"&&!p.Clone().HunterMode);
-            string file=Path.GetTempFileName();try{QuickRoutePlan.Save(file,p);var loaded=QuickRoutePlan.Load(file);Check(loaded.RevivePetAfterDeath&&loaded.RevivePetKey=="e");QuickRoutePlan.SaveRecording(file,p);Check(QuickRoutePlan.LoadRecording(file).RevivePetAfterDeath);
-            var json=File.ReadAllText(file).Replace("\"RevivePetAfterDeath\":true,","").Replace("\"RevivePetKey\":\"e\",","");File.WriteAllText(file,json);Check(!QuickRoutePlan.LoadRecording(file).RevivePetAfterDeath);
-            }finally{File.Delete(file);}p.RevivePetKey="F12";bool rejected=false;try{p.ValidateSkills();}catch(FormatException){rejected=true;}Check(rejected);
+            var p=Plan();Check(!p.RevivePetAfterDeath);p.RevivePetAfterDeath=true;p.RevivePetKey="r";p.SummonPetKey="e";Check(p.Clone().SummonPetKey=="e"&&p.Clone().RevivePetKey=="r"&&!p.Clone().HunterMode);
+            string file=Path.GetTempFileName();try{QuickRoutePlan.Save(file,p);var loaded=QuickRoutePlan.Load(file);Check(loaded.RevivePetAfterDeath&&loaded.RevivePetKey=="r"&&loaded.SummonPetKey=="e");QuickRoutePlan.SaveRecording(file,p);Check(QuickRoutePlan.LoadRecording(file).RevivePetAfterDeath);
+            var json=File.ReadAllText(file).Replace("\"RevivePetAfterDeath\":true,","").Replace("\"RevivePetKey\":\"r\",","");File.WriteAllText(file,json);Check(!QuickRoutePlan.LoadRecording(file).RevivePetAfterDeath);
+            }finally{File.Delete(file);}p.RevivePetWithCommand=false;p.RevivePetKey="F12";bool rejected=false;try{p.ValidateSkills();}catch(FormatException){rejected=true;}Check(rejected);
         });
         Test("hunter setting persists in plans recordings clones and defaults off for legacy files",()=>{
             var p=Plan();Check(!p.HunterMode);p.HunterMode=true;Check(p.Clone().HunterMode);var file=Path.GetTempFileName();try{

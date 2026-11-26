@@ -529,7 +529,7 @@ function P.BuildCombatPacket(core)
     local caps,flags,extra=0,0,0
     local exists=has(core[126],8) and has(core[7],8)
     if not exists and P.portraitPanel then P.portraitPanel:Hide() end
-    put(0,87);put(1,67);put(2,51);put(3,5);u16(4,core[5]+core[6]*256)
+    put(0,87);put(1,67);put(2,51);put(3,6);u16(4,core[5]+core[6]*256)
     put(16,P.rangeSlot);norm(12,nil);norm(14,nil)
     if exists then
         local guid,token=section("identity",function()
@@ -672,13 +672,17 @@ function P.BuildCombatPacket(core)
     if exists and P.trackedTargetToken and rangeClock and P.rangeErrorToken==P.trackedTargetToken and P.rangeErrorUntil and rangeNow<P.rangeErrorUntil then
         put(125,p[126]+4)
     end
-    -- WC3 v5: own pet state is independent of the currently selected target.
+    -- WC3 v6 also distinguishes a dead, currently absent pet from a dismissed pet.
     local petFlags=section("petState",function()
         local present=combatBool("UnitExists(pet)",UnitExists,"pet")
         if present==nil then return nil end
-        if not present then return 8 end
         local dead=combatBool("UnitIsDead(pet)",UnitIsDead,"pet")
+        if not present then
+            local now,known=rawTime()
+            return (dead==true or known and P.petDeadUntil and now<P.petDeadUntil) and 40 or 8
+        end
         if dead==nil then return nil end
+        if not dead then P.petDeadUntil=nil end
         return dead and 56 or 24
     end)
     if petFlags then put(125,p[126]+petFlags) end
@@ -929,7 +933,7 @@ local function printLine(text)
 end
 function P.ResetDiagnostics()
     local visible = type(WoWProbeDB) == "table" and WoWProbeDB.visible ~= false
-    WoWProbeDB = { schema = 1, addonVersion = "0.5.15", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
+    WoWProbeDB = { schema = 1, addonVersion = "0.5.16", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
     readClient(); captureBindings(); captureAPIs(); if P.panel then P.ScalePanel() end
 end
 function P.Command(command)
@@ -1067,7 +1071,7 @@ function P.Initialize()
     WoWProbeDB = old; WoWProbeDB.visible = visible
     if integer(old.rangeSlot,4) and old.rangeSlot>=1 then P.rangeSlot=old.rangeSlot end
     WoWProbeDB.previousSession = previous
-    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.15"
+    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.16"
     WoWProbeDB.errors, WoWProbeDB.bindings, WoWProbeDB.capabilities = {}, {}, {}
     readClient(); captureBindings(); captureAPIs()
     local ok, reason = pcall(createPanel)
@@ -1147,6 +1151,8 @@ function P.OnEvent(_, event, ...)
     elseif event == "UI_ERROR_MESSAGE" then
         local first, second = ...
         local message = type(second) == "string" and second or first
+        local deadPet=type(message)=="string" and (message==SPELL_FAILED_PET_DEAD or message==ERR_PET_SPELL_DEAD or message=="你的宠物已经死亡。" or message=="你的宠物已经死亡" or message=="你的宠物已死亡。" or message=="你的宠物已死亡" or message=="Your pet is dead.")
+        if deadPet then local now,known=rawTime();if known then P.petDeadUntil=now+120 end end
         if type(ERR_INV_FULL) == "string" and message == ERR_INV_FULL then P.bagFullUntil = rawTime() + 5 end
         local tooFar=type(message)=="string" and (message==SPELL_FAILED_OUT_OF_RANGE or message==ERR_OUT_OF_RANGE or message==ERR_SPELL_OUT_OF_RANGE or message=="距离太远。" or message=="距离太远" or message=="距离不足。" or message=="距离不足")
         if tooFar then
@@ -1157,7 +1163,7 @@ function P.OnEvent(_, event, ...)
     elseif event == "UI_SCALE_CHANGED" or event == "DISPLAY_SIZE_CHANGED" then P.ScalePanel()
     elseif event == "PLAYER_ENTERING_WORLD" then
         P.merchantOpen, P.lootOpen, P.bagFullUntil = false, false, nil
-        P.rangeErrorUntil,P.rangeErrorToken=nil,nil
+        P.rangeErrorUntil,P.rangeErrorToken,P.petDeadUntil=nil,nil,nil
         P.merchantKnown, P.lootKnown = false, false
         P.ScalePanel()
     elseif event == "PLAYER_LOGOUT" then captureBindings(); update() end

@@ -3,12 +3,12 @@ using System.Collections.Generic;
 
 namespace WoWProbe
 {
-    public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin, Vanish, StealthEnter, StealthExit, StealthHold, RangedStop, HunterAspect, HunterRevivePet }
+    public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin, Vanish, StealthEnter, StealthExit, StealthHold, RangedStop, HunterAspect, HunterRevivePet, HunterSummonPet }
     public sealed class QuickCommand
     {
         public bool AttackHostile;public bool MeleeConfirmed;public bool RangedSkill;public bool AllowApproach;public bool InputStarted;
         public bool HunterSkill,HunterDefense;public int HealthAtIssue;
-        public bool CastFailuresKnown;public uint CastFailuresAtIssue;
+        public bool UsePetReviveChat;public bool CastFailuresKnown;public uint CastFailuresAtIssue;
         public QuickAction Action; public ushort Key; public uint Token;public HashSet<uint> IgnoredTargets; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement,PauseForward,CombatRecovery;public QuickRouteFollower RouteContext;
     }
 
@@ -40,7 +40,7 @@ namespace WoWProbe
         public bool HunterRecoveryPending {get{return hunterMode&&hunterState.AspectPending||hunterState.Pet.Required;}}
         public void HunterInputCompleted(QuickCommand command)
         {
-            if(command.Action==QuickAction.HunterRevivePet){hunterState.Pet.InputCompleted(command,last);return;}
+            if(command.Action==QuickAction.HunterRevivePet||command.Action==QuickAction.HunterSummonPet){hunterState.Pet.InputCompleted(command,last);return;}
             if(command.Action==QuickAction.HunterAspect){hunterState.AspectInputCompleted();return;}
             if(!command.HunterSkill||command.Token!=token)return;
             hunterIssued=true;hunterIssuedDefense=command.HunterDefense;hunterIssuedOpening=opening;hunterIssuedLoop=loopIndex;hunterIssuedIndex=hunterIndex;hunterIssuedAt=last;hunterIssuedToken=token;
@@ -436,13 +436,13 @@ namespace WoWProbe
         public static bool Matches(QuickCommand c,FarmObservation o)
         {return Matches(c,o,false);}
         public static bool MatchesChatCommand(QuickCommand c,FarmObservation o)
-        {return c!=null&&(c.Action==QuickAction.CorpseSelect||c.Action==QuickAction.Reacquire||c.Action==QuickAction.Scan||c.Action==QuickAction.ReturnToRoute)&&o!=null&&o.ChatOpenKnown&&Matches(c,o,true);}
+        {return c!=null&&(c.Action==QuickAction.CorpseSelect||c.Action==QuickAction.Reacquire||c.Action==QuickAction.Scan||c.Action==QuickAction.ReturnToRoute||c.Action==QuickAction.HunterRevivePet&&c.UsePetReviveChat)&&o!=null&&o.ChatOpenKnown&&Matches(c,o,true);}
         static bool Matches(QuickCommand c,FarmObservation o,bool ownedChat)
         {
             if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||o.PlayerDead||o.PlayerGhost)return false;
             if(c.RouteContext!=null&&!c.RouteContext.CanOperate(o))return false;
             if(!ownedChat&&o.ChatOpenKnown&&o.ChatOpen)return false;
-            if(c.Action==QuickAction.HunterRevivePet)return !o.InCombat&&o.Health==100&&o.CastingKnown&&(c.InputStarted||!o.Casting&&!o.Channeling&&o.PetStateKnown&&(!o.PetExists||o.PetDead));
+            if(c.Action==QuickAction.HunterRevivePet||c.Action==QuickAction.HunterSummonPet)return !o.InCombat&&o.Health==100&&o.CastingKnown&&(c.InputStarted||!o.Casting&&!o.Channeling&&o.PetStateKnown&&(c.Action==QuickAction.HunterRevivePet?o.PetDead:!o.PetDead));
             if(c.Action==QuickAction.HunterAspect)return !o.InCombat&&o.Health==100&&o.CastingKnown&&!o.Casting&&!o.Channeling;
             if(c.HunterSkill)
             {

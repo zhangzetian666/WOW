@@ -11,8 +11,14 @@ class QuickCombatTests
     {return new QuickCombat(o,750,false,null,"4563","4563",80,0,false,null,ranged,true,state);}
     static int Main()
     {
+        Test("dead pet may use explicit revive command while summon remains a keyboard action",()=>{
+            var o=Observation();o.ChatOpenKnown=o.PetStateKnown=o.PetDead=true;var state=new QuickHunterState();state.Pet.Configure(true,"","E",true);state.Pet.PlayerDied();
+            var e=new QuickCombat(o,750,false,null,"4","4",80,0,false,null,true,false,state);var c=Step(e,o,0);
+            Check(c.Action==QuickAction.HunterRevivePet&&c.UsePetReviveChat&&c.Key==0);o.ChatOpen=true;
+            Check(!QuickCombat.Matches(c,o)&&QuickCombat.MatchesChatCommand(c,o));o.InCombat=true;Check(!QuickCombat.MatchesChatCommand(c,o));
+        });
         Test("pet revive waits for food minimum and full health then holds still through cast until pet is alive",()=>{
-            var o=Observation();o.PetStateSupported=o.PetStateKnown=true;o.TargetExists=false;o.Health=30;o.FoodCount=10;
+            var o=Observation();o.PetStateSupported=o.PetStateKnown=o.PetDead=true;o.TargetExists=false;o.Health=30;o.FoodCount=10;
             var state=new QuickHunterState();state.Pet.Configure(true,"E");o.PlayerGhost=true;state.Observe(o);o.PlayerGhost=false;
             var e=new QuickCombat(o,750,false,null,"4","4",80,0,false,null,true,false,state);
             Check(e.HunterRecoveryPending&&Step(e,o,0).Action==QuickAction.Food);e.RestInputCompleted(100,true);
@@ -22,10 +28,10 @@ class QuickCombatTests
             c.InputStarted=true;o.Casting=true;Check(QuickCombat.Matches(c,o));e.HunterInputCompleted(c);
             o.PowerType=0;o.Power=30;
             for(int t=10300;t<20000;t+=1000)Check(Step(e,o,t).Action==QuickAction.None&&e.HunterRecoveryPending);
-            o.Casting=false;o.PetExists=true;Check(Step(e,o,20100).Action==QuickAction.None&&!e.HunterRecoveryPending);
+            o.Casting=false;o.PetExists=true;o.PetDead=false;Check(Step(e,o,20100).Action==QuickAction.None&&!e.HunterRecoveryPending);
         });
         Test("pet revive failure retries after delay and combat interruption preserves recovery across engines",()=>{
-            var o=Observation();o.PetStateKnown=o.CastEventsKnown=true;var state=new QuickHunterState();state.Pet.Configure(true,"E");state.Pet.PlayerDied();
+            var o=Observation();o.PetStateKnown=o.PetDead=o.CastEventsKnown=true;var state=new QuickHunterState();state.Pet.Configure(true,"E");state.Pet.PlayerDied();
             var e=new QuickCombat(o,750,false,null,"4","4",80,0,false,null,true,false,state);
             var c=Step(e,o,0);Check(c.Action==QuickAction.HunterRevivePet);e.HunterInputCompleted(c);o.CastFailed++;
             Check(Step(e,o,100).Report&&e.HunterRecoveryPending);Check(Step(e,o,2000).Action==QuickAction.None);
@@ -34,14 +40,28 @@ class QuickCombatTests
             o.InCombat=o.Casting=false;o.Health=40;o.FoodCount=10;e=new QuickCombat(o,750,false,null,"4","4",80,0,false,null,true,false,state);
             Check(Step(e,o,0).Action==QuickAction.Food&&e.HunterRecoveryPending);
         });
-        Test("pet already alive skips revive while unknown state and an unconfirmed key never allow patrol",()=>{
-            foreach(bool alive in new[]{false,true}){
-                var o=Observation();o.PetStateKnown=alive;o.PetExists=alive;var state=new QuickHunterState();state.Pet.Configure(true,"E");state.Pet.PlayerDied();
+        Test("pet summon and revive use different keys and missing pet is never assumed dead",()=>{
+            foreach(bool dead in new[]{false,true}){
+                var o=Observation();o.PetStateKnown=true;o.PetDead=dead;var state=new QuickHunterState();state.Pet.Configure(true,"R","E");state.Pet.PlayerDied();
                 var e=new QuickCombat(o,750,false,null,"4","4",80,0,false,null,true,false,state);
-                Check(Step(e,o,0).Action==QuickAction.None);Check(e.HunterRecoveryPending==!alive);
-                if(!alive){o.PetStateKnown=true;var c=Step(e,o,100);Check(c.Action==QuickAction.HunterRevivePet);e.HunterInputCompleted(c);Check(Step(e,o,3200).Action==QuickAction.None&&e.HunterRecoveryPending);}
+                var c=Step(e,o,0);Check(c.Action==(dead?QuickAction.HunterRevivePet:QuickAction.HunterSummonPet)&&c.Key==(dead?82:69)&&QuickCombat.Matches(c,o));
+                o.PetDead=!dead;Check(!QuickCombat.Matches(c,o));o.PetDead=dead;e.HunterInputCompleted(c);
+                o.PetExists=true;o.PetDead=false;Check(Step(e,o,100).Action==QuickAction.None&&!e.HunterRecoveryPending);
             }
+        });
+        Test("pet already alive receives one summon after food and unknown pet data never permits guessing",()=>{
+            var o=Observation();var state=new QuickHunterState();state.Pet.Configure(true,"R","E");state.Pet.PlayerDied();
+            var e=new QuickCombat(o,750,false,null,"4","4",80,0,false,null,true,false,state);
+            Check(Step(e,o,0).Action==QuickAction.None&&e.HunterRecoveryPending);o.PetStateKnown=o.PetExists=true;
+            var c=Step(e,o,100);Check(c.Action==QuickAction.HunterSummonPet&&c.Key==69);e.HunterInputCompleted(c);
+            Check(Step(e,o,200).Action==QuickAction.None&&!e.HunterRecoveryPending);
             var disabled=new QuickHunterState();disabled.Pet.PlayerDied();Check(!disabled.Pet.Required);
+        });
+        Test("dead pet feedback after failed summon selects revive instead of repeating summon",()=>{
+            var o=Observation();o.PetStateKnown=o.CastEventsKnown=true;var state=new QuickHunterState();state.Pet.Configure(true,"R","E");state.Pet.PlayerDied();
+            var e=new QuickCombat(o,750,false,null,"4","4",80,0,false,null,true,false,state);var c=Step(e,o,0);Check(c.Action==QuickAction.HunterSummonPet);e.HunterInputCompleted(c);
+            o.PetDead=true;o.CastFailed++;Check(Step(e,o,100).Action==QuickAction.None&&e.HunterRecoveryPending);
+            c=Step(e,o,2200);Check(c.Action==QuickAction.HunterRevivePet&&c.Key==82&&QuickCombat.Matches(c,o));
         });
         Test("hunter full health aggro preserves 4567 and waits for each global cooldown",()=>{
             var o=Observation();o.ActionRangeKnownMask=o.ActionsInRangeMask=o.KnownActionsMask=o.ReadyActionsMask=o.UsableActionsMask=127;
