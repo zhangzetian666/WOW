@@ -23,6 +23,14 @@ class CombatTelemetryTests
     static void Reject(Action<byte[]> change) { var b=Extra();change(b);Checksum(b);try{Decode(b);}catch(TargetInvocationException e){if(e.InnerException is FormatException)return;throw;}throw new Exception("Invalid WC3 packet accepted"); }
     static int Main(string[] args)
     {
+        Test("WC3 v5 pet state is independent of enemy selection and distinguishes absent alive dead and unknown",delegate{
+            foreach(byte flags in new byte[]{0,8,24,56}){
+                var b=Extra();b[3]=5;b[125]=flags;Checksum(b);var o=Observe(ProbePacket.Decode(Core()),Decode(b),true);
+                Equal(Get(o,"PetStateSupported"),true,"pet schema");Equal(Get(o,"PetStateKnown"),flags!=0,"pet known");Equal(Get(o,"PetExists"),(flags&16)!=0,"pet exists");Equal(Get(o,"PetDead"),(flags&32)!=0,"pet dead");
+            }
+            foreach(byte version in new byte[]{1,2,3,4}){var b=Extra();b[3]=version;Checksum(b);Equal(Get(Decode(b),"PetStateSupported"),false,"old supported without pets");}
+            Reject(v=>{v[3]=5;v[125]=16;});Reject(v=>{v[3]=5;v[125]=40;});Reject(v=>{v[3]=4;v[125]=8;});Reject(v=>{v[3]=5;v[125]=25;});
+        });
         Test("WC3 v4 exposes five six seven readiness and seventh range without changing older packets",delegate{
             var b=Extra();b[3]=4;b[6]=128;b[17]=127;b[18]=111;b[19]=95;b[123]=112;b[124]=64;Checksum(b);
             var o=Observe(ProbePacket.Decode(Core()),Decode(b),true);

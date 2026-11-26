@@ -18,6 +18,12 @@ class QuickRouteTests
     static void Target(FarmObservation o){o.TargetExists=o.TargetIdentityKnown=o.AttackabilityKnown=o.TargetCanAttack=o.TargetDeadKnown=true;o.TargetToken=8;o.TargetReaction=4;}
     static int Main()
     {
+        Test("pet recovery option and key survive plan draft clone and legacy imports independently of hunter combat",()=>{
+            var p=Plan();Check(!p.RevivePetAfterDeath);p.RevivePetAfterDeath=true;p.RevivePetKey="e";Check(p.Clone().RevivePetKey=="e"&&!p.Clone().HunterMode);
+            string file=Path.GetTempFileName();try{QuickRoutePlan.Save(file,p);var loaded=QuickRoutePlan.Load(file);Check(loaded.RevivePetAfterDeath&&loaded.RevivePetKey=="e");QuickRoutePlan.SaveRecording(file,p);Check(QuickRoutePlan.LoadRecording(file).RevivePetAfterDeath);
+            var json=File.ReadAllText(file).Replace("\"RevivePetAfterDeath\":true,","").Replace("\"RevivePetKey\":\"e\",","");File.WriteAllText(file,json);Check(!QuickRoutePlan.LoadRecording(file).RevivePetAfterDeath);
+            }finally{File.Delete(file);}p.RevivePetKey="F12";bool rejected=false;try{p.ValidateSkills();}catch(FormatException){rejected=true;}Check(rejected);
+        });
         Test("hunter setting persists in plans recordings clones and defaults off for legacy files",()=>{
             var p=Plan();Check(!p.HunterMode);p.HunterMode=true;Check(p.Clone().HunterMode);var file=Path.GetTempFileName();try{
                 QuickRoutePlan.Save(file,p);Check(QuickRoutePlan.Load(file).HunterMode);QuickRoutePlan.SaveRecording(file,p);Check(QuickRoutePlan.LoadRecording(file).HunterMode);

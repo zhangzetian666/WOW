@@ -529,7 +529,7 @@ function P.BuildCombatPacket(core)
     local caps,flags,extra=0,0,0
     local exists=has(core[126],8) and has(core[7],8)
     if not exists and P.portraitPanel then P.portraitPanel:Hide() end
-    put(0,87);put(1,67);put(2,51);put(3,4);u16(4,core[5]+core[6]*256)
+    put(0,87);put(1,67);put(2,51);put(3,5);u16(4,core[5]+core[6]*256)
     put(16,P.rangeSlot);norm(12,nil);norm(14,nil)
     if exists then
         local guid,token=section("identity",function()
@@ -672,6 +672,16 @@ function P.BuildCombatPacket(core)
     if exists and P.trackedTargetToken and rangeClock and P.rangeErrorToken==P.trackedTargetToken and P.rangeErrorUntil and rangeNow<P.rangeErrorUntil then
         put(125,p[126]+4)
     end
+    -- WC3 v5: own pet state is independent of the currently selected target.
+    local petFlags=section("petState",function()
+        local present=combatBool("UnitExists(pet)",UnitExists,"pet")
+        if present==nil then return nil end
+        if not present then return 8 end
+        local dead=combatBool("UnitIsDead(pet)",UnitIsDead,"pet")
+        if dead==nil then return nil end
+        return dead and 56 or 24
+    end)
+    if petFlags then put(125,p[126]+petFlags) end
     local events=P.eventRegistration or {};local counters=P.counters
     if events.UNIT_FLAGS and events.UNIT_HEALTH then
         extra=extra+32;u32(57,P.lastDeathToken or 0);u32(61,P.targetDeaths or 0)
@@ -919,7 +929,7 @@ local function printLine(text)
 end
 function P.ResetDiagnostics()
     local visible = type(WoWProbeDB) == "table" and WoWProbeDB.visible ~= false
-    WoWProbeDB = { schema = 1, addonVersion = "0.5.14", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
+    WoWProbeDB = { schema = 1, addonVersion = "0.5.15", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
     readClient(); captureBindings(); captureAPIs(); if P.panel then P.ScalePanel() end
 end
 function P.Command(command)
@@ -1057,7 +1067,7 @@ function P.Initialize()
     WoWProbeDB = old; WoWProbeDB.visible = visible
     if integer(old.rangeSlot,4) and old.rangeSlot>=1 then P.rangeSlot=old.rangeSlot end
     WoWProbeDB.previousSession = previous
-    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.14"
+    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.15"
     WoWProbeDB.errors, WoWProbeDB.bindings, WoWProbeDB.capabilities = {}, {}, {}
     readClient(); captureBindings(); captureAPIs()
     local ok, reason = pcall(createPanel)

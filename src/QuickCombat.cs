@@ -3,7 +3,7 @@ using System.Collections.Generic;
 
 namespace WoWProbe
 {
-    public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin, Vanish, StealthEnter, StealthExit, StealthHold, RangedStop, HunterAspect }
+    public enum QuickAction { None, Scan, Turn, Face, Skill, Loot, Skin, CorpseSelect, Food, Drink, BackOff, DetourTurn, DetourForward, Patrol, Defensive, Reacquire, Stop, RouteProbe, ReturnToRoute, CorpseApproach, InterruptSkin, Vanish, StealthEnter, StealthExit, StealthHold, RangedStop, HunterAspect, HunterRevivePet }
     public sealed class QuickCommand
     {
         public bool AttackHostile;public bool MeleeConfirmed;public bool RangedSkill;public bool AllowApproach;public bool InputStarted;
@@ -37,9 +37,10 @@ namespace WoWProbe
         int hunterIssuedOpening,hunterIssuedLoop,hunterIssuedIndex;long hunterIssuedAt;uint hunterIssuedToken;
         double hunterBlockedX,hunterBlockedY;
         bool hunterIssuedFailuresKnown;uint hunterIssuedFailures;
-        public bool HunterRecoveryPending {get{return hunterMode&&hunterState.AspectPending;}}
+        public bool HunterRecoveryPending {get{return hunterMode&&hunterState.AspectPending||hunterState.Pet.Required;}}
         public void HunterInputCompleted(QuickCommand command)
         {
+            if(command.Action==QuickAction.HunterRevivePet){hunterState.Pet.InputCompleted(command,last);return;}
             if(command.Action==QuickAction.HunterAspect){hunterState.AspectInputCompleted();return;}
             if(!command.HunterSkill||command.Token!=token)return;
             hunterIssued=true;hunterIssuedDefense=command.HunterDefense;hunterIssuedOpening=opening;hunterIssuedLoop=loopIndex;hunterIssuedIndex=hunterIndex;hunterIssuedAt=last;hunterIssuedToken=token;
@@ -120,6 +121,9 @@ namespace WoWProbe
                 lastHealth=o.Health;
             }
             if(!o.CastingKnown)return Stop("施法状态不可读。");
+            if(hunterState.Pet.Required&&(o.Casting||o.Channeling))
+            {if(o.InCombat){hunterState.Pet.Interrupted();return Cmd(QuickAction.InterruptSkin,"复活宠物时受到攻击：中断读条，优先反击。",27);}return hunterState.Pet.Step(o,now);}
+            if(hunterState.Pet.Waiting){if(o.InCombat){hunterState.Pet.Interrupted();if(o.Casting||o.Channeling)return Cmd(QuickAction.InterruptSkin,"复活宠物时受到攻击：中断读条，优先反击。",27);}else return hunterState.Pet.Step(o,now);}
             if(o.Health>=30&&vanishAt<0)vanishLatched=false;
             if(vanishAt>=0)
             {
@@ -150,7 +154,7 @@ namespace WoWProbe
             {
                 bool mana=o.PowerType==0;
                 if(mana&&(o.Power<0||o.Power>100))return Stop("法力值不可读，不能确认饮水完成。");
-                if(!resting&&!o.InCombat&&(o.Health<(HunterRecoveryPending?100:initialRest?99:restBelow)||mana&&o.Power<(initialRest?99:restBelow)))
+                if(!resting&&!o.InCombat&&(o.Health<(HunterRecoveryPending?100:initialRest?99:restBelow)||mana&&o.Power<(HunterRecoveryPending||initialRest?99:restBelow)))
                 {resting=true;foodStealthAllowed=!hunterMode&&!rangedCombat&&o.PowerType==3&&(route==null||route.Plan.UseRogueVanish);naturalRecovery=o.FoodCount==0||mana&&drinkKey==0;nextRestReport=now;restStarted=now;restHoldUntil=now+10000;food=drink=false;foodProgressAt=drinkProgressAt=now;restHealth=o.Health;restPower=o.Power;foodRetries=drinkRetries=0;if(route!=null)route.Interrupt(o);}
                 if(resting&&o.InCombat){foodStealth=enterStealthPending=false;resting=false;initialRest=true;food=drink=false;if(o.Casting||o.Channeling)return Cmd(QuickAction.InterruptSkin,"吃喝期间受到攻击，停止恢复施法并优先反击。",27);}
                 if(resting)
@@ -171,7 +175,8 @@ namespace WoWProbe
             }
             if(hunterDefending&&(o.Casting||o.Channeling))return Cmd(QuickAction.InterruptSkin,"猎人受袭：中断未完成读条，改为1、2循环。",27);
             if((o.Casting||o.Channeling)&&!(o.InCombat&&looted&&corpse!=null))return Cmd(QuickAction.None,"等待当前施法。",0);
-            if(HunterRecoveryPending&&!o.InCombat&&o.Health==100)
+            if(hunterState.Pet.Required&&!o.InCombat&&o.Health==100){var petCommand=hunterState.Pet.Step(o,now);petCommand.RouteContext=route;return petCommand;}
+            if(hunterMode&&hunterState.AspectPending&&!o.InCombat&&o.Health==100)
                 return Cmd(QuickAction.HunterAspect,"猎人复活恢复满血：按8尝试灵猴守护。",56);
             if(token==0&&!o.InCombat&&deferredCorpses.Count>0)
             {var pending=deferredCorpses.Pop();token=pending.Token;corpse=pending.Corpse;creditedLoots=pending.Loots;creditedSkins=pending.Skins;looted=true;corpse.Resume(o,now);return AdvanceCorpse(o,now);}
@@ -437,6 +442,7 @@ namespace WoWProbe
             if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||o.PlayerDead||o.PlayerGhost)return false;
             if(c.RouteContext!=null&&!c.RouteContext.CanOperate(o))return false;
             if(!ownedChat&&o.ChatOpenKnown&&o.ChatOpen)return false;
+            if(c.Action==QuickAction.HunterRevivePet)return !o.InCombat&&o.Health==100&&o.CastingKnown&&(c.InputStarted||!o.Casting&&!o.Channeling&&o.PetStateKnown&&(!o.PetExists||o.PetDead));
             if(c.Action==QuickAction.HunterAspect)return !o.InCombat&&o.Health==100&&o.CastingKnown&&!o.Casting&&!o.Channeling;
             if(c.HunterSkill)
             {

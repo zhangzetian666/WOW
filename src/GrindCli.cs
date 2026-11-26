@@ -112,7 +112,7 @@ namespace WoWProbe
         {
             if(hunterState==null)hunterState=new QuickHunterState();
             if(killCounter==null)killCounter=new QuickKillCounter();killCounter.BeginRun();
-            if(plan==null)throw new InvalidOperationException("请先手动配置固定打怪巡航路线，再点击开始。");plan.Validate(true);plan=plan.Clone();
+            if(plan==null)throw new InvalidOperationException("请先手动配置固定打怪巡航路线，再点击开始。");plan.Validate(true);plan=plan.Clone();hunterState.Pet.Configure(plan.RevivePetAfterDeath,plan.RevivePetKey);
             string vendorCheckpointPath=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-npc-progress.json");
             var savedTrip=QuickVendorCheckpoint.Load(vendorCheckpointPath);
             WindowInfo window = OpenTelemetry();Native.RequireInputIntegrity(window.ProcessId);
@@ -121,7 +121,7 @@ namespace WoWProbe
             bool obsoleteRepair=savedTrip!=null&&savedTrip.ObsoleteEmergencyRepair(plan,anchor);
             bool obsoleteSale=savedTrip!=null&&savedTrip.ObsoleteAutomaticSale(plan,anchor);
             if(obsoleteRepair||obsoleteSale){QuickVendorCheckpoint.Save(vendorCheckpointPath,null);savedTrip=null;}
-            if(savedTrip!=null){savedTrip.Plan.HunterMode=plan.HunterMode;savedTrip.Plan.UseRogueVanish=plan.UseRogueVanish;savedTrip.Plan.NoChatCombat=plan.NoChatCombat;savedTrip.Plan.SkinWithInteract=plan.SkinWithInteract;savedTrip.Plan.StartAttackKey=plan.StartAttackKey;savedTrip.Plan.LastTargetKey=plan.LastTargetKey;savedTrip.Plan.StopAttackKey=plan.StopAttackKey;savedTrip.Plan.RangedCombat=plan.RangedCombat;savedTrip.Plan.SkillRows=plan.SkillRows;savedTrip.Plan.RandomRoutes=plan.RandomRoutes;savedTrip.Plan.RouteVariation=plan.RouteVariation;savedTrip.Plan.RandomRouteSeed=plan.RandomRouteSeed;savedTrip.Plan.TimedBreaks=plan.TimedBreaks;savedTrip.Plan.Validate(true);plan=savedTrip.Plan.Clone();}
+            if(savedTrip!=null){savedTrip.Plan.HunterMode=plan.HunterMode;savedTrip.Plan.RevivePetAfterDeath=plan.RevivePetAfterDeath;savedTrip.Plan.RevivePetKey=plan.RevivePetKey;savedTrip.Plan.UseRogueVanish=plan.UseRogueVanish;savedTrip.Plan.NoChatCombat=plan.NoChatCombat;savedTrip.Plan.SkinWithInteract=plan.SkinWithInteract;savedTrip.Plan.StartAttackKey=plan.StartAttackKey;savedTrip.Plan.LastTargetKey=plan.LastTargetKey;savedTrip.Plan.StopAttackKey=plan.StopAttackKey;savedTrip.Plan.RangedCombat=plan.RangedCombat;savedTrip.Plan.SkillRows=plan.SkillRows;savedTrip.Plan.RandomRoutes=plan.RandomRoutes;savedTrip.Plan.RouteVariation=plan.RouteVariation;savedTrip.Plan.RandomRouteSeed=plan.RandomRouteSeed;savedTrip.Plan.TimedBreaks=plan.TimedBreaks;savedTrip.Plan.Validate(true);plan=savedTrip.Plan.Clone();}
             bool skipUnavailableSkin=skinning&&(plan.SkinWithInteract?(!anchor.InteractBindingKnown||!anchor.InteractBindingCorrect):(!anchor.SkinBindingKnown||!anchor.SkinBindingCorrect));
             if(skipUnavailableSkin)skinning=false;
             var routeFollower=new QuickRouteFollower(plan,anchor);
@@ -141,7 +141,7 @@ namespace WoWProbe
             {
                 nativeReport=message=>{journal.WriteLine(DateTimeOffset.Now.ToString("HH:mm:ss.fff")+" [input] "+message);journal.Flush();};
                 Action<string> write=message=>{journal.WriteLine(DateTimeOffset.Now.ToString("HH:mm:ss.fff")+" "+message);journal.Flush();report(message);};
-                frames.WriteLine("time\tsequence\thealth\tcombat\tdead\tghost\ttargetExists\ttargetToken\ttargetName\ttargetDeadKnown\ttargetDead\tattackable\tcastSuccess\tdeathToken\tdeathCount\tx\ty\tkillCreditNameHash\tkillCredits\tlootOpened\tchatOpen\tlootClosed\tskinKnown\tskinnable\tskinSuccess\tcastFailed\tfoodCount\ttargetReaction\tfacing\tclaimKnown\tclaimedByOther\ttargetCombatKnown\ttargetCombat\tvictimKnown\ttargetsPlayer\tgearKnown\tgearRed\tdurability\tactionKnown\tactionReady\tactionUsable\trangeKnown\tinRange\trangeError");
+                frames.WriteLine("time\tsequence\thealth\tcombat\tdead\tghost\ttargetExists\ttargetToken\ttargetName\ttargetDeadKnown\ttargetDead\tattackable\tcastSuccess\tdeathToken\tdeathCount\tx\ty\tkillCreditNameHash\tkillCredits\tlootOpened\tchatOpen\tlootClosed\tskinKnown\tskinnable\tskinSuccess\tcastFailed\tfoodCount\ttargetReaction\tfacing\tclaimKnown\tclaimedByOther\ttargetCombatKnown\ttargetCombat\tvictimKnown\ttargetsPlayer\tgearKnown\tgearRed\tdurability\tactionKnown\tactionReady\tactionUsable\trangeKnown\tinRange\trangeError\tpetKnown\tpetExists\tpetDead");
 
                 try
                 {
@@ -151,6 +151,8 @@ namespace WoWProbe
                     QuickRoutePlan.Save(prefix+"-patrol.json",plan);
                     if(breakSchedule!=null)write(breakSchedule.Summary);
                     if(plan.RandomRoutes){string variants=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"random-routes");QuickRouteVariants.Export(variants,"patrol",QuickRouteVariants.For(plan,plan.Route,20));if(plan.Vendor.RouteComplete)QuickRouteVariants.Export(variants,"npc",QuickRouteVariants.For(plan,QuickRouteVariants.Service(plan,plan.Vendor),10));}
+                    if(plan.RevivePetAfterDeath&&!anchor.PetStateSupported)throw new InvalidOperationException("复活宠物需要新版宠物状态数据，请/reload加载0.5.15插件。");
+                    if(plan.RevivePetAfterDeath)write("死亡复活后恢复宠物已启用：吃喝结束按"+plan.RevivePetKey+"，确认宠物存活再巡航。");
                     if(plan.HunterMode&&(!anchor.ExtendedActionRanges||!anchor.RangeErrorSupported||!anchor.ExtendedActionStates))throw new InvalidOperationException("猎人模式需要新版射程和技能冷却数据，请在游戏输入/reload加载0.5.14插件后开始。");
                     if(plan.HunterMode)write("猎人模式：复活后恢复满血按8；战斗中实际掉血才切换1、2；正常按技能行执行，冷却等待、距离不足先接近。");
                     if(anchor.BagFull&&!plan.Vendor.Enabled)throw new InvalidOperationException("背包已满，请先填写并启用售卖NPC坐标。");
@@ -217,7 +219,7 @@ namespace WoWProbe
                         if(observed.Sequence!=frameSequence)
                         {
                             frameSequence=observed.Sequence;
-                            frames.WriteLine(String.Join("\t",new object[]{DateTimeOffset.Now.ToString("HH:mm:ss.fff"),observed.Sequence,observed.Health,observed.InCombat,observed.PlayerDead,observed.PlayerGhost,observed.TargetExists,observed.TargetToken,observed.TargetName,observed.TargetDeadKnown,observed.TargetDead,observed.TargetCanAttack,observed.CastSuccess,observed.DeathToken,observed.TargetDeaths,observed.X,observed.Y,observed.KillCreditNameHash,observed.KillCredits,observed.LootOpened,observed.ChatOpen,observed.LootClosed,observed.SkinKnown,observed.Skinnable,observed.SkinSuccess,observed.CastFailed,observed.FoodCount,observed.TargetReaction,observed.Facing,observed.TargetClaimKnown,observed.TargetClaimedByOther,observed.TargetCombatKnown,observed.TargetInCombat,observed.TargetVictimKnown,observed.TargetTargetsPlayer,observed.GearKnown,observed.GearRed,observed.Durability,observed.KnownActionsMask,observed.ReadyActionsMask,observed.UsableActionsMask,observed.ActionRangeKnownMask,observed.ActionsInRangeMask,observed.RangeErrorActive}));frames.Flush();
+                            frames.WriteLine(String.Join("\t",new object[]{DateTimeOffset.Now.ToString("HH:mm:ss.fff"),observed.Sequence,observed.Health,observed.InCombat,observed.PlayerDead,observed.PlayerGhost,observed.TargetExists,observed.TargetToken,observed.TargetName,observed.TargetDeadKnown,observed.TargetDead,observed.TargetCanAttack,observed.CastSuccess,observed.DeathToken,observed.TargetDeaths,observed.X,observed.Y,observed.KillCreditNameHash,observed.KillCredits,observed.LootOpened,observed.ChatOpen,observed.LootClosed,observed.SkinKnown,observed.Skinnable,observed.SkinSuccess,observed.CastFailed,observed.FoodCount,observed.TargetReaction,observed.Facing,observed.TargetClaimKnown,observed.TargetClaimedByOther,observed.TargetCombatKnown,observed.TargetInCombat,observed.TargetVictimKnown,observed.TargetTargetsPlayer,observed.GearKnown,observed.GearRed,observed.Durability,observed.KnownActionsMask,observed.ReadyActionsMask,observed.UsableActionsMask,observed.ActionRangeKnownMask,observed.ActionsInRangeMask,observed.RangeErrorActive,observed.PetStateKnown,observed.PetExists,observed.PetDead}));frames.Flush();
                             if(observed.TargetExists&&observed.TargetToken!=picturedToken){picturedToken=observed.TargetToken;write("观察目标："+observed.TargetName+" token="+picturedToken+" reaction="+observed.TargetReaction);}
                         }
                         if(recovery!=null||observed.PlayerDead||observed.PlayerGhost)
@@ -281,6 +283,7 @@ namespace WoWProbe
                         QuickCommand command=engine.Step(observed,clock.ElapsedMilliseconds);
                         if(!engine.IsResting)restMovementStopped=false;
                         else searchMotion.Stop();
+                        if(engine.HunterRecoveryPending&&!observed.InCombat)searchMotion.Stop();
                         if(completedKills+engine.Kills!=reportedKills){reportedKills=completedKills+engine.Kills;killCounter.Record(reportedKills);CancelQuickMovement(backend);write("已确认目标死亡，窗口累计击杀="+killCounter.Total);}
                         if(completedLoots+engine.Loots!=reportedLoots){reportedLoots=completedLoots+engine.Loots;write("已确认拾取窗口完成，累计拾取="+reportedLoots);}
                         if(completedSkins+engine.Skins!=reportedSkins){reportedSkins=completedSkins+engine.Skins;write("已确认剥皮成功，累计剥皮="+reportedSkins);}
@@ -327,12 +330,12 @@ namespace WoWProbe
                             else
                             {
                                 bool detour=command.Action==QuickAction.BackOff||command.Action==QuickAction.DetourTurn||command.Action==QuickAction.DetourForward;
-                                if(detour||command.Action==QuickAction.HunterAspect)CancelQuickMovement(backend);
+                                if(detour||command.Action==QuickAction.HunterAspect||command.Action==QuickAction.HunterRevivePet)CancelQuickMovement(backend);
                                 if((command.Action==QuickAction.Food||command.Action==QuickAction.Drink)&&!restMovementStopped){Pulse(backend,QuickMovement.Forward,80);write("进食准备：停止移动，等待坐标连续稳定1秒。");QuickRestPreparation.Wait(read,Pause);restMovementStopped=true;}
                                 if(command.RouteMovement&&command.Action==QuickAction.Turn&&!command.PauseForward)searchMotion.Start();
                                 int hold=command.Hold>0?command.Hold:command.Action==QuickAction.Turn?260:command.Action==QuickAction.BackOff?300:command.Action==QuickAction.DetourTurn?220:command.Action==QuickAction.DetourForward?600:80;
                                 var beforeFace=command.Action==QuickAction.Face?read():null;
-                                if(command.Action==QuickAction.Skill&&(command.RangedSkill||command.HunterSkill))RequireInput().Pulse(command.Key,hold,()=>command.InputStarted=true);else Pulse(backend,command.Key,hold);
+                                if(command.Action==QuickAction.HunterRevivePet||command.Action==QuickAction.Skill&&(command.RangedSkill||command.HunterSkill))RequireInput().Pulse(command.Key,hold,()=>command.InputStarted=true);else Pulse(backend,command.Key,hold);
                                 if(beforeFace!=null)
                                 {
                                     Pause(250);var afterFace=read();write("原交互流程：F后朝向="+beforeFace.Facing.ToString("F3")+"→"+afterFace.Facing.ToString("F3")+"；位置="+beforeFace.X.ToString("F5")+","+beforeFace.Y.ToString("F5")+"→"+afterFace.X.ToString("F5")+","+afterFace.Y.ToString("F5"));
@@ -345,7 +348,7 @@ namespace WoWProbe
                                     }
                                 }
                                 if(command.Action==QuickAction.Face&&(plan.RangedCombat||plan.HunterMode)&&!command.AllowApproach)CancelQuickMovement(backend);
-                                if(command.HunterSkill||command.Action==QuickAction.HunterAspect)engine.HunterInputCompleted(command);
+                                if(command.HunterSkill||command.Action==QuickAction.HunterAspect||command.Action==QuickAction.HunterRevivePet)engine.HunterInputCompleted(command);
                                 if(command.Action==QuickAction.Food||command.Action==QuickAction.Drink)engine.RestInputCompleted(clock.ElapsedMilliseconds,command.Action==QuickAction.Food);
                                 // Recheck target, contact and chase limits on the next frame;
                                 // an accepted interaction key is not movement evidence.

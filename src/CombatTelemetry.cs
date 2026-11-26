@@ -13,6 +13,7 @@ namespace WoWProbe
         public bool ExtendedActionRanges {get;private set;}
         public bool RangeErrorSupported {get;private set;}public bool RangeErrorActive {get;private set;}
         public bool ExtendedActionStates {get;private set;}
+        public bool PetStateSupported {get;private set;}public bool PetStateKnown {get;private set;}public bool PetExists {get;private set;}public bool PetDead {get;private set;}
         public int KnownActionsMask { get; private set; }
         public int ReadyActionsMask { get; private set; }
         public int UsableActionsMask { get; private set; }
@@ -59,14 +60,15 @@ namespace WoWProbe
         {
             if (bytes == null || bytes.Length != 128) throw Invalid("WC3 packet must contain exactly 128 bytes.");
             byte[] b=(byte[])bytes.Clone();
-            if(b[0]!=87 || b[1]!=67 || b[2]!=51 || b[3]<1||b[3]>4) throw Invalid("Unsupported WC3 signature or version.");
+            if(b[0]!=87 || b[1]!=67 || b[2]!=51 || b[3]<1||b[3]>5) throw Invalid("Unsupported WC3 signature or version.");
             int a=0,s=0;for(int i=0;i<126;i++){a=(a+b[i])%255;s=(s+a)%255;}
             if(b[126]!=a || b[127]!=s)throw Invalid("WC3 Fletcher16 checksum mismatch.");
             if(b[118]!=0&&b[118]!=1&&b[118]!=3)throw Invalid("Invalid stealth flags.");
             if(b[119]!=0&&b[119]!=1&&b[119]!=3)throw Invalid("Invalid interact binding flags.");
             if(b[120]!=0&&b[120]!=1&&b[120]!=3)throw Invalid("Invalid click-to-move flags.");
             int hover=b[125]&3;
-            if(hover==2||(b[125]&~(b[3]>=3?7:3))!=0||b[125]!=0&&(b[6]&1)==0)throw Invalid("WC3 target hover/range error needs readable target identity.");
+            if(hover==2||(b[125]&~(b[3]>=5?63:b[3]>=3?7:3))!=0||(b[125]&7)!=0&&(b[6]&1)==0)throw Invalid("WC3 target hover/range error needs readable target identity.");
+            int pet=b[125]&56;if(pet!=0&&pet!=8&&pet!=24&&pet!=56)throw Invalid("WC3 pet state flags disagree.");
             int extraRangeMask=b[3]>=4?112:b[3]>=2?48:0;
             int rangeKnown=(b[121]&15)|(b[123]&extraRangeMask),inRange=(b[121]>>4)|(b[124]&extraRangeMask);
             if((inRange&~rangeKnown)!=0||((b[122]>>4)&~(b[122]&15))!=0||b[123]>(15|extraRangeMask)||b[124]>(15|extraRangeMask)||(b[123]&b[124]&15)!=0)throw Invalid("WC3 per-action range or repeat masks disagree.");
@@ -103,6 +105,7 @@ namespace WoWProbe
                 throw Invalid("WC3 portrait capability disagrees with client pixel rectangle.");
             return new CombatPacket { Sequence=U16(b,4),Capabilities=c,Flags=f,RangeSlot=b[16],KnownActionsMask=known,
                 ExtendedActionStates=b[3]>=4,
+                PetStateSupported=b[3]>=5,PetStateKnown=(pet&8)!=0,PetExists=(pet&16)!=0,PetDead=(pet&32)!=0,
                 MeleeEventsKnown=b[109]==1,MeleeHitToken=U32(b,110),MeleeHits=U32(b,114),
                 InteractBindingKnown=(b[119]&1)!=0,InteractBindingCorrect=(b[119]&2)!=0,
                 ClickToMoveKnown=(b[120]&1)!=0,ClickToMoveEnabled=(b[120]&2)!=0,
@@ -129,6 +132,7 @@ namespace WoWProbe
         public bool MeleeEventsKnown;public uint MeleeHitToken,MeleeHits;
         public bool ExtendedActionRanges,RangeErrorSupported,RangeErrorActive;
         public bool ExtendedActionStates;
+        public bool PetStateSupported,PetStateKnown,PetExists,PetDead;
         public int ActionRangeKnownMask,ActionsInRangeMask,RepeatKnownMask,RepeatingMask,RangedActionsMask,MeleeActionsMask;
         public int Sequence,ReadFailures,Health=255,Power=255,PowerType=255,TargetHealth=255,MapMode,RangeSlot,
             KnownActionsMask,ReadyActionsMask,UsableActionsMask,FoodCount=-1,TargetReaction=255;
@@ -168,6 +172,7 @@ namespace WoWProbe
             o.CastingKnown=(c&64)!=0;o.Casting=o.CastingKnown && (f&32)!=0;o.Channeling=o.CastingKnown && (f&64)!=0;
             o.ActionsKnown=(c&128)!=0;o.KnownActionsMask=extra.KnownActionsMask;o.ReadyActionsMask=extra.ReadyActionsMask;o.UsableActionsMask=extra.UsableActionsMask;
             o.ExtendedActionStates=extra.ExtendedActionStates;
+            o.PetStateSupported=extra.PetStateSupported;o.PetStateKnown=extra.PetStateKnown;o.PetExists=extra.PetExists;o.PetDead=extra.PetDead;
             o.RangeErrorSupported=extra.RangeErrorSupported;o.RangeErrorActive=extra.RangeErrorActive;o.ExtendedActionRanges=extra.ExtendedActionRanges;o.ActionRangeKnownMask=extra.ActionRangeKnownMask;o.ActionsInRangeMask=extra.ActionsInRangeMask;o.RepeatKnownMask=extra.RepeatKnownMask;o.RepeatingMask=extra.RepeatingMask;o.RangedActionsMask=extra.RangedActionsMask;o.MeleeActionsMask=extra.MeleeActionsMask;
             o.LootEventsKnown=(k&8)!=0;o.CastEventsKnown=(k&16)!=0;o.SkinSuccessKnown=(k&2)!=0;
             o.LootOpened=extra.LootOpened;o.LootClosed=extra.LootClosed;o.CastSuccess=extra.CastSuccess;o.CastFailed=extra.CastFailed;o.SkinSuccess=extra.SkinSuccess;
