@@ -38,21 +38,21 @@ namespace WoWProbe
         public bool NoSaleObserved {get{return noSaleObserved;}}
         bool closeAfterCombat;
         bool stealthRequested,stealthExitRequested;long nextStealth;
-        bool emergencyRepair;
+        bool emergencyRepair;readonly bool automaticSale;
         public bool AvoidCombat {get{return emergencyRepair&&phase!=Phase.Return&&phase!=Phase.Done;}}
         public void PrioritizeBrokenGear(FarmObservation f){if(f!=null&&f.GearKnown&&f.GearRed&&f.Durability==0&&!emergencyRepair){emergencyRepair=true;if(nav!=null)nav=QuickServicePaths.Navigate(plan,nav.WorkingRoute,f,nav.TargetIndex,true);}}
         readonly bool repair;bool repairIssued;bool sharedService,saleRequired;
-        public QuickVendorEngine(QuickRoutePlan plan,OperationObservation start,bool repair=false,bool fromStart=false,bool emergencyRepair=false,bool resumeTrip=false)
+        public QuickVendorEngine(QuickRoutePlan plan,OperationObservation start,bool repair=false,bool fromStart=false,bool emergencyRepair=false,bool resumeTrip=false,bool automaticSale=false)
         {
             if(plan==null)throw new ArgumentNullException("plan");plan.Validate(true);var service=repair?plan.Repair:plan.Vendor;if(!service.Enabled)throw new InvalidOperationException(repair?"请先启用并填写修理NPC坐标。":"请先启用并填写售卖NPC坐标。");if(start==null||!start.Fresh||start.Farm==null||!start.Farm.Fresh)throw new InvalidOperationException("商人及背包状态不可读，请确认配套插件已加载。");
             this.emergencyRepair=emergencyRepair&&start.Farm.GearKnown&&start.Farm.GearRed&&start.Farm.Durability==0;this.plan=plan.Clone();this.repair=repair;settings=service.Clone();settings.RequireRoute();if(plan.RandomRoutes){var variants=QuickRouteVariants.For(plan,QuickRouteVariants.Service(plan,settings),10);OutboundChoice=QuickRandom.Next(variants.Count);ReturnChoice=QuickRandom.Except(variants.Count,OutboundChoice);settings.Points=variants[OutboundChoice].Clone().Points;returnVariant=variants[ReturnChoice].Clone();}var f=start.Farm;if(!plan.MapMatches(f)||f.InCombat&&!this.emergencyRepair&&!resumeTrip||f.PlayerDead||f.PlayerGhost)throw new InvalidOperationException("商人行程须在当前地图存活脱战时开始。");outbound=QuickServicePaths.Outbound(this.plan,settings,f,!fromStart);nav=QuickServicePaths.Navigate(this.plan,outbound,f,0,this.emergencyRepair);phase=nav==null?Phase.Select:Phase.Outbound;
-            sharedService=plan.Vendor.Enabled&&plan.Repair.Enabled&&plan.Vendor.X==plan.Repair.X&&plan.Vendor.Y==plan.Repair.Y;saleRequired=!repair||f.BagFull;
+            this.automaticSale=automaticSale&&!repair;sharedService=plan.Vendor.Enabled&&plan.Repair.Enabled&&plan.Vendor.X==plan.Repair.X&&plan.Vendor.Y==plan.Repair.Y;saleRequired=!repair||f.BagFull;
         }
         public QuickVendorCheckpoint Checkpoint
-        {get{return phase==Phase.Done?null:new QuickVendorCheckpoint{Plan=plan.Clone(),Outbound=outbound.Clone(),ReturnVariant=returnVariant==null?null:returnVariant.Clone(),OutboundChoice=OutboundChoice,ReturnChoice=ReturnChoice,Path=nav==null?null:nav.WorkingRoute,Next=nav==null?0:nav.TargetIndex,Returning=phase==Phase.Return,Repair=repair,Emergency=emergencyRepair,StealthRequested=stealthRequested&&!stealthExitRequested};}}
+        {get{return phase==Phase.Done?null:new QuickVendorCheckpoint{AutomaticSale=automaticSale,Plan=plan.Clone(),Outbound=outbound.Clone(),ReturnVariant=returnVariant==null?null:returnVariant.Clone(),OutboundChoice=OutboundChoice,ReturnChoice=ReturnChoice,Path=nav==null?null:nav.WorkingRoute,Next=nav==null?0:nav.TargetIndex,Returning=phase==Phase.Return,Repair=repair,Emergency=emergencyRepair,StealthRequested=stealthRequested&&!stealthExitRequested};}}
         static QuickRoutePlan RestorePlan(QuickRoutePlan p){var copy=p.Clone();copy.RandomRoutes=false;return copy;}
         public QuickVendorEngine(QuickVendorCheckpoint cp,OperationObservation start)
-            :this(RestorePlan(cp.Plan),start,cp.Repair,false,cp.Emergency,true)
+            :this(RestorePlan(cp.Plan),start,cp.Repair,false,cp.Emergency,true,cp.AutomaticSale)
         {
             plan=cp.Plan.Clone();
             if(cp.Outbound==null||!cp.Plan.MapMatches(start.Farm))throw new InvalidOperationException("NPC断点地图或路线无效，保留断点等待检查。");

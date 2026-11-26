@@ -13,6 +13,29 @@ class QuickVendorTests
     static void Test(string name,Action f){try{f();passed++;Console.WriteLine("PASS "+name);}catch(Exception e){failed++;Console.WriteLine("FAIL "+name+": "+e.Message);}}
     static int Main()
     {
+        Test("resolved automatic full bag outbound expires while manual legacy return and uncertain trips remain",()=>{
+            var p=Plan();var o=O();var cp=new QuickVendorEngine(p,o,false,true,false,false,true).Checkpoint;
+            Check(cp.AutomaticSale);o.Farm.GearKnown=true;o.Farm.Durability=9000;o.Farm.BagFull=false;
+            Check(cp.ObsoleteAutomaticSale(p,o.Farm));
+            for(int i=0;i<16;i++){
+                var f=O().Farm;f.GearKnown=true;f.Durability=9000;f.BagFull=false;
+                var c=new QuickVendorEngine(p,O(),false,true,false,false,true).Checkpoint;
+                switch(i){case 0:f.Fresh=false;break;case 1:f.KnownCore=false;break;case 2:f.ReadFailures=1;break;case 3:f.PlayerDead=true;break;case 4:f.PlayerGhost=true;break;case 5:f.MapId++;break;case 6:f.GearKnown=false;break;case 7:f.GearRed=true;break;case 8:f.Durability=0;break;case 9:f.BagFull=true;break;case 10:c.Returning=true;break;case 11:c.Repair=true;break;case 12:c.Emergency=true;break;case 13:c.AutomaticSale=false;break;case 14:c.Plan=null;break;case 15:f=null;break;}
+                Check(!c.ObsoleteAutomaticSale(p,f));
+            }
+            Check(!cp.ObsoleteAutomaticSale(null,o.Farm));Check(p.Vendor.Points.Count==2&&p.Vendor.RouteComplete);
+            o.Farm.BagFull=true;Check(!cp.ObsoleteAutomaticSale(p,o.Farm));var resumed=new QuickVendorEngine(cp,o);Check(resumed.Checkpoint.AutomaticSale&&resumed.Checkpoint.Next==cp.Next);
+        });
+        Test("automatic sale origin round trips and missing legacy origin never implies automatic",()=>{
+            var cp=new QuickVendorEngine(Plan(),O(),false,true,false,false,true).Checkpoint;
+            string file=System.IO.Path.GetTempFileName();try{
+                QuickVendorCheckpoint.Save(file,cp);var loaded=QuickVendorCheckpoint.Load(file);Check(loaded.AutomaticSale&&loaded.Outbound.Points.Count==cp.Outbound.Points.Count);
+                var json=System.IO.File.ReadAllText(file);json=System.Text.RegularExpressions.Regex.Replace(json,",?\"AutomaticSale\":true","");System.IO.File.WriteAllText(file,json);
+                loaded=QuickVendorCheckpoint.Load(file);Check(!loaded.AutomaticSale);
+                var o=O();o.Farm.GearKnown=true;o.Farm.Durability=10000;o.Farm.BagFull=false;Check(!loaded.ObsoleteAutomaticSale(Plan(),o.Farm));
+            }finally{System.IO.File.Delete(file);}
+            Check(!new QuickVendorEngine(Plan(),O()).Checkpoint.AutomaticSale);
+        });
         Test("repaired outbound emergency checkpoint expires without discarding manual full bag or return trips",()=>{
             var p=Plan();p.Repair=p.Vendor.Clone();var o=O();o.Farm.GearKnown=o.Farm.GearRed=true;o.Farm.Durability=0;
             var cp=new QuickVendorEngine(p,o,true,false,true).Checkpoint;o.Farm.GearRed=false;o.Farm.BagFull=false;

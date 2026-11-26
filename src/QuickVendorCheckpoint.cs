@@ -9,6 +9,14 @@ namespace WoWProbe
         public RouteDocument Outbound,Path,ReturnVariant;public int OutboundChoice,ReturnChoice;
         public int Next;
         public bool Returning,Repair,Emergency,StealthRequested;
+        public bool AutomaticSale;
+        public bool ObsoleteAutomaticSale(QuickRoutePlan current,FarmObservation f)
+        {
+            // Legacy and manual trips have no automatic-sale marker and remain resumable.
+            return AutomaticSale&&!Repair&&!Emergency&&!Returning&&Plan!=null&&current!=null&&
+                f!=null&&f.Fresh&&f.KnownCore&&f.ReadFailures==0&&!f.PlayerDead&&!f.PlayerGhost&&
+                Plan.MapMatches(f)&&current.MapMatches(f)&&GearOperational(f)&&!f.BagFull;
+        }
         public bool ObsoleteEmergencyRepair(QuickRoutePlan current,FarmObservation f)
         {
             // A completed repair invalidates an old automatic outbound task,
