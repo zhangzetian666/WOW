@@ -12,6 +12,7 @@ namespace WoWProbe
         public int RangeSlot { get; private set; }
         public bool ExtendedActionRanges {get;private set;}
         public bool RangeErrorSupported {get;private set;}public bool RangeErrorActive {get;private set;}
+        public bool ExtendedActionStates {get;private set;}
         public int KnownActionsMask { get; private set; }
         public int ReadyActionsMask { get; private set; }
         public int UsableActionsMask { get; private set; }
@@ -58,7 +59,7 @@ namespace WoWProbe
         {
             if (bytes == null || bytes.Length != 128) throw Invalid("WC3 packet must contain exactly 128 bytes.");
             byte[] b=(byte[])bytes.Clone();
-            if(b[0]!=87 || b[1]!=67 || b[2]!=51 || b[3]<1||b[3]>3) throw Invalid("Unsupported WC3 signature or version.");
+            if(b[0]!=87 || b[1]!=67 || b[2]!=51 || b[3]<1||b[3]>4) throw Invalid("Unsupported WC3 signature or version.");
             int a=0,s=0;for(int i=0;i<126;i++){a=(a+b[i])%255;s=(s+a)%255;}
             if(b[126]!=a || b[127]!=s)throw Invalid("WC3 Fletcher16 checksum mismatch.");
             if(b[118]!=0&&b[118]!=1&&b[118]!=3)throw Invalid("Invalid stealth flags.");
@@ -66,8 +67,9 @@ namespace WoWProbe
             if(b[120]!=0&&b[120]!=1&&b[120]!=3)throw Invalid("Invalid click-to-move flags.");
             int hover=b[125]&3;
             if(hover==2||(b[125]&~(b[3]>=3?7:3))!=0||b[125]!=0&&(b[6]&1)==0)throw Invalid("WC3 target hover/range error needs readable target identity.");
-            int rangeKnown=(b[121]&15)|(b[3]>=2?b[123]&48:0),inRange=(b[121]>>4)|(b[3]>=2?b[124]&48:0);
-            if((inRange&~rangeKnown)!=0||((b[122]>>4)&~(b[122]&15))!=0||b[123]>(b[3]>=2?63:15)||b[124]>(b[3]>=2?63:15)||(b[123]&b[124]&15)!=0)throw Invalid("WC3 per-action range or repeat masks disagree.");
+            int extraRangeMask=b[3]>=4?112:b[3]>=2?48:0;
+            int rangeKnown=(b[121]&15)|(b[123]&extraRangeMask),inRange=(b[121]>>4)|(b[124]&extraRangeMask);
+            if((inRange&~rangeKnown)!=0||((b[122]>>4)&~(b[122]&15))!=0||b[123]>(15|extraRangeMask)||b[124]>(15|extraRangeMask)||(b[123]&b[124]&15)!=0)throw Invalid("WC3 per-action range or repeat masks disagree.");
             if(b[109]>1||b[109]==0&&(U32(b,110)!=0||U32(b,114)!=0)||(U32(b,110)==0)!=(U32(b,114)==0))throw Invalid("WC3 melee evidence is inconsistent.");
             int durability=U16(b,90),repair=b[92],rx=U16(b,93),ry=U16(b,95),rw=U16(b,97),rh=U16(b,99);
             if((b[89]!=0&&b[89]!=1&&b[89]!=3)||b[89]==0&&durability!=0||durability>10000||b[89]==3&&durability!=0)throw Invalid("WC3 durability evidence is inconsistent.");
@@ -90,7 +92,7 @@ namespace WoWProbe
             if((c&8)!=0 ? x==65535 || y==65535 : x!=65535 || y!=65535)throw Invalid("WC3 position capability disagrees with coordinates.");
             if((f&96)==96 || ((f&96)!=0)!=(end!=0))throw Invalid("WC3 cast end disagrees with cast/channel state.");
             int known=b[17],ready=b[18],usable=b[19];
-            if((known&~15)!=0 || (ready&~known)!=0 || (usable&~known)!=0)throw Invalid("WC3 action masks disagree.");
+            if((known&~(b[3]>=4?127:15))!=0 || (ready&~known)!=0 || (usable&~known)!=0)throw Invalid("WC3 action masks disagree.");
             Match(c,128,known!=0,"action knowledge");
             uint opened=U32(b,24),closed=U32(b,28),success=U32(b,32),failed=U32(b,36),skin=U32(b,40);
             if((k&8)==0 && (opened!=0 || closed!=0))throw Invalid("Unknown WC3 loot counters must be zero.");
@@ -100,6 +102,7 @@ namespace WoWProbe
             if((k&1)!=0 ? pw==0 || ph==0 || pw>512 || ph>512 || px+pw>65535 || py+ph>65535 : px!=0 || py!=0 || pw!=0 || ph!=0)
                 throw Invalid("WC3 portrait capability disagrees with client pixel rectangle.");
             return new CombatPacket { Sequence=U16(b,4),Capabilities=c,Flags=f,RangeSlot=b[16],KnownActionsMask=known,
+                ExtendedActionStates=b[3]>=4,
                 MeleeEventsKnown=b[109]==1,MeleeHitToken=U32(b,110),MeleeHits=U32(b,114),
                 InteractBindingKnown=(b[119]&1)!=0,InteractBindingCorrect=(b[119]&2)!=0,
                 ClickToMoveKnown=(b[120]&1)!=0,ClickToMoveEnabled=(b[120]&2)!=0,
@@ -125,6 +128,7 @@ namespace WoWProbe
     {
         public bool MeleeEventsKnown;public uint MeleeHitToken,MeleeHits;
         public bool ExtendedActionRanges,RangeErrorSupported,RangeErrorActive;
+        public bool ExtendedActionStates;
         public int ActionRangeKnownMask,ActionsInRangeMask,RepeatKnownMask,RepeatingMask,RangedActionsMask,MeleeActionsMask;
         public int Sequence,ReadFailures,Health=255,Power=255,PowerType=255,TargetHealth=255,MapMode,RangeSlot,
             KnownActionsMask,ReadyActionsMask,UsableActionsMask,FoodCount=-1,TargetReaction=255;
@@ -163,6 +167,7 @@ namespace WoWProbe
             o.RangeSlot=extra.RangeSlot;
             o.CastingKnown=(c&64)!=0;o.Casting=o.CastingKnown && (f&32)!=0;o.Channeling=o.CastingKnown && (f&64)!=0;
             o.ActionsKnown=(c&128)!=0;o.KnownActionsMask=extra.KnownActionsMask;o.ReadyActionsMask=extra.ReadyActionsMask;o.UsableActionsMask=extra.UsableActionsMask;
+            o.ExtendedActionStates=extra.ExtendedActionStates;
             o.RangeErrorSupported=extra.RangeErrorSupported;o.RangeErrorActive=extra.RangeErrorActive;o.ExtendedActionRanges=extra.ExtendedActionRanges;o.ActionRangeKnownMask=extra.ActionRangeKnownMask;o.ActionsInRangeMask=extra.ActionsInRangeMask;o.RepeatKnownMask=extra.RepeatKnownMask;o.RepeatingMask=extra.RepeatingMask;o.RangedActionsMask=extra.RangedActionsMask;o.MeleeActionsMask=extra.MeleeActionsMask;
             o.LootEventsKnown=(k&8)!=0;o.CastEventsKnown=(k&16)!=0;o.SkinSuccessKnown=(k&2)!=0;
             o.LootOpened=extra.LootOpened;o.LootClosed=extra.LootClosed;o.CastSuccess=extra.CastSuccess;o.CastFailed=extra.CastFailed;o.SkinSuccess=extra.SkinSuccess;

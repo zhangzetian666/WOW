@@ -8,6 +8,7 @@ namespace WoWProbe
     {
         public bool AttackHostile;public bool MeleeConfirmed;public bool RangedSkill;public bool AllowApproach;public bool InputStarted;
         public bool HunterSkill,HunterDefense;public int HealthAtIssue;
+        public bool CastFailuresKnown;public uint CastFailuresAtIssue;
         public QuickAction Action; public ushort Key; public uint Token;public HashSet<uint> IgnoredTargets; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement,PauseForward,CombatRecovery;public QuickRouteFollower RouteContext;
     }
 
@@ -35,12 +36,14 @@ namespace WoWProbe
         bool hunterIssued,hunterIssuedDefense,hunterRangeBlocked,hunterErrorSeen;
         int hunterIssuedOpening,hunterIssuedLoop,hunterIssuedIndex;long hunterIssuedAt;uint hunterIssuedToken;
         double hunterBlockedX,hunterBlockedY;
+        bool hunterIssuedFailuresKnown;uint hunterIssuedFailures;
         public bool HunterRecoveryPending {get{return hunterMode&&hunterState.AspectPending;}}
         public void HunterInputCompleted(QuickCommand command)
         {
             if(command.Action==QuickAction.HunterAspect){hunterState.AspectInputCompleted();return;}
             if(!command.HunterSkill||command.Token!=token)return;
             hunterIssued=true;hunterIssuedDefense=command.HunterDefense;hunterIssuedOpening=opening;hunterIssuedLoop=loopIndex;hunterIssuedIndex=hunterIndex;hunterIssuedAt=last;hunterIssuedToken=token;
+            hunterIssuedFailuresKnown=command.CastFailuresKnown;hunterIssuedFailures=command.CastFailuresAtIssue;
             if(command.HunterDefense)hunterIndex++;
             else if(opening<openingKeys.Length)opening++;else loopIndex++;
         }
@@ -112,7 +115,7 @@ namespace WoWProbe
             if(hunterMode)
             {
                 if(!o.InCombat){hunterDefending=hunterAnnounced=false;hunterIndex=0;}
-                else if(!hunterDefending&&(DirectAttacker(o)||lastHealth<=100&&o.Health<lastHealth))
+                else if(!hunterDefending&&HealthDropped(o,lastHealth))
                 {hunterDefending=true;hunterRangeBlocked=false;hunterIndex=0;openingPending=false;sliceRecovery=0;nextSkill=now;nextFace=now+1500;escapePhase=0;escapeCombat=false;}
                 lastHealth=o.Health;
             }
@@ -332,8 +335,8 @@ namespace WoWProbe
         }
         public bool HasDeathEvidence(FarmObservation o,uint expected)
         {return expected!=0&&expected==token&&o!=null&&o.Fresh&&(o.DeathEventsKnown&&o.DeathToken==expected&&o.TargetDeaths!=deathBase||o.KillCreditsKnown&&lockedName!=0&&o.KillCreditNameHash==lockedName&&o.KillCredits!=creditBase);}
-        static bool DirectAttacker(FarmObservation o)
-        {return o.InCombat&&o.TargetExists&&!o.TargetIsPlayer&&o.AttackabilityKnown&&o.TargetCanAttack&&o.TargetDeadKnown&&!o.TargetDead&&o.TargetVictimKnown&&o.TargetTargetsPlayer;}
+        static bool HealthDropped(FarmObservation o,int previous)
+        {return o.InCombat&&previous>=0&&previous<=100&&o.Health>=0&&o.Health<=100&&o.Health<previous;}
         QuickCommand HunterCombat(FarmObservation o,long now)
         {
             if(!o.RangeErrorActive)hunterErrorSeen=false;
@@ -344,10 +347,16 @@ namespace WoWProbe
                 {
                     opening=hunterIssuedOpening;loopIndex=hunterIssuedLoop;hunterIndex=hunterIssuedIndex;
                     hunterRangeBlocked=true;hunterBlockedX=o.X;hunterBlockedY=o.Y;nextFace=now;nextSkill=now;
+                    hunterIssued=false;
                 }
             }
+            if(hunterIssued&&hunterIssuedFailuresKnown&&o.CastEventsKnown&&o.CastFailed!=hunterIssuedFailures&&hunterIssuedToken==token&&now-hunterIssuedAt<=2500&&(!hunterDefending||hunterIssuedDefense))
+            {
+                opening=hunterIssuedOpening;loopIndex=hunterIssuedLoop;hunterIndex=hunterIssuedIndex;hunterIssued=false;nextSkill=now+500;
+                var failed=Cmd(QuickAction.None,"猎人技能施放失败：保留刚才的按键，等待冷却和射程后重试，不跳过后续技能。",0);failed.Report=true;return failed;
+            }
             if(hunterDefending&&!hunterAnnounced)
-            {hunterAnnounced=true;nextFace=now+1500;var note=Cmd(QuickAction.None,"猎人受到攻击：放弃本轮剩余技能行，立即改为1、2循环，脱战后新怪恢复技能设置。",0);note.Report=true;return note;}
+            {hunterAnnounced=true;nextFace=now+1500;var note=Cmd(QuickAction.None,"猎人检测到战斗中生命下降：放弃本轮剩余技能行，改为1、2循环，脱战后新怪恢复技能设置。",0);note.Report=true;return note;}
             char digit=hunterDefending?"12"[hunterIndex%2]:opening<openingKeys.Length?openingKeys[opening]:loopKeys[loopIndex%loopKeys.Length];
             ushort key=(ushort)(digit=='='?187:digit=='-'?189:digit);int bit=ActionBit(key);
             bool rangeKnown=bit!=0&&(o.ActionRangeKnownMask&bit)!=0;
@@ -364,11 +373,12 @@ namespace WoWProbe
             if(now<nextSkill)return Cmd(QuickAction.None,"等待猎人技能间隔。",0);
             if((o.RepeatKnownMask&o.RepeatingMask&bit)!=0)
             {if(hunterDefending)hunterIndex++;else if(opening<openingKeys.Length)opening++;else loopIndex++;nextSkill=now+interval;return Cmd(QuickAction.None,"当前自动射击已开启，保留效果并继续下一按键。",0);}
-            if(!RangedKeyAllowed(key,o,true))return Cmd(QuickAction.None,"等待当前猎人技能可用，不丢弃技能顺序。",0);
+            if(!RangedKeyAllowed(key,o,true))
+            {var wait=Cmd(QuickAction.None,"猎人技能"+digit+"冷却中或暂不可用：等待就绪，保留当前技能顺序。",0);if(now>=nextRangedReport){wait.Report=true;nextRangedReport=now+3000;}return wait;}
             nextSkill=now+interval;var skill=Cmd(QuickAction.Skill,"猎人"+(hunterDefending?"受袭循环":"技能顺序")+"：按"+digit+"。",key);
-            skill.HunterSkill=true;skill.HunterDefense=hunterDefending;skill.HealthAtIssue=o.Health;return skill;
+            skill.HunterSkill=true;skill.HunterDefense=hunterDefending;skill.HealthAtIssue=o.Health;skill.CastFailuresKnown=o.CastEventsKnown;skill.CastFailuresAtIssue=o.CastFailed;return skill;
         }
-        static int ActionBit(ushort key){return key>=49&&key<=54?1<<(key-49):0;}
+        static int ActionBit(ushort key){return key>=49&&key<=55?1<<(key-49):0;}
         int FirstRangedAction(FarmObservation o){foreach(char key in openingKeys+loopKeys){int bit=ActionBit(key);if((o.RangedActionsMask&bit)!=0)return bit;}return 0;}
         static bool CloseContact(FarmObservation o){return (o.MeleeActionsMask&o.ActionRangeKnownMask&o.ActionsInRangeMask)!=0;}
         static bool RangedKeyAllowed(ushort key,FarmObservation o,bool contact,bool inputStarted=false)
@@ -432,7 +442,7 @@ namespace WoWProbe
             {
                 if(o.RangeErrorActive&&!c.HunterDefense&&!c.InputStarted)return false;
                 if(c.HunterDefense&&!o.InCombat)return false;
-                if(!c.HunterDefense&&(DirectAttacker(o)||o.InCombat&&o.Health<c.HealthAtIssue))return false;
+                if(!c.HunterDefense&&HealthDropped(o,c.HealthAtIssue))return false;
                 if(!RangedKeyAllowed(c.Key,o,true,c.InputStarted))return false;
             }
             if(c.Action==QuickAction.StealthEnter||c.Action==QuickAction.StealthHold)return !o.InCombat;

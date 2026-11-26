@@ -427,7 +427,7 @@ test("WC3 keeps unknown APIs unknown and never requests legacy target coordinate
     local env=environment(); env.GetPlayerMapPosition=function(unit) eq(unit,"player"); return 0.2,0.4 end
     local wp=load(env); assert(type(wp.BuildCombatPacket)=="function","WC3 builder missing")
     local p=wp.BuildCombatPacket(wp.BuildPacket())
-    eq(#p,128); eq(p[1],87);eq(p[2],67);eq(p[3],51);eq(p[4],3)
+    eq(#p,128); eq(p[1],87);eq(p[2],67);eq(p[3],51);eq(p[4],4)
     eq(p[7],0);eq(p[8],0);eq(word(p,12),65535);eq(word(p,14),65535)
     eq(p[18],0);eq(p[19],0);eq(p[20],0)
 end)
@@ -461,11 +461,22 @@ test("WC3 v3 captures actual too far UI feedback only for the current target and
     wp.OnEvent(nil,"UI_ERROR_MESSAGE","Other error");p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[126],4),false)
 end)
 
+test("WC3 v4 reads cooldown usability and range independently for paged keys five six seven",function()
+    local env=combatEnvironment();env.ActionButton5={action=29};env.ActionButton6={action=30};env.ActionButton7={action=31}
+    env.GetActionCooldown=function(slot)return slot==29 and 12 or 0,slot==29 and 2 or 0,1 end
+    env.IsUsableAction=function(slot)return slot~=30,false end
+    env.IsActionInRange=function(slot)if slot==30 then return nil end;return slot==29 and 0 or 1 end
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket())
+    eq(p[4],4);eq(p[18],127);eq(p[19],111);eq(p[20],95)
+    eq(math.floor(p[124]/16),5);eq(math.floor(p[125]/16),4)
+    env.GetActionCooldown=function(slot)if slot==30 then return nil end;return 0,0,1 end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[18],95);eq(p[19],95);eq(p[20],95)
+end)
 test("WC3 v2 reads paged keys five six and keeps unknown range separate",function()
     local env=combatEnvironment();env.ActionButton5={action=17};env.ActionButton6={action=18}
     env.IsActionInRange=function(slot)return slot==18 and 1 or 0 end
     local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket())
-    eq(p[4],3);eq(math.floor(p[124]/16),3);eq(math.floor(p[125]/16),2)
+    eq(p[4],4);eq(math.floor(p[124]/16),3);eq(math.floor(p[125]/16),2)
     env.IsActionInRange=function(slot)if slot==17 then return nil else return 0 end end
     p=wp.BuildCombatPacket(wp.BuildPacket());eq(math.floor(p[124]/16),2);eq(math.floor(p[125]/16),0)
 end)

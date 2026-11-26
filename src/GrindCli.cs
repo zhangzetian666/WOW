@@ -140,7 +140,7 @@ namespace WoWProbe
             {
                 nativeReport=message=>{journal.WriteLine(DateTimeOffset.Now.ToString("HH:mm:ss.fff")+" [input] "+message);journal.Flush();};
                 Action<string> write=message=>{journal.WriteLine(DateTimeOffset.Now.ToString("HH:mm:ss.fff")+" "+message);journal.Flush();report(message);};
-                frames.WriteLine("time\tsequence\thealth\tcombat\tdead\tghost\ttargetExists\ttargetToken\ttargetName\ttargetDeadKnown\ttargetDead\tattackable\tcastSuccess\tdeathToken\tdeathCount\tx\ty\tkillCreditNameHash\tkillCredits\tlootOpened\tchatOpen\tlootClosed\tskinKnown\tskinnable\tskinSuccess\tcastFailed\tfoodCount\ttargetReaction\tfacing\tclaimKnown\tclaimedByOther\ttargetCombatKnown\ttargetCombat\tvictimKnown\ttargetsPlayer\tgearKnown\tgearRed\tdurability");
+                frames.WriteLine("time\tsequence\thealth\tcombat\tdead\tghost\ttargetExists\ttargetToken\ttargetName\ttargetDeadKnown\ttargetDead\tattackable\tcastSuccess\tdeathToken\tdeathCount\tx\ty\tkillCreditNameHash\tkillCredits\tlootOpened\tchatOpen\tlootClosed\tskinKnown\tskinnable\tskinSuccess\tcastFailed\tfoodCount\ttargetReaction\tfacing\tclaimKnown\tclaimedByOther\ttargetCombatKnown\ttargetCombat\tvictimKnown\ttargetsPlayer\tgearKnown\tgearRed\tdurability\tactionKnown\tactionReady\tactionUsable\trangeKnown\tinRange\trangeError");
 
                 try
                 {
@@ -149,8 +149,8 @@ namespace WoWProbe
                     QuickRoutePlan.Save(prefix+"-patrol.json",plan);
                     if(breakSchedule!=null)write(breakSchedule.Summary);
                     if(plan.RandomRoutes){string variants=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"random-routes");QuickRouteVariants.Export(variants,"patrol",QuickRouteVariants.For(plan,plan.Route,20));if(plan.Vendor.RouteComplete)QuickRouteVariants.Export(variants,"npc",QuickRouteVariants.For(plan,QuickRouteVariants.Service(plan,plan.Vendor),10));}
-                    if(plan.HunterMode&&(!anchor.ExtendedActionRanges||!anchor.RangeErrorSupported))throw new InvalidOperationException("猎人模式需要新版射程数据，请在游戏输入/reload加载0.5.13插件后开始。");
-                    if(plan.HunterMode)write("猎人模式：复活后恢复满血按8；受袭切换1、2，5/6/3按当前技能射程接近。");
+                    if(plan.HunterMode&&(!anchor.ExtendedActionRanges||!anchor.RangeErrorSupported||!anchor.ExtendedActionStates))throw new InvalidOperationException("猎人模式需要新版射程和技能冷却数据，请在游戏输入/reload加载0.5.14插件后开始。");
+                    if(plan.HunterMode)write("猎人模式：复活后恢复满血按8；战斗中实际掉血才切换1、2；正常按技能行执行，冷却等待、距离不足先接近。");
                     if(anchor.BagFull&&!plan.Vendor.Enabled)throw new InvalidOperationException("背包已满，请先填写并启用售卖NPC坐标。");
                     if(!anchor.ChatOpenKnown||anchor.ChatOpen)throw new InvalidOperationException("请先关闭聊天输入框，并确认新版插件已加载。");
                     if(anchor.InteractBindingKnown&&!anchor.InteractBindingCorrect)throw new InvalidOperationException(GrindInputGuard.InteractBindingError);
@@ -215,7 +215,7 @@ namespace WoWProbe
                         if(observed.Sequence!=frameSequence)
                         {
                             frameSequence=observed.Sequence;
-                            frames.WriteLine(String.Join("\t",new object[]{DateTimeOffset.Now.ToString("HH:mm:ss.fff"),observed.Sequence,observed.Health,observed.InCombat,observed.PlayerDead,observed.PlayerGhost,observed.TargetExists,observed.TargetToken,observed.TargetName,observed.TargetDeadKnown,observed.TargetDead,observed.TargetCanAttack,observed.CastSuccess,observed.DeathToken,observed.TargetDeaths,observed.X,observed.Y,observed.KillCreditNameHash,observed.KillCredits,observed.LootOpened,observed.ChatOpen,observed.LootClosed,observed.SkinKnown,observed.Skinnable,observed.SkinSuccess,observed.CastFailed,observed.FoodCount,observed.TargetReaction,observed.Facing,observed.TargetClaimKnown,observed.TargetClaimedByOther,observed.TargetCombatKnown,observed.TargetInCombat,observed.TargetVictimKnown,observed.TargetTargetsPlayer,observed.GearKnown,observed.GearRed,observed.Durability}));frames.Flush();
+                            frames.WriteLine(String.Join("\t",new object[]{DateTimeOffset.Now.ToString("HH:mm:ss.fff"),observed.Sequence,observed.Health,observed.InCombat,observed.PlayerDead,observed.PlayerGhost,observed.TargetExists,observed.TargetToken,observed.TargetName,observed.TargetDeadKnown,observed.TargetDead,observed.TargetCanAttack,observed.CastSuccess,observed.DeathToken,observed.TargetDeaths,observed.X,observed.Y,observed.KillCreditNameHash,observed.KillCredits,observed.LootOpened,observed.ChatOpen,observed.LootClosed,observed.SkinKnown,observed.Skinnable,observed.SkinSuccess,observed.CastFailed,observed.FoodCount,observed.TargetReaction,observed.Facing,observed.TargetClaimKnown,observed.TargetClaimedByOther,observed.TargetCombatKnown,observed.TargetInCombat,observed.TargetVictimKnown,observed.TargetTargetsPlayer,observed.GearKnown,observed.GearRed,observed.Durability,observed.KnownActionsMask,observed.ReadyActionsMask,observed.UsableActionsMask,observed.ActionRangeKnownMask,observed.ActionsInRangeMask,observed.RangeErrorActive}));frames.Flush();
                             if(observed.TargetExists&&observed.TargetToken!=picturedToken){picturedToken=observed.TargetToken;write("观察目标："+observed.TargetName+" token="+picturedToken+" reaction="+observed.TargetReaction);}
                         }
                         if(recovery!=null||observed.PlayerDead||observed.PlayerGhost)

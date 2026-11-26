@@ -23,6 +23,16 @@ class CombatTelemetryTests
     static void Reject(Action<byte[]> change) { var b=Extra();change(b);Checksum(b);try{Decode(b);}catch(TargetInvocationException e){if(e.InnerException is FormatException)return;throw;}throw new Exception("Invalid WC3 packet accepted"); }
     static int Main(string[] args)
     {
+        Test("WC3 v4 exposes five six seven readiness and seventh range without changing older packets",delegate{
+            var b=Extra();b[3]=4;b[6]=128;b[17]=127;b[18]=111;b[19]=95;b[123]=112;b[124]=64;Checksum(b);
+            var o=Observe(ProbePacket.Decode(Core()),Decode(b),true);
+            Equal(Get(o,"ExtendedActionStates"),true,"v4 capability");Equal(Get(o,"KnownActionsMask"),127,"all seven known");
+            Equal(Get(o,"ReadyActionsMask"),111,"five cooling down");Equal(Get(o,"UsableActionsMask"),95,"six not usable");
+            Equal(Get(o,"ActionRangeKnownMask"),112,"five six seven ranges known");Equal(Get(o,"ActionsInRangeMask"),64,"seven in range");
+            foreach(byte version in new byte[]{1,2,3}){b=Extra();b[3]=version;Checksum(b);Equal(Get(Decode(b),"ExtendedActionStates"),false,"legacy state masks");}
+            Reject(v=>{v[3]=4;v[6]=128;v[17]=128;});Reject(v=>{v[3]=3;v[6]=128;v[17]=16;});
+            Reject(v=>{v[3]=4;v[6]=128;v[17]=16;v[18]=32;});Reject(v=>{v[3]=4;v[124]=64;});
+        });
         Test("WC3 v3 reports target scoped range feedback without changing hover flags",delegate{
             var b=Extra();b[3]=3;b[6]=1;U32(b,8,123);b[125]=4;Checksum(b);var o=Observe(ProbePacket.Decode(Core()),Decode(b),true);
             Equal(Get(o,"RangeErrorSupported"),true,"v3 capability");Equal(Get(o,"RangeErrorActive"),true,"too far feedback");Equal(Get(o,"TargetHoverKnown"),false,"independent hover");

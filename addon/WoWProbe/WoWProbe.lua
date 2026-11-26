@@ -529,7 +529,7 @@ function P.BuildCombatPacket(core)
     local caps,flags,extra=0,0,0
     local exists=has(core[126],8) and has(core[7],8)
     if not exists and P.portraitPanel then P.portraitPanel:Hide() end
-    put(0,87);put(1,67);put(2,51);put(3,3);u16(4,core[5]+core[6]*256)
+    put(0,87);put(1,67);put(2,51);put(3,4);u16(4,core[5]+core[6]*256)
     put(16,P.rangeSlot);norm(12,nil);norm(14,nil)
     if exists then
         local guid,token=section("identity",function()
@@ -648,22 +648,25 @@ function P.BuildCombatPacket(core)
         local r,u=section("action"..i,function() return actionState(actionSlot(i)) end)
         if r~=nil then local mask=2^(i-1);known=known+mask;if r then ready=ready+mask end;if u then usable=usable+mask end end
     end
-    if known~=0 then caps=caps+128 end
-    put(17,known);put(18,ready);put(19,usable)
     put(121,rangeKnown+16*inRange);put(122,repeatKnown+16*repeating);put(123,ranged);put(124,melee)
-    -- WC3 v2 retains all v1 offsets. Bits 4/5 of these bytes report
-    -- range knowledge/value for physical keys 5/6 on the current action page.
+    -- WC3 v4 adds key 7 range and keys 5/6/7 cooldown/usability, including GCD.
+    -- All action queries use the effective slot on the current action page.
     local extraKnown,extraRange=0,0
-    if exists then for i=5,6 do
+    for i=5,7 do
         local slot=actionSlot(i)
-        if slot then
+        local bit=2^(i-1)
+        local r,u=section("action"..i,function() return actionState(slot) end)
+        if r~=nil then known=known+bit;if r then ready=ready+bit end;if u then usable=usable+bit end end
+        if exists and slot then
             local value=section("actionRange"..i,function()
                 local ok,v=call("IsActionInRange",IsActionInRange,slot,"target")
                 if ok then local b,k=strictBool(v,false);if k then return b end end
             end)
-            if value~=nil then local bit=2^(i-1);extraKnown=extraKnown+bit;if value then extraRange=extraRange+bit end end
+            if value~=nil then extraKnown=extraKnown+bit;if value then extraRange=extraRange+bit end end
         end
-    end end
+    end
+    if known~=0 then caps=caps+128 end
+    put(17,known);put(18,ready);put(19,usable)
     put(123,ranged+extraKnown);put(124,melee+extraRange)
     local rangeNow,rangeClock=rawTime()
     if exists and P.trackedTargetToken and rangeClock and P.rangeErrorToken==P.trackedTargetToken and P.rangeErrorUntil and rangeNow<P.rangeErrorUntil then
@@ -916,7 +919,7 @@ local function printLine(text)
 end
 function P.ResetDiagnostics()
     local visible = type(WoWProbeDB) == "table" and WoWProbeDB.visible ~= false
-    WoWProbeDB = { schema = 1, addonVersion = "0.5.13", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
+    WoWProbeDB = { schema = 1, addonVersion = "0.5.14", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
     readClient(); captureBindings(); captureAPIs(); if P.panel then P.ScalePanel() end
 end
 function P.Command(command)
@@ -1054,7 +1057,7 @@ function P.Initialize()
     WoWProbeDB = old; WoWProbeDB.visible = visible
     if integer(old.rangeSlot,4) and old.rangeSlot>=1 then P.rangeSlot=old.rangeSlot end
     WoWProbeDB.previousSession = previous
-    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.13"
+    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.14"
     WoWProbeDB.errors, WoWProbeDB.bindings, WoWProbeDB.capabilities = {}, {}, {}
     readClient(); captureBindings(); captureAPIs()
     local ok, reason = pcall(createPanel)
