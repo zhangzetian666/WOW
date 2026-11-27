@@ -7,7 +7,7 @@ namespace WoWProbe
     public sealed class QuickCommand
     {
         public bool AttackHostile;public bool MeleeConfirmed;public bool RangedSkill;public bool AllowApproach;public bool InputStarted;
-        public bool HunterSkill,HunterDefense;public int HealthAtIssue;
+        public bool HunterSkill,HunterDefense,HunterPetMelee;public int HealthAtIssue;
         public bool UsePetReviveChat,PriorityPetRecovery,FixedPostDeath;public bool CastFailuresKnown;public uint CastFailuresAtIssue;
         public QuickAction Action; public ushort Key; public uint Token;public HashSet<uint> IgnoredTargets; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement,PauseForward,CombatRecovery;public QuickRouteFollower RouteContext;
     }
@@ -32,7 +32,8 @@ namespace WoWProbe
         readonly int restBelow;readonly ushort drinkKey;
         readonly bool permitFullBags;readonly bool attackHostile;
         readonly bool hunterMode;readonly QuickHunterState hunterState;
-        bool hunterDefending,hunterAnnounced;int hunterIndex,lastHealth=255;
+        bool hunterDefending,hunterPetMelee,hunterAnnounced;int hunterIndex,lastHealth=255;
+        bool HunterUsingMelee {get{return hunterDefending||hunterPetMelee;}}
         bool hunterIssued,hunterIssuedDefense,hunterRangeBlocked,hunterErrorSeen;
         int hunterIssuedOpening,hunterIssuedLoop,hunterIssuedIndex;long hunterIssuedAt;uint hunterIssuedToken;
         double hunterBlockedX,hunterBlockedY;
@@ -100,7 +101,7 @@ namespace WoWProbe
             if(o.BagFull&&!o.InCombat&&!permitFullBags&&!HunterRecoveryPending)return Stop("背包已满。");
             if(o.Health<0||o.Health>100)return Stop("生命值不可读，不能确认恢复完成。");
             if(!MapIdentity.Matches(o.MapId,o.MapMode,o.Zone,map,mode,zone))return Stop("地图发生变化。");
-            if(hunterState.Pet.PriorityRequired||hunterState.Pet.PostDeathStarted)
+            if(hunterState.Pet.PriorityRequired&&(!o.InCombat||hunterState.Pet.Waiting)||hunterState.Pet.PostDeathStarted)
             {
                 if(!o.CastingKnown)return Stop("施法状态不可读。");
                 if(sequence==o.Sequence)return Cmd(QuickAction.None,"等待新一帧宠物状态。",0);sequence=o.Sequence;
@@ -126,11 +127,14 @@ namespace WoWProbe
             if(sequence==o.Sequence)return Cmd(QuickAction.None,"等待新一帧状态。",0);sequence=o.Sequence;
             if(hunterMode)
             {
-                if(!o.InCombat){hunterDefending=hunterAnnounced=false;hunterIndex=0;}
+                if(!o.InCombat){hunterDefending=false;if(!hunterPetMelee){hunterAnnounced=false;hunterIndex=0;}}
                 else if(!hunterDefending&&HealthDropped(o,lastHealth))
                 {hunterDefending=true;hunterRangeBlocked=false;hunterIndex=0;openingPending=false;sliceRecovery=0;nextSkill=now;nextFace=now+1500;escapePhase=0;escapeCombat=false;}
                 lastHealth=o.Health;
             }
+            bool petMelee=(hunterMode||rangedCombat)&&PetMeleeNeeded(o);
+            if(petMelee!=hunterPetMelee)
+            {hunterPetMelee=petMelee;hunterAnnounced=hunterIssued=hunterRangeBlocked=false;hunterIndex=0;nextSkill=nextFace=now;}
             if(!o.CastingKnown)return Stop("施法状态不可读。");
             if(o.Health>=30&&vanishAt<0)vanishLatched=false;
             if(vanishAt>=0)
@@ -152,7 +156,7 @@ namespace WoWProbe
             if(urgentDefenseScan){urgentDefenseScan=false;if(o.InCombat)return Cmd(QuickAction.Scan,"剥皮中断后立即选择附近攻击者。",9);}
             bool lockedDead=token!=0&&(HasDeathEvidence(o,token)||o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken==token&&o.TargetDeadKnown&&o.TargetDead);
             if(o.InCombat&&token!=0&&!looted&&!lockedDead&&!o.TargetExists){if(route!=null)route.Interrupt(o);token=0;nextScan=Math.Min(nextScan,now);}
-            if(o.InCombat&&(!hunterMode||hunterDefending)&&!looted&&!lockedDead&&o.TargetExists&&o.TargetDeadKnown&&!o.TargetDead&&o.TargetVictimKnown&&!o.TargetTargetsPlayer)
+            if(o.InCombat&&(!hunterMode||hunterDefending)&&!looted&&!lockedDead&&o.TargetExists&&o.TargetDeadKnown&&!o.TargetDead&&o.TargetVictimKnown&&!o.TargetTargetsPlayer&&!AttackingOwnPet(o))
             {
                 if(route!=null)route.Interrupt(o);token=0;resting=false;initialRest=true;
                 if(now-lastDefenseScan<300)return Cmd(QuickAction.None,"已受攻击，等待切换到攻击本人的怪物。",0);
@@ -182,7 +186,7 @@ namespace WoWProbe
                 }
                 initialRest=false;
             }
-            if(hunterDefending&&(o.Casting||o.Channeling))return Cmd(QuickAction.InterruptSkin,"猎人受袭：中断未完成读条，改为1、2循环。",27);
+            if(HunterUsingMelee&&(o.Casting||o.Channeling))return Cmd(QuickAction.InterruptSkin,"猎人近战：中断未完成远程读条，改为1、2循环。",27);
             if((o.Casting||o.Channeling)&&!(o.InCombat&&looted&&corpse!=null))return Cmd(QuickAction.None,"等待当前施法。",0);
             if(hunterState.Pet.Required&&!o.InCombat&&o.Health==100){var petCommand=hunterState.Pet.Step(o,now);petCommand.RouteContext=route;return petCommand;}
             if(hunterMode&&hunterState.AspectPending&&!o.InCombat&&o.Health==100)
@@ -221,7 +225,7 @@ namespace WoWProbe
                 }
                 deadFrames=0;
                 if(!o.TargetCanAttack)return Stop("目标不再可攻击。");
-                if(hunterMode)return HunterCombat(o,now);
+                if(hunterMode||hunterPetMelee)return HunterCombat(o,now);
                 if(!rangedCombat&&o.InCombat&&o.PowerType==3&&o.Health<45&&now>=nextDefensive)
                 {nextDefensive=now+120000;return Cmd(QuickAction.Defensive,"血量低于45%，尝试9闪避；继续当前战斗。",57);}
                 if(o.MeleeEventsKnown&&o.MeleeHitToken==token&&o.MeleeHits!=meleeBaseline)meleeConfirmed=true;
@@ -357,26 +361,26 @@ namespace WoWProbe
             if(o.RangeErrorActive&&!hunterErrorSeen)
             {
                 hunterErrorSeen=true;
-                if(hunterIssued&&hunterIssuedToken==token&&now-hunterIssuedAt<=2500&&(!hunterDefending||hunterIssuedDefense))
+                if(hunterIssued&&hunterIssuedToken==token&&now-hunterIssuedAt<=2500&&(!HunterUsingMelee||hunterIssuedDefense))
                 {
                     opening=hunterIssuedOpening;loopIndex=hunterIssuedLoop;hunterIndex=hunterIssuedIndex;
                     hunterRangeBlocked=true;hunterBlockedX=o.X;hunterBlockedY=o.Y;nextFace=now;nextSkill=now;
                     hunterIssued=false;
                 }
             }
-            if(hunterIssued&&hunterIssuedFailuresKnown&&o.CastEventsKnown&&o.CastFailed!=hunterIssuedFailures&&hunterIssuedToken==token&&now-hunterIssuedAt<=2500&&(!hunterDefending||hunterIssuedDefense))
+            if(hunterIssued&&hunterIssuedFailuresKnown&&o.CastEventsKnown&&o.CastFailed!=hunterIssuedFailures&&hunterIssuedToken==token&&now-hunterIssuedAt<=2500&&(!HunterUsingMelee||hunterIssuedDefense))
             {
                 opening=hunterIssuedOpening;loopIndex=hunterIssuedLoop;hunterIndex=hunterIssuedIndex;hunterIssued=false;nextSkill=now+500;
                 var failed=Cmd(QuickAction.None,"猎人技能施放失败：保留刚才的按键，等待冷却和射程后重试，不跳过后续技能。",0);failed.Report=true;return failed;
             }
-            if(hunterDefending&&!hunterAnnounced)
-            {hunterAnnounced=true;nextFace=now+1500;var note=Cmd(QuickAction.None,"猎人检测到战斗中生命下降：放弃本轮剩余技能行，改为1、2循环，脱战后新怪恢复技能设置。",0);note.Report=true;return note;}
-            char digit=hunterDefending?"12"[hunterIndex%2]:opening<openingKeys.Length?openingKeys[opening]:loopKeys[loopIndex%loopKeys.Length];
+            if(HunterUsingMelee&&!hunterAnnounced)
+            {hunterAnnounced=true;nextFace=hunterPetMelee?now:now+1500;var note=Cmd(QuickAction.None,hunterPetMelee?"怪物正在攻击自己的宝宝，已在近战范围且远程射程不足：切换1、2近战协助。":"猎人检测到战斗中生命下降：放弃本轮剩余技能行，改为1、2循环，脱战后新怪恢复技能设置。",0);note.Report=true;return note;}
+            char digit=HunterUsingMelee?"12"[hunterIndex%2]:opening<openingKeys.Length?openingKeys[opening]:loopKeys[loopIndex%loopKeys.Length];
             ushort key=(ushort)(digit=='='?187:digit=='-'?189:digit);int bit=ActionBit(key);
             bool rangeKnown=bit!=0&&(o.ActionRangeKnownMask&bit)!=0;
             if(hunterRangeBlocked&&!o.RangeErrorActive&&rangeKnown&&(o.ActionsInRangeMask&bit)!=0&&
                 (o.X-hunterBlockedX)*(o.X-hunterBlockedX)+(o.Y-hunterBlockedY)*(o.Y-hunterBlockedY)>1e-8)hunterRangeBlocked=false;
-            if(!hunterRangeBlocked&&!hunterDefending&&(digit=='5'||digit=='6'||digit=='3')&&!rangeKnown)
+            if(!hunterRangeBlocked&&!HunterUsingMelee&&(digit=='5'||digit=='6'||digit=='3')&&!rangeKnown)
             {var wait=Cmd(QuickAction.None,"猎人技能"+digit+"射程暂不可读，等待插件刷新；未推进技能顺序。",0);if(now>=nextRangedReport){wait.Report=true;nextRangedReport=now+5000;}return wait;}
             bool approach=hunterRangeBlocked||rangeKnown&&(o.ActionsInRangeMask&bit)==0;
             if(approach&&!rangedMoving)nextFace=now;
@@ -386,15 +390,17 @@ namespace WoWProbe
             if(approach)return Cmd(QuickAction.None,"等待进入当前猎人技能的射程。",0);
             if(now<nextSkill)return Cmd(QuickAction.None,"等待猎人技能间隔。",0);
             if((o.RepeatKnownMask&o.RepeatingMask&bit)!=0)
-            {if(hunterDefending)hunterIndex++;else if(opening<openingKeys.Length)opening++;else loopIndex++;nextSkill=now+interval;return Cmd(QuickAction.None,"当前自动射击已开启，保留效果并继续下一按键。",0);}
+            {if(HunterUsingMelee)hunterIndex++;else if(opening<openingKeys.Length)opening++;else loopIndex++;nextSkill=now+interval;return Cmd(QuickAction.None,"当前自动射击已开启，保留效果并继续下一按键。",0);}
             if(!RangedKeyAllowed(key,o,true))
             {var wait=Cmd(QuickAction.None,"猎人技能"+digit+"冷却中或暂不可用：等待就绪，保留当前技能顺序。",0);if(now>=nextRangedReport){wait.Report=true;nextRangedReport=now+3000;}return wait;}
-            nextSkill=now+interval;var skill=Cmd(QuickAction.Skill,"猎人"+(hunterDefending?"受袭循环":"技能顺序")+"：按"+digit+"。",key);
-            skill.HunterSkill=true;skill.HunterDefense=hunterDefending;skill.HealthAtIssue=o.Health;skill.CastFailuresKnown=o.CastEventsKnown;skill.CastFailuresAtIssue=o.CastFailed;return skill;
+            nextSkill=now+interval;var skill=Cmd(QuickAction.Skill,"猎人"+(HunterUsingMelee?"近战循环":"技能顺序")+"：按"+digit+"。",key);
+            skill.HunterSkill=true;skill.HunterDefense=HunterUsingMelee;skill.HunterPetMelee=hunterPetMelee&&!hunterDefending;skill.HealthAtIssue=o.Health;skill.CastFailuresKnown=o.CastEventsKnown;skill.CastFailuresAtIssue=o.CastFailed;return skill;
         }
         static int ActionBit(ushort key){return key>=49&&key<=55?1<<(key-49):0;}
         int FirstRangedAction(FarmObservation o){foreach(char key in openingKeys+loopKeys){int bit=ActionBit(key);if((o.RangedActionsMask&bit)!=0)return bit;}return 0;}
         static bool CloseContact(FarmObservation o){return (o.MeleeActionsMask&o.ActionRangeKnownMask&o.ActionsInRangeMask)!=0;}
+        static bool AttackingOwnPet(FarmObservation o){return o!=null&&o.TargetPetVictimKnown&&o.TargetTargetsPet&&o.TargetCombatKnown&&o.TargetInCombat;}
+        static bool PetMeleeNeeded(FarmObservation o){return AttackingOwnPet(o)&&GrindRecoveryPolicy.CanAttack(o)&&!(o.TargetClaimKnown&&o.TargetClaimedByOther)&&CloseContact(o)&&(o.RangedActionsMask&o.ActionRangeKnownMask&~o.ActionsInRangeMask)!=0;}
         static bool RangedKeyAllowed(ushort key,FarmObservation o,bool contact,bool inputStarted=false)
         {
             int bit=ActionBit(key);if(bit==0)return true;
@@ -405,8 +411,8 @@ namespace WoWProbe
         }
         bool CanAcquire(FarmObservation o){return CanAcquire(o,attackHostile);}
         static bool CanAcquire(FarmObservation o,bool includeHostile)
-        {return GrindRecoveryPolicy.CanAttack(o)&&(o.InCombat&&(!o.TargetVictimKnown||o.TargetTargetsPlayer)||(o.TargetReaction==4||includeHostile&&o.TargetReaction>=1&&o.TargetReaction<=3)&&!Contested(o));}
-        public static bool Contested(FarmObservation o){return o!=null&&!(o.InCombat&&(!o.TargetVictimKnown||o.TargetTargetsPlayer))&&(o.TargetClaimKnown&&o.TargetClaimedByOther||o.TargetCombatKnown&&o.TargetInCombat&&(!o.TargetVictimKnown||!o.TargetTargetsPlayer));}
+        {return GrindRecoveryPolicy.CanAttack(o)&&(o.InCombat&&(!o.TargetVictimKnown||o.TargetTargetsPlayer)||AttackingOwnPet(o)&&!(o.TargetClaimKnown&&o.TargetClaimedByOther)||(o.TargetReaction==4||includeHostile&&o.TargetReaction>=1&&o.TargetReaction<=3)&&!Contested(o));}
+        public static bool Contested(FarmObservation o){return o!=null&&!(o.InCombat&&(!o.TargetVictimKnown||o.TargetTargetsPlayer))&&(o.TargetClaimKnown&&o.TargetClaimedByOther||o.TargetCombatKnown&&o.TargetInCombat&&(!o.TargetVictimKnown||!o.TargetTargetsPlayer)&&!AttackingOwnPet(o));}
         public bool ShouldAcquire(FarmObservation o,long now)
         {long until;return CanAcquire(o)&&(o.InCombat||!skippedTargets.TryGetValue(o.TargetToken,out until)||now>=until)&&(route==null||route.MayAcquire(o));}
         public bool CanInspectCorpse(FarmObservation o)
@@ -452,12 +458,13 @@ namespace WoWProbe
             if(c.RouteContext!=null&&!c.RouteContext.CanOperate(o))return false;
             if(!ownedChat&&o.ChatOpenKnown&&o.ChatOpen)return false;
             if(c.FixedPostDeath)return o.Health>0&&o.Health<=100&&o.CastingKnown&&(c.InputStarted||!o.Casting&&!o.Channeling)&&(c.Action==QuickAction.HunterSummonPet?!o.InCombat&&o.Health==100:c.Action==QuickAction.HunterRevivePet||c.Action==QuickAction.HunterAspect);
-            if(c.Action==QuickAction.HunterRevivePet||c.Action==QuickAction.HunterSummonPet)return (c.PriorityPetRecovery?o.Health>0&&o.Health<=100:!o.InCombat&&o.Health==100)&&o.CastingKnown&&(c.InputStarted||!o.Casting&&!o.Channeling&&o.PetStateKnown&&(c.Action==QuickAction.HunterRevivePet?o.PetDead:!o.PetDead));
+            if(c.Action==QuickAction.HunterRevivePet||c.Action==QuickAction.HunterSummonPet)return (!o.InCombat||c.InputStarted)&&o.Health>0&&o.Health<=100&&o.CastingKnown&&(c.InputStarted||!o.Casting&&!o.Channeling&&o.PetStateKnown&&(c.Action==QuickAction.HunterRevivePet?o.PetDead:!o.PetDead));
             if(c.Action==QuickAction.HunterAspect)return !o.InCombat&&o.Health==100&&o.CastingKnown&&!o.Casting&&!o.Channeling;
             if(c.HunterSkill)
             {
                 if(o.RangeErrorActive&&!c.HunterDefense&&!c.InputStarted)return false;
-                if(c.HunterDefense&&!o.InCombat)return false;
+                if(c.HunterPetMelee&&!PetMeleeNeeded(o))return false;
+                if(c.HunterDefense&&!c.HunterPetMelee&&!o.InCombat)return false;
                 if(!c.HunterDefense&&HealthDropped(o,c.HealthAtIssue))return false;
                 if(!RangedKeyAllowed(c.Key,o,true,c.InputStarted))return false;
             }

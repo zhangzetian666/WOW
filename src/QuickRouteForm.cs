@@ -16,10 +16,10 @@ namespace WoWProbe
         readonly CheckBox timedBreaks=new CheckBox{Text="定时下线休息：2小时加随机时长，休息13/15/18分钟后上线",AutoSize=true,Checked=true};
         readonly NumericUpDown routeVariation=N(.01m,.2m,.06m,2);int variationSeed=20261123;
         readonly ComboBox combatStyle=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,Width=160};
-        readonly CheckBox revivePet=new CheckBox{Text="宠物恢复：循环中优先复活；复活满血后固定E→Q→等11秒→8",AutoSize=true};
+        readonly CheckBox revivePet=new CheckBox{Text="宠物恢复：脱战复活宝宝等11秒；角色复活满血后固定E→Q→等11秒→8",AutoSize=true};
         readonly CheckBox revivePetWithCommand=new CheckBox{Text="复活宠物使用 /cast 复活宠物（仅循环宠物恢复；角色复活固定按E/Q/8）",Checked=false,AutoSize=true};
         readonly TextBox revivePetKey=new TextBox{Text="Q",Width=65},summonPetKey=new TextBox{Text="E",Width=65};
-        readonly CheckBox hunterMode=new CheckBox{Text="猎人：复活后按8雄鹰守护；战斗中掉血后改为1、2循环",AutoSize=true};
+        readonly CheckBox hunterMode=new CheckBox{Text="猎人：复活后按8雄鹰守护；角色掉血或宝宝遭近身攻击时1、2循环",AutoSize=true};
         readonly CheckBox rogueVanish=new CheckBox{Text="盗贼恢复：进食后Q潜行；低于15%按6消失，成功脱战后保持潜行回血",Checked=true,AutoSize=true};
         readonly CheckBox attackHostile=new CheckBox{Text="主动攻击红名怪（不勾选只主动打黄名怪）",AutoSize=true};
         readonly CheckBox noChatCombat=new CheckBox{Text="战斗、拾取、剥皮使用快捷键，不开聊天框（先绑定以下按键）",AutoSize=true,Checked=true};

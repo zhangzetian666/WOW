@@ -16,6 +16,12 @@ class GrindCliIntegrationTests
     {long now=0;var o=new FarmObservation{Fresh=true,KnownCore=true,MapId=42,MapMode=2,Zone="TEST"};var g=new GrindInputGuard(backend,()=>o,()=>now,ms=>{now+=ms;if(wait!=null)wait(ms);},new InputFailureLatch(),42,2,"TEST");typeof(GrindCli).GetField("input",Flags).SetValue(null,g);}
     static int Main()
     {
+        Test("movement cleanup sends no key during pet revival eleven second input lock",delegate{
+            long now=0;var pet=new QuickPetRecovery(()=>now);pet.Configure(true,"Q");pet.Observe(new FarmObservation{PetStateKnown=true,PetDead=true});
+            pet.InputCompleted(new QuickCommand{Action=QuickAction.HunterRevivePet},0);var b=new Backend();
+            Call("CancelQuickMovement",b,pet);Assert(b.Down==0&&b.Up==0);now=10999;Call("CancelQuickMovement",b,pet);Assert(b.Down==0&&b.Up==0&&pet.InputLocked);
+            now=11000;Assert(!pet.InputLocked);
+        });
         Test("pet revive chat submits exact Chinese command and allows its own cast only after Enter",delegate{
             var o=new FarmObservation{Fresh=true,KnownCore=true,MapId=42,MapMode=2,Zone="TEST",Health=100,CastingKnown=true,ChatOpenKnown=true,PetStateKnown=true,PetDead=true};
             var command=new QuickCommand{Action=QuickAction.HunterRevivePet,UsePetReviveChat=true};var b=new Backend();long now=0;var typed=new System.Text.StringBuilder();

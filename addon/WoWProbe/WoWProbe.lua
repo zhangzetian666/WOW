@@ -529,7 +529,7 @@ function P.BuildCombatPacket(core)
     local caps,flags,extra=0,0,0
     local exists=has(core[126],8) and has(core[7],8)
     if not exists and P.portraitPanel then P.portraitPanel:Hide() end
-    put(0,87);put(1,67);put(2,51);put(3,6);u16(4,core[5]+core[6]*256)
+    put(0,87);put(1,67);put(2,51);put(3,7);u16(4,core[5]+core[6]*256)
     put(16,P.rangeSlot);norm(12,nil);norm(14,nil)
     if exists then
         local guid,token=section("identity",function()
@@ -563,6 +563,9 @@ function P.BuildCombatPacket(core)
         if fighting~=nil then ownership=ownership+4;if fighting then ownership=ownership+8 end end
         local victim=section("targetVictim",function()if type(UnitIsUnit)=="function" then return combatBool("UnitIsUnit(targettarget,player)",UnitIsUnit,"targettarget","player") end end)
         if victim~=nil then ownership=ownership+16;if victim then ownership=ownership+32 end end
+        -- A non-player victim can be another player; identify our own pet explicitly.
+        local petVictim=section("targetPetVictim",function()if type(UnitIsUnit)=="function" then return combatBool("UnitIsUnit(targettarget,pet)",UnitIsUnit,"targettarget","pet") end end)
+        if petVictim~=nil and not (victim and petVictim) then ownership=ownership+64;if petVictim then ownership=ownership+128 end end
         put(79,ownership)
         local range=section("range",function()
             local slot=actionSlot(P.rangeSlot)
@@ -933,7 +936,7 @@ local function printLine(text)
 end
 function P.ResetDiagnostics()
     local visible = type(WoWProbeDB) == "table" and WoWProbeDB.visible ~= false
-    WoWProbeDB = { schema = 1, addonVersion = "0.5.16", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
+    WoWProbeDB = { schema = 1, addonVersion = "0.5.17", visible = visible, rangeSlot=P.rangeSlot, errors = {}, bindings = {}, capabilities = {} }
     readClient(); captureBindings(); captureAPIs(); if P.panel then P.ScalePanel() end
 end
 function P.Command(command)
@@ -1071,7 +1074,7 @@ function P.Initialize()
     WoWProbeDB = old; WoWProbeDB.visible = visible
     if integer(old.rangeSlot,4) and old.rangeSlot>=1 then P.rangeSlot=old.rangeSlot end
     WoWProbeDB.previousSession = previous
-    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.16"
+    WoWProbeDB.schema, WoWProbeDB.addonVersion = 1, "0.5.17"
     WoWProbeDB.errors, WoWProbeDB.bindings, WoWProbeDB.capabilities = {}, {}, {}
     readClient(); captureBindings(); captureAPIs()
     local ok, reason = pcall(createPanel)

@@ -11,17 +11,15 @@ class QuickCombatTests
     {return new QuickCombat(o,750,false,null,"4563","4563",80,0,false,null,ranged,true,state);}
     static int Main()
     {
-        Test("pet dying during combat prioritizes Q and holds through damage until confirmed alive",()=>{
-            var o=Observation();o.PetStateKnown=o.PetExists=true;o.InCombat=true;o.Health=70;
-            var state=new QuickHunterState();state.Pet.Configure(true,"Q","E");var e=Hunter(o,state,true);
-            Step(e,o,0);o.PetDead=true;var c=Step(e,o,100);
-            Check(c.Action==QuickAction.HunterRevivePet&&c.Key==81&&c.PriorityPetRecovery&&!c.UsePetReviveChat&&QuickCombat.Matches(c,o));
-            c.InputStarted=true;o.Casting=true;Check(QuickCombat.Matches(c,o));e.HunterInputCompleted(c);
-            for(int t=200;t<12000;t+=1000){o.Health--;Check(Step(e,o,t).Action==QuickAction.None&&e.HunterRecoveryPending);}
-            o.Casting=false;o.PetDead=false;Check(Step(e,o,12100).Action==QuickAction.None&&!e.HunterRecoveryPending);
-            bool resumed=false;for(int t=12200;t<16000;t+=200){var next=Step(e,o,t);if(next.Action==QuickAction.Skill){resumed=true;Check(next.Key==49||next.Key==50);break;}}
-            Check(resumed);
-            o.PetDead=true;Check(Step(e,o,17000).Action==QuickAction.HunterRevivePet);
+        Test("dead pet waits for combat to end then Q holds eleven seconds even if attacked or pet appears early",()=>{
+            long clock=0;var o=Observation();o.PetStateKnown=o.PetExists=true;o.InCombat=o.TargetVictimKnown=o.TargetTargetsPlayer=true;o.Health=70;
+            var state=new QuickHunterState(()=>clock);state.Pet.Configure(true,"Q","E");var e=Hunter(o,state,true);
+            Step(e,o,0);o.PetDead=true;o.Health=68;bool fought=false;
+            for(int t=100;t<4000;t+=100){var c=Step(e,o,t);Check(c.Action!=QuickAction.HunterRevivePet);if(c.Action==QuickAction.Skill){fought=true;e.HunterInputCompleted(c);}}
+            Check(fought);o.InCombat=false;var revive=Step(e,o,4000);Check(revive.Action==QuickAction.HunterRevivePet&&revive.Key==81&&QuickCombat.Matches(revive,o));
+            o.InCombat=true;Check(!QuickCombat.Matches(revive,o));o.InCombat=false;revive.InputStarted=true;o.Casting=true;e.HunterInputCompleted(revive);
+            for(int t=4100;t<15000;t+=500){clock=t-4000;o.InCombat=true;o.Health=50;Check(Step(e,o,t).Action==QuickAction.None&&e.HunterRecoveryPending&&state.Pet.InputLocked);}
+            clock=11000;Check(Step(e,o,15000).Action==QuickAction.None);o.Casting=false;o.PetDead=false;Check(Step(e,o,15100).Action==QuickAction.None&&!e.HunterRecoveryPending);
         });
         Test("routine pet death preempts resting and corpse work without full health or target requirements",()=>{
             foreach(bool corpse in new[]{false,true}){
@@ -31,14 +29,39 @@ class QuickCombatTests
                 o.PetDead=false;Check(!QuickCombat.Matches(c,o));o.PetDead=true;o.PlayerGhost=true;Check(!QuickCombat.Matches(c,o));
             }
         });
-        Test("dead pet interrupts unrelated casts once and revive failure retries with interval in combat",()=>{
-            var o=Observation();o.PetStateKnown=o.PetDead=o.Casting=o.CastEventsKnown=true;
-            var state=new QuickHunterState();state.Pet.Configure(true,"Q");var e=Hunter(o,state,true);
-            var c=Step(e,o,0);Check(c.Action==QuickAction.InterruptSkin&&QuickCombat.Matches(c,o));
-            o.PetDead=false;Check(!QuickCombat.Matches(c,o));o.PetDead=true;o.Casting=false;o.InCombat=true;
+        Test("routine revive failure and restart preserve eleven second minimum before retry",()=>{
+            long clock=0;var o=Observation();o.PetStateKnown=o.PetDead=o.Casting=o.CastEventsKnown=true;
+            var state=new QuickHunterState(()=>clock);state.Pet.Configure(true,"Q");var e=Hunter(o,state,true);
+            var c=Step(e,o,0);Check(c.Action==QuickAction.InterruptSkin&&QuickCombat.Matches(c,o));o.Casting=false;
             c=Step(e,o,100);Check(c.Action==QuickAction.HunterRevivePet);e.HunterInputCompleted(c);o.CastFailed++;
-            Check(Step(e,o,200).Action==QuickAction.None);Check(Step(e,o,2100).Action==QuickAction.None);
-            c=Step(e,o,2200);Check(c.Action==QuickAction.HunterRevivePet&&QuickCombat.Matches(c,o));
+            clock=10000;state.Pet.Configure(true,"Q");e=Hunter(o,state,true);Check(Step(e,o,0).Action==QuickAction.None&&state.Pet.InputLocked);
+            clock=11000;Check(Step(e,o,100).Action==QuickAction.None);clock=12999;Check(Step(e,o,200).Action==QuickAction.None);
+            clock=13000;c=Step(e,o,300);Check(c.Key==81&&QuickCombat.Matches(c,o));e.HunterInputCompleted(c);
+            o.PetExists=true;o.PetDead=false;clock=23999;Check(Step(e,o,400).Action==QuickAction.None&&e.HunterRecoveryPending);
+            clock=24000;Check(Step(e,o,500).Action==QuickAction.None&&!e.HunterRecoveryPending);
+        });
+        Test("hunter and ordinary ranged mode assist own pet with melee one two without player damage",()=>{
+            foreach(bool hunter in new[]{false,true}){
+                var o=Observation();o.TargetPetVictimKnown=o.TargetTargetsPet=o.TargetCombatKnown=o.TargetInCombat=o.TargetVictimKnown=true;
+                o.InCombat=true;o.TargetReaction=3;o.MeleeActionsMask=3;o.RangedActionsMask=4;o.ActionRangeKnownMask=7;o.ActionsInRangeMask=3;
+                var e=new QuickCombat(o,750,false,null,"4563","4563",80,0,false,null,true,hunter);string keys="";
+                for(int t=0;t<5000;t+=100){var c=Step(e,o,t);Check(c.Action!=QuickAction.Scan);if(c.Action==QuickAction.Skill){Check(c.HunterPetMelee&&QuickCombat.Matches(c,o));keys+=(char)c.Key;e.HunterInputCompleted(c);}}
+                Check(keys.StartsWith("1212")&&o.Health==100);
+                o.ActionsInRangeMask=4;bool ranged=false;for(int t=5000;t<8000;t+=100){var c=Step(e,o,t);if(c.Action==QuickAction.Skill){Check(!c.HunterPetMelee);ranged=true;break;}}Check(ranged);
+            }
+        });
+        Test("pet melee requires explicit own pet plus close range and range failure, never another player's victim",()=>{
+            for(int invalid=0;invalid<4;invalid++){
+                var o=Observation();o.TargetPetVictimKnown=o.TargetTargetsPet=o.TargetCombatKnown=o.TargetInCombat=o.TargetVictimKnown=true;
+                o.InCombat=true;o.MeleeActionsMask=3;o.RangedActionsMask=4;o.ActionRangeKnownMask=7;o.ActionsInRangeMask=3;
+                if(invalid==0)o.TargetPetVictimKnown=false;if(invalid==1)o.TargetTargetsPet=false;if(invalid==2)o.ActionsInRangeMask=0;if(invalid==3)o.ActionRangeKnownMask=3;
+                var e=Hunter(o,null,true);for(int t=0;t<3000;t+=100)Check(!Step(e,o,t).HunterPetMelee);
+                if(invalid<2)Check(QuickCombat.Contested(o));
+            }
+            var own=Observation();own.TargetPetVictimKnown=own.TargetTargetsPet=own.TargetCombatKnown=own.TargetInCombat=own.TargetVictimKnown=true;
+            own.MeleeActionsMask=3;own.RangedActionsMask=4;own.ActionRangeKnownMask=7;own.ActionsInRangeMask=3;var combat=Hunter(own,null,true);QuickCommand skill=null;
+            for(int t=0;t<3000;t+=100){var c=Step(combat,own,t);if(c.Action==QuickAction.Skill){skill=c;break;}}Check(skill!=null&&QuickCombat.Matches(skill,own));
+            own.TargetTargetsPet=false;Check(!QuickCombat.Matches(skill,own));own.TargetTargetsPet=true;own.ActionsInRangeMask=0;Check(!QuickCombat.Matches(skill,own));
         });
         Test("routine pet recovery only arms from fresh known death and is independent of hunter rotation",()=>{
             var o=Observation();var state=new QuickHunterState();state.Pet.Configure(true,"Q");

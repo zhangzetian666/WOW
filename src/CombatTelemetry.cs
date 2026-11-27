@@ -44,6 +44,7 @@ namespace WoWProbe
         public bool TargetClaimKnown {get;private set;}public bool TargetClaimedByOther {get;private set;}
         public bool TargetCombatKnown {get;private set;}public bool TargetInCombat {get;private set;}
         public bool TargetVictimKnown {get;private set;}public bool TargetTargetsPlayer {get;private set;}
+        public bool PetVictimSupported {get;private set;}public bool TargetPetVictimKnown {get;private set;}public bool TargetTargetsPet {get;private set;}
         public bool GossipGoodsVisible {get;private set;}public Rectangle GossipGoodsRegion {get;private set;}
         public bool StealthKnown {get;private set;}public bool Stealthed {get;private set;}
         public bool InteractBindingKnown {get;private set;}public bool InteractBindingCorrect {get;private set;}
@@ -61,7 +62,7 @@ namespace WoWProbe
         {
             if (bytes == null || bytes.Length != 128) throw Invalid("WC3 packet must contain exactly 128 bytes.");
             byte[] b=(byte[])bytes.Clone();
-            if(b[0]!=87 || b[1]!=67 || b[2]!=51 || b[3]<1||b[3]>6) throw Invalid("Unsupported WC3 signature or version.");
+            if(b[0]!=87 || b[1]!=67 || b[2]!=51 || b[3]<1||b[3]>7) throw Invalid("Unsupported WC3 signature or version.");
             int a=0,s=0;for(int i=0;i<126;i++){a=(a+b[i])%255;s=(s+a)%255;}
             if(b[126]!=a || b[127]!=s)throw Invalid("WC3 Fletcher16 checksum mismatch.");
             if(b[118]!=0&&b[118]!=1&&b[118]!=3)throw Invalid("Invalid stealth flags.");
@@ -79,7 +80,7 @@ namespace WoWProbe
             if((repair&~31)!=0||(repair&2)!=0&&(repair&1)==0||(repair&4)!=0&&(repair&3)!=3||((repair&2)!=0?(rw==0||rh==0||rw>512||rh>512||rx+rw>65535||ry+rh>65535):(rx!=0||ry!=0||rw!=0||rh!=0))||(repair&8)==0&&U32(b,101)!=0||(repair&16)==0&&U32(b,105)!=0)throw Invalid("WC3 repair button or cost evidence is inconsistent.");
             if(b[80]!=0&&b[80]!=1&&b[80]!=3&&b[80]!=7)throw Invalid("WC3 gossip flags are inconsistent.");
             int gx=U16(b,81),gy=U16(b,83),gw=U16(b,85),gh=U16(b,87);if(b[80]==7?(gw==0||gh==0||gw>2048||gh>512||gx+gw>65535||gy+gh>65535):(gx!=0||gy!=0||gw!=0||gh!=0))throw Invalid("WC3 goods option rectangle is invalid.");
-            if((b[79]&~63)!=0||(b[79]&3)==2||(b[79]&12)==8||(b[79]&48)==32)throw Invalid("WC3 target ownership flags are inconsistent.");
+            if((b[79]&~(b[3]>=7?255:63))!=0||(b[79]&3)==2||(b[79]&12)==8||(b[79]&48)==32||(b[79]&192)==128||(b[79]&192)!=0&&(b[6]&1)==0||(b[79]&160)==160)throw Invalid("WC3 target ownership flags are inconsistent.");
             if(b[75]>3||b[75]==2||b[76]>1||b[76]==0&&U16(b,77)!=0||b[76]==1&&U16(b,77)==65535)throw Invalid("WC3 optional action setup is inconsistent.");
             uint creditName=U32(b,66),credits=U32(b,70);
             if(b[74]>1||b[74]==0&&(creditName!=0||credits!=0)||(creditName==0)!=(credits==0))throw Invalid("WC3 kill credit evidence is inconsistent.");
@@ -116,7 +117,7 @@ namespace WoWProbe
                 CastEndMilliseconds=end,LootOpened=opened,LootClosed=closed,CastSuccess=success,CastFailed=failed,SkinSuccess=skin,DeathToken=deathToken,TargetDeaths=deaths,ChatOpenKnown=(b[65]&1)!=0,ChatOpen=(b[65]&2)!=0,KillCreditsKnown=b[74]==1,KillCreditNameHash=creditName,KillCredits=credits,SkinBindingKnown=(b[75]&1)!=0,SkinBindingCorrect=(b[75]&2)!=0,FoodCount=b[76]==1?U16(b,77):-1,
                 TargetX=x==65535?Double.NaN:x/65534.0,TargetY=y==65535?Double.NaN:y/65534.0,
                 TargetClaimKnown=(b[79]&1)!=0,TargetClaimedByOther=(b[79]&2)!=0,TargetCombatKnown=(b[79]&4)!=0,TargetInCombat=(b[79]&8)!=0,
-                TargetVictimKnown=(b[79]&16)!=0,TargetTargetsPlayer=(b[79]&32)!=0,
+                TargetVictimKnown=(b[79]&16)!=0,TargetTargetsPlayer=(b[79]&32)!=0,PetVictimSupported=b[3]>=7,TargetPetVictimKnown=(b[79]&64)!=0,TargetTargetsPet=(b[79]&128)!=0,
                 GossipGoodsVisible=b[80]==7,GossipGoodsRegion=b[80]==7?new Rectangle(gx,gy,gw,gh):Rectangle.Empty,
                 StealthKnown=(b[118]&1)!=0,Stealthed=(b[118]&2)!=0,GearKnown=(b[89]&1)!=0,GearRed=(b[89]&2)!=0,Durability=(b[89]&1)!=0?durability:-1,RepairButtonVisible=(repair&2)!=0,RepairButtonEnabled=(repair&4)!=0,RepairRegion=(repair&2)!=0?new Rectangle(rx,ry,rw,rh):Rectangle.Empty,RepairCostKnown=(repair&8)!=0,RepairCost=U32(b,101),MoneyKnown=(repair&16)!=0,Money=U32(b,105),
                 TargetHoverKnown=(b[125]&1)!=0,TargetHovered=(b[125]&2)!=0,Portrait=(k&1)!=0?new Rectangle(px,py,pw,ph):Rectangle.Empty };
@@ -148,7 +149,7 @@ namespace WoWProbe
             TargetIdentityKnown,NameHashKnown,AttackabilityKnown,TargetCanAttack,TargetIsPlayer,RangeKnown,TargetInRange,
             TargetPositionKnown,LootKnown,Lootable,SkinKnown,Skinnable,CastingKnown,Casting,Channeling,ActionsKnown,
             LootEventsKnown,CastEventsKnown,SkinSuccessKnown,PortraitKnown,VisualHealth,VisualPower,DeathEventsKnown,ChatOpenKnown,ChatOpen,KillCreditsKnown,SkinBindingKnown,SkinBindingCorrect;
-        public bool TargetClaimKnown,TargetClaimedByOther,TargetCombatKnown,TargetInCombat,TargetVictimKnown,TargetTargetsPlayer;
+        public bool TargetClaimKnown,TargetClaimedByOther,TargetCombatKnown,TargetInCombat,TargetVictimKnown,TargetTargetsPlayer,PetVictimSupported,TargetPetVictimKnown,TargetTargetsPet;
         public bool InteractBindingKnown,InteractBindingCorrect;
         public bool ClickToMoveKnown,ClickToMoveEnabled;
         public bool GossipGoodsVisible;public Rectangle GossipGoodsRegion;
@@ -191,7 +192,7 @@ namespace WoWProbe
             o.StealthKnown=extra.StealthKnown;o.Stealthed=extra.Stealthed;o.GearKnown=extra.GearKnown;o.GearRed=extra.GearRed;o.Durability=extra.Durability;o.RepairButtonVisible=extra.RepairButtonVisible;o.RepairButtonEnabled=extra.RepairButtonEnabled;o.RepairRegion=extra.RepairRegion;o.RepairCostKnown=extra.RepairCostKnown;o.RepairCost=extra.RepairCost;o.MoneyKnown=extra.MoneyKnown;o.Money=extra.Money;
             if(!o.TargetExists)return o;
             o.TargetClaimKnown=extra.TargetClaimKnown;o.TargetClaimedByOther=extra.TargetClaimedByOther;o.TargetCombatKnown=extra.TargetCombatKnown;o.TargetInCombat=extra.TargetInCombat;
-            o.TargetVictimKnown=extra.TargetVictimKnown;o.TargetTargetsPlayer=extra.TargetTargetsPlayer;
+            o.TargetVictimKnown=extra.TargetVictimKnown;o.TargetTargetsPlayer=extra.TargetTargetsPlayer;o.PetVictimSupported=extra.PetVictimSupported;o.TargetPetVictimKnown=extra.TargetPetVictimKnown;o.TargetTargetsPet=extra.TargetTargetsPet;
             o.TargetIdentityKnown=(c&1)!=0;o.TargetToken=extra.TargetToken;o.NameHashKnown=(k&4)!=0;o.TargetNameHash=extra.TargetNameHash;
             o.AttackabilityKnown=(c&2)!=0;o.TargetCanAttack=o.AttackabilityKnown && (f&1)!=0;o.TargetIsPlayer=o.AttackabilityKnown && (f&2)!=0;
             o.RangeKnown=(c&4)!=0;o.TargetInRange=o.RangeKnown && (f&4)!=0;

@@ -23,6 +23,13 @@ class CombatTelemetryTests
     static void Reject(Action<byte[]> change) { var b=Extra();change(b);Checksum(b);try{Decode(b);}catch(TargetInvocationException e){if(e.InnerException is FormatException)return;throw;}throw new Exception("Invalid WC3 packet accepted"); }
     static int Main(string[] args)
     {
+        Test("WC3 v7 own pet victim survives decoding and legacy or contradictory flags are rejected",delegate{
+            var b=Extra();b[3]=7;b[6]=1;U32(b,8,123);b[79]=208;Checksum(b);var o=Observe(ProbePacket.Decode(Core()),Decode(b),true);
+            Equal(Get(o,"PetVictimSupported"),true,"new schema");Equal(Get(o,"TargetPetVictimKnown"),true,"pet identity known");Equal(Get(o,"TargetTargetsPet"),true,"own pet");Equal(Get(o,"TargetTargetsPlayer"),false,"not player");
+            b[79]=80;Checksum(b);Equal(Get(Decode(b),"TargetTargetsPet"),false,"other victim");
+            b[79]=0;b[3]=6;Checksum(b);Equal(Get(Decode(b),"PetVictimSupported"),false,"legacy unknown");
+            Reject(v=>{v[3]=6;v[79]=64;});Reject(v=>{v[3]=7;v[79]=64;});Reject(v=>{v[3]=7;v[6]=1;U32(v,8,1);v[79]=128;});Reject(v=>{v[3]=7;v[6]=1;U32(v,8,1);v[79]=240;});
+        });
         Test("WC3 v6 accepts absent dead pet evidence without claiming it is summoned",delegate{
             var b=Extra();b[3]=6;b[125]=40;Checksum(b);var o=Observe(ProbePacket.Decode(Core()),Decode(b),true);
             Equal(Get(o,"PetCallFeedbackSupported"),true,"call feedback schema");Equal(Get(o,"PetStateKnown"),true,"known");Equal(Get(o,"PetExists"),false,"not present");Equal(Get(o,"PetDead"),true,"dead pet");

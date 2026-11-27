@@ -447,7 +447,7 @@ test("WC3 keeps unknown APIs unknown and never requests legacy target coordinate
     local env=environment(); env.GetPlayerMapPosition=function(unit) eq(unit,"player"); return 0.2,0.4 end
     local wp=load(env); assert(type(wp.BuildCombatPacket)=="function","WC3 builder missing")
     local p=wp.BuildCombatPacket(wp.BuildPacket())
-    eq(#p,128); eq(p[1],87);eq(p[2],67);eq(p[3],51);eq(p[4],6)
+    eq(#p,128); eq(p[1],87);eq(p[2],67);eq(p[3],51);eq(p[4],7)
     eq(p[7],0);eq(p[8],0);eq(word(p,12),65535);eq(word(p,14),65535)
     eq(p[18],0);eq(p[19],0);eq(p[20],0)
 end)
@@ -487,7 +487,7 @@ test("WC3 v4 reads cooldown usability and range independently for paged keys fiv
     env.IsUsableAction=function(slot)return slot~=30,false end
     env.IsActionInRange=function(slot)if slot==30 then return nil end;return slot==29 and 0 or 1 end
     local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket())
-    eq(p[4],6);eq(p[18],127);eq(p[19],111);eq(p[20],95)
+    eq(p[4],7);eq(p[18],127);eq(p[19],111);eq(p[20],95)
     eq(math.floor(p[124]/16),5);eq(math.floor(p[125]/16),4)
     env.GetActionCooldown=function(slot)if slot==30 then return nil end;return 0,0,1 end
     p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[18],95);eq(p[19],95);eq(p[20],95)
@@ -496,7 +496,7 @@ test("WC3 v2 reads paged keys five six and keeps unknown range separate",functio
     local env=combatEnvironment();env.ActionButton5={action=17};env.ActionButton6={action=18}
     env.IsActionInRange=function(slot)return slot==18 and 1 or 0 end
     local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket())
-    eq(p[4],6);eq(math.floor(p[124]/16),3);eq(math.floor(p[125]/16),2)
+    eq(p[4],7);eq(math.floor(p[124]/16),3);eq(math.floor(p[125]/16),2)
     env.IsActionInRange=function(slot)if slot==17 then return nil else return 0 end end
     p=wp.BuildCombatPacket(wp.BuildPacket());eq(math.floor(p[124]/16),2);eq(math.floor(p[125]/16),0)
 end)
@@ -867,6 +867,15 @@ test("click to move reports only supported current CVar values",function()
     env.GetCVar=nil;eq(wp.BuildCombatPacket(wp.BuildPacket())[121],0)
     env.GetCVar=function()error("unavailable")end;eq(wp.BuildCombatPacket(wp.BuildPacket())[121],0)
 end)
+test("WC3 v7 distinguishes own pet victim from player and others without guessing",function()
+    local env=combatEnvironment();env.UnitIsUnit=function(a,b)return a=="targettarget" and b=="pet" end
+    local wp=load(env);local p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[4],7);eq(has(p[80],64),true);eq(has(p[80],128),true);eq(has(p[80],32),false)
+    env.UnitIsUnit=function(a,b)return a=="targettarget" and b=="player" end
+    p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[80],64),true);eq(has(p[80],128),false);eq(has(p[80],32),true)
+    env.UnitIsUnit=function()return false end;p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[80],64),true);eq(has(p[80],128),false)
+    env.UnitIsUnit=function()error("unreadable")end;p=wp.BuildCombatPacket(wp.BuildPacket());eq(has(p[80],64),false);eq(has(p[80],128),false)
+end)
+
 test("target ownership flags skip claimed mobs and distinguish the player's attacker",function()
     local env=combatEnvironment();env.UnitIsTapDenied=function()return true end
     env.UnitAffectingCombat=function(unit)return unit=="target" end
