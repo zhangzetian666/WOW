@@ -5,7 +5,7 @@ using WoWProbe;
 class GrindCliIntegrationTests
 {
     sealed class Backend:IInputBackend
-    {public bool Focus=true,Emergency;public int Down,Up;public Action<ushort> Released;public bool IsTargetForeground(){return Focus;}public bool IsEmergencyPressed(){return Emergency;}public bool IsKeyAlreadyDown(ushort k){return false;}public void KeyDown(ushort k){Down++;}public void KeyUp(ushort k){Up++;if(Released!=null)Released(k);}}
+    {public bool Focus=true,Emergency;public int Down,Up;public readonly System.Collections.Generic.List<ushort> Keys=new System.Collections.Generic.List<ushort>();public Action<ushort> Released;public bool IsTargetForeground(){return Focus;}public bool IsEmergencyPressed(){return Emergency;}public bool IsKeyAlreadyDown(ushort k){return false;}public void KeyDown(ushort k){Down++;Keys.Add(k);}public void KeyUp(ushort k){Up++;if(Released!=null)Released(k);}}
     static int passed,failed;
     static readonly BindingFlags Flags=BindingFlags.NonPublic|BindingFlags.Static;
     static void Test(string name,Action action){try{action();passed++;Console.WriteLine("PASS "+name);}catch(Exception ex){failed++;Console.WriteLine("FAIL "+name+": "+ex.Message);}finally{typeof(GrindCli).GetField("input",Flags).SetValue(null,null);typeof(GrindCli).GetField("chatReader",Flags).SetValue(null,null);}}
@@ -16,11 +16,27 @@ class GrindCliIntegrationTests
     {long now=0;var o=new FarmObservation{Fresh=true,KnownCore=true,MapId=42,MapMode=2,Zone="TEST"};var g=new GrindInputGuard(backend,()=>o,()=>now,ms=>{now+=ms;if(wait!=null)wait(ms);},new InputFailureLatch(),42,2,"TEST");typeof(GrindCli).GetField("input",Flags).SetValue(null,g);}
     static int Main()
     {
+        Test("actual pet keyboard dispatch sends only E Q eight and never a movement tap",delegate{
+            long now=0;var o=new FarmObservation{Fresh=true,KnownCore=true,MapId=42,MapMode=2,Zone="TEST",Health=100,CastingKnown=true,ChatOpenKnown=true,X=.3,Y=.4};
+            var state=new QuickHunterState(()=>now);state.Pet.Configure(true,"Q");state.Pet.PlayerDied();var engine=new QuickCombat(o,750,false,null,"4","4",80,0,false,null,true,false,state);var b=new Backend();
+            Func<FarmObservation> read=()=>o;QuickCommand c=null;
+            Action arm=()=>{var g=new GrindInputGuard(b,()=>{if(!QuickCombat.Matches(c,o))throw new InvalidOperationException("目标状态变化，停止当前按键。");return o;},()=>now,ms=>{now+=ms;o.Sequence++;},new InputFailureLatch(),42,2,"TEST");typeof(GrindCli).GetField("input",Flags).SetValue(null,g);};
+            c=engine.Step(o,now);arm();Call("PetKeyChecked",b,c,engine,state.Pet,read);Assert(now>=1000&&b.Keys.Count==1&&b.Keys[0]==69);
+            now+=1600;o.Sequence++;c=engine.Step(o,now);Assert(c.Key==81);arm();Call("PetKeyChecked",b,c,engine,state.Pet,read);Assert(b.Keys.Count==2&&b.Keys[1]==81&&state.Pet.InputLocked);
+            long qSent=now-80;while(now<qSent+11000){now=Math.Min(qSent+11000,now+100);o.Sequence++;c=engine.Step(o,now);if(now<qSent+11000){Assert(c.Action==QuickAction.None);Call("CancelQuickMovement",b,state.Pet);Assert(b.Keys.Count==2);}}
+            Assert(c.Key==56&&!state.Pet.InputLocked);arm();Call("PetKeyChecked",b,c,engine,state.Pet,read);Assert(b.Keys.Count==3&&b.Keys[2]==56&&b.Down==b.Up);
+        });
+        Test("pet key preparation stops only observed movement and requires fresh stable coordinates",delegate{
+            var o=new FarmObservation{Fresh=true,KnownCore=true,Health=100,CastingKnown=true,ChatOpenKnown=true,X=.3,Y=.4};int elapsed=0,stops=0;bool moving=true;
+            QuickPetInput.Prepare(()=>o,ms=>{elapsed+=ms;o.Sequence++;if(moving)o.X+=.0001;},()=>{stops++;moving=false;});Assert(stops==1&&elapsed>=1100);
+            o.Casting=true;Reject(()=>QuickPetInput.Prepare(()=>o,ms=>{},()=>stops++));Assert(stops==1);o.Casting=false;
+            Reject(()=>QuickPetInput.Prepare(()=>o,ms=>{},()=>stops++));Assert(stops==1);
+        });
         Test("movement cleanup sends no key during pet revival eleven second input lock",delegate{
             long now=0;var pet=new QuickPetRecovery(()=>now);pet.Configure(true,"Q");pet.Observe(new FarmObservation{PetStateKnown=true,PetDead=true});
             pet.InputCompleted(new QuickCommand{Action=QuickAction.HunterRevivePet},0);var b=new Backend();
             Call("CancelQuickMovement",b,pet);Assert(b.Down==0&&b.Up==0);now=10999;Call("CancelQuickMovement",b,pet);Assert(b.Down==0&&b.Up==0&&pet.InputLocked);
-            now=11000;Assert(!pet.InputLocked);
+            now=11000;Assert(pet.InputLocked);Call("CancelQuickMovement",b,pet);Assert(b.Down==0);
         });
         Test("pet revive chat submits exact Chinese command and allows its own cast only after Enter",delegate{
             var o=new FarmObservation{Fresh=true,KnownCore=true,MapId=42,MapMode=2,Zone="TEST",Health=100,CastingKnown=true,ChatOpenKnown=true,PetStateKnown=true,PetDead=true};

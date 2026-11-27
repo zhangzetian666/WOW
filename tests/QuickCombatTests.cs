@@ -7,6 +7,8 @@ class QuickCombatTests
     static void Check(bool condition){if(!condition)throw new Exception("Unexpected combat behavior");}
     static FarmObservation Observation(){return new FarmObservation{TargetPositionKnown=true,TargetX=.3203,TargetY=.4703,Health=100,Fresh=true,KnownCore=true,MapId=1432,MapMode=1,Zone="TEST",X=.32,Y=.47,Facing=1,CastingKnown=true,TargetExists=true,TargetIdentityKnown=true,TargetToken=123,TargetName="怪物",NameHashKnown=true,TargetNameHash=1,AttackabilityKnown=true,TargetCanAttack=true,TargetDeadKnown=true,TargetReaction=4};}
     static QuickCommand Step(QuickCombat e,FarmObservation o,long time){o.Sequence++;return e.Step(o,time);}
+    static QuickCommand WaitUntil(QuickCombat e,FarmObservation o,ref long clock,long end)
+    {QuickCommand c=null;while(clock<end){clock=Math.Min(end,clock+100);c=Step(e,o,clock);if(clock<end)Check(c.Action==QuickAction.None);}return c;}
     static QuickCombat Hunter(FarmObservation o,QuickHunterState state=null,bool ranged=false)
     {return new QuickCombat(o,750,false,null,"4563","4563",80,0,false,null,ranged,true,state);}
     static int Main()
@@ -19,26 +21,25 @@ class QuickCombatTests
             Check(fought);o.InCombat=false;var revive=Step(e,o,4000);Check(revive.Action==QuickAction.HunterRevivePet&&revive.Key==81&&QuickCombat.Matches(revive,o));
             o.InCombat=true;Check(!QuickCombat.Matches(revive,o));o.InCombat=false;revive.InputStarted=true;o.Casting=true;e.HunterInputCompleted(revive);
             for(int t=4100;t<15000;t+=500){clock=t-4000;o.InCombat=true;o.Health=50;Check(Step(e,o,t).Action==QuickAction.None&&e.HunterRecoveryPending&&state.Pet.InputLocked);}
-            clock=11000;Check(Step(e,o,15000).Action==QuickAction.None);o.Casting=false;o.PetDead=false;Check(Step(e,o,15100).Action==QuickAction.None&&!e.HunterRecoveryPending);
+            clock=11000;Check(Step(e,o,15000).Action==QuickAction.None);o.Casting=false;o.PetDead=false;Check(Step(e,o,15100).Action==QuickAction.None&&e.HunterRecoveryPending);clock=11500;Step(e,o,15600);clock=12000;Check(Step(e,o,16100).Action==QuickAction.None&&!e.HunterRecoveryPending);
         });
         Test("routine pet death preempts resting and corpse work without full health or target requirements",()=>{
             foreach(bool corpse in new[]{false,true}){
                 var o=Observation();o.PetStateKnown=o.PetDead=true;o.Health=50;o.FoodCount=10;o.TargetExists=corpse;o.TargetDead=corpse;o.LootKnown=o.Lootable=corpse;
                 var state=new QuickHunterState();state.Pet.Configure(true,"Q");var e=new QuickCombat(o,750,true,null,"4","4",80,0,false,null,true,false,state);
                 var c=Step(e,o,0);Check(c.Action==QuickAction.HunterRevivePet&&QuickCombat.Matches(c,o)&&!e.IsResting);
-                o.PetDead=false;Check(!QuickCombat.Matches(c,o));o.PetDead=true;o.PlayerGhost=true;Check(!QuickCombat.Matches(c,o));
+                o.PetDead=false;o.PetExists=true;Check(!QuickCombat.Matches(c,o));o.PetDead=true;o.PlayerGhost=true;Check(!QuickCombat.Matches(c,o));
             }
         });
-        Test("routine revive failure and restart preserve eleven second minimum before retry",()=>{
-            long clock=0;var o=Observation();o.PetStateKnown=o.PetDead=o.Casting=o.CastEventsKnown=true;
+        Test("routine revive failure and restart preserve minimum and retain Q after corpse vanishes",()=>{
+            long clock=0;var o=Observation();o.PetStateKnown=o.PetDead=o.CastEventsKnown=true;
             var state=new QuickHunterState(()=>clock);state.Pet.Configure(true,"Q");var e=Hunter(o,state,true);
-            var c=Step(e,o,0);Check(c.Action==QuickAction.InterruptSkin&&QuickCombat.Matches(c,o));o.Casting=false;
-            c=Step(e,o,100);Check(c.Action==QuickAction.HunterRevivePet);e.HunterInputCompleted(c);o.CastFailed++;
-            clock=10000;state.Pet.Configure(true,"Q");e=Hunter(o,state,true);Check(Step(e,o,0).Action==QuickAction.None&&state.Pet.InputLocked);
-            clock=11000;Check(Step(e,o,100).Action==QuickAction.None);clock=12999;Check(Step(e,o,200).Action==QuickAction.None);
-            clock=13000;c=Step(e,o,300);Check(c.Key==81&&QuickCombat.Matches(c,o));e.HunterInputCompleted(c);
-            o.PetExists=true;o.PetDead=false;clock=23999;Check(Step(e,o,400).Action==QuickAction.None&&e.HunterRecoveryPending);
-            clock=24000;Check(Step(e,o,500).Action==QuickAction.None&&!e.HunterRecoveryPending);
+            var c=Step(e,o,0);Check(c.Key==81);e.HunterInputCompleted(c);o.CastFailed++;o.PetExists=o.PetDead=false;
+            WaitUntil(e,o,ref clock,10000);state.Pet.Configure(true,"Q");e=Hunter(o,state,true);
+            Check(WaitUntil(e,o,ref clock,11000).Action==QuickAction.None&&state.Pet.InputLocked);
+            Check(WaitUntil(e,o,ref clock,11100).Action==QuickAction.None&&!state.Pet.InputLocked);
+            c=WaitUntil(e,o,ref clock,13100);Check(c.Key==81&&QuickCombat.Matches(c,o));e.HunterInputCompleted(c);
+            o.PetExists=true;Check(WaitUntil(e,o,ref clock,24100).Action==QuickAction.None&&!e.HunterRecoveryPending);
         });
         Test("hunter and ordinary ranged mode assist own pet with melee one two without player damage",()=>{
             foreach(bool hunter in new[]{false,true}){
@@ -86,44 +87,39 @@ class QuickCombatTests
             Check(c.Action==QuickAction.HunterRevivePet&&c.UsePetReviveChat&&c.Key==0);o.ChatOpen=true;
             Check(!QuickCombat.Matches(c,o)&&QuickCombat.MatchesChatCommand(c,o));o.PlayerDead=true;Check(!QuickCombat.MatchesChatCommand(c,o));
         });
-        Test("post resurrection food completes on full health despite low mana then fixed E Q eleven seconds eight and combat",()=>{
-            long clock=0;var o=Observation();o.Health=30;o.PowerType=0;o.Power=10;o.FoodCount=10;
-            var state=new QuickHunterState(()=>clock);state.Pet.Configure(true,"Q");o.PlayerGhost=true;state.Observe(o);o.PlayerGhost=false;
+        Test("post resurrection food completes on full health and low mana then E Q quiet eleven seconds eight combat",()=>{
+            long clock=0;var o=Observation();o.Health=30;o.PowerType=0;o.Power=10;o.FoodCount=10;var state=new QuickHunterState(()=>clock);state.Pet.Configure(true,"Q");state.Pet.PlayerDied();
             var e=new QuickCombat(o,750,false,null,"4","4",80,189,false,null,true,false,state);
-            Check(Step(e,o,0).Action==QuickAction.Food);e.RestInputCompleted(100,true);Check(Step(e,o,200).Action==QuickAction.Drink);
-            o.Health=100;Check(Step(e,o,300).Action==QuickAction.None&&!e.IsResting);
-            var c=Step(e,o,400);Check(c.Action==QuickAction.HunterSummonPet&&c.Key==69&&c.FixedPostDeath&&QuickCombat.Matches(c,o));e.HunterInputCompleted(c);
-            clock=1499;Check(Step(e,o,500).Action==QuickAction.None);clock=1500;c=Step(e,o,600);Check(c.Action==QuickAction.HunterRevivePet&&c.Key==81&&QuickCombat.Matches(c,o));e.HunterInputCompleted(c);
-            clock=12499;Check(Step(e,o,700).Action==QuickAction.None&&e.HunterRecoveryPending);clock=12500;c=Step(e,o,800);
-            Check(c.Action==QuickAction.HunterAspect&&c.Key==56&&QuickCombat.Matches(c,o));e.HunterInputCompleted(c);Check(!e.HunterRecoveryPending&&!state.AspectPending);
-            bool resumed=false;for(int t=900;t<6000;t+=100){c=Step(e,o,t);Check(c.Action!=QuickAction.Food&&c.Action!=QuickAction.Drink&&c.Action!=QuickAction.HunterAspect);if(c.Action==QuickAction.Skill){resumed=true;break;}}
-            Check(resumed);
+            Check(Step(e,o,0).Action==QuickAction.Food);e.RestInputCompleted(0,true);clock=100;Check(Step(e,o,clock).Action==QuickAction.Drink);
+            o.Health=100;clock=200;Check(Step(e,o,clock).Action==QuickAction.None&&!e.IsResting);clock=300;var c=Step(e,o,clock);Check(c.Key==69);e.HunterInputCompleted(c);
+            c=WaitUntil(e,o,ref clock,1800);Check(c.Key==81&&QuickCombat.Matches(c,o));e.HunterInputCompleted(c);
+            c=WaitUntil(e,o,ref clock,12800);Check(c.Key==56&&!state.Pet.InputLocked);e.HunterInputCompleted(c);Check(!e.HunterRecoveryPending);
+            bool resumed=false;for(int t=12900;t<16000;t+=100){c=Step(e,o,t);Check(c.Action!=QuickAction.Food&&c.Action!=QuickAction.Drink&&c.Action!=QuickAction.HunterAspect);if(c.Action==QuickAction.Skill){resumed=true;break;}}Check(resumed);
         });
-        Test("fixed E Q eight ignores living dead missing or unknown pet data and configured command or alternative keys",()=>{
-            for(int pet=0;pet<4;pet++){
-                long clock=0;var o=Observation();o.PetStateKnown=pet!=0;o.PetExists=pet>=2;o.PetDead=pet==3;
-                var state=new QuickHunterState(()=>clock);state.Pet.Configure(true,"R","T",true);state.Pet.PlayerDied();
-                var e=new QuickCombat(o,750,false,null,"4","4",80,0,false,null,true,false,state);
-                var c=Step(e,o,0);Check(c.Key==69&&!c.UsePetReviveChat&&QuickCombat.Matches(c,o));e.HunterInputCompleted(c);
-                clock=1500;c=Step(e,o,100);Check(c.Key==81&&!c.UsePetReviveChat&&QuickCombat.Matches(c,o));e.HunterInputCompleted(c);
-                clock=12500;c=Step(e,o,200);Check(c.Key==56&&!c.UsePetReviveChat&&QuickCombat.Matches(c,o));e.HunterInputCompleted(c);
-                c=Step(e,o,300);Check(!e.HunterRecoveryPending&&c.Action!=QuickAction.HunterRevivePet);
+        Test("fixed E Q eight ignores living dead missing unknown pet and configured alternate keys",()=>{
+            for(int kind=0;kind<4;kind++){
+                long clock=0;var o=Observation();o.PetStateKnown=kind!=0;o.PetExists=kind>=2;o.PetDead=kind==3;
+                var state=new QuickHunterState(()=>clock);state.Pet.Configure(true,"R","T",true);state.Pet.PlayerDied();var e=Hunter(o,state,true);
+                var c=Step(e,o,clock);Check(c.Key==69&&!c.UsePetReviveChat);e.HunterInputCompleted(c);
+                c=WaitUntil(e,o,ref clock,1500);Check(c.Key==81&&!c.UsePetReviveChat&&QuickCombat.Matches(c,o));e.HunterInputCompleted(c);
+                c=WaitUntil(e,o,ref clock,12500);Check(c.Key==56&&!c.UsePetReviveChat);e.HunterInputCompleted(c);
+                Step(e,o,12600);Check(!e.HunterRecoveryPending);
             }
         });
-        Test("fixed recovery waits eleven seconds from accepted Q and keeps its clock across engine retry",()=>{
-            long clock=1000;var o=Observation();var state=new QuickHunterState(()=>clock);state.Pet.Configure(true,"Q");state.Pet.PlayerDied();var e=Hunter(o,state,true);
-            var c=Step(e,o,0);clock=6000;Check(Step(e,o,100).Key==69);e.HunterInputCompleted(c);
-            clock=7499;Check(Step(e,o,200).Action==QuickAction.None);clock=7500;c=Step(e,o,300);Check(c.Key==81);
-            clock=12000;e.HunterInputCompleted(c);o.CastEventsKnown=true;o.CastFailed++;o.PowerType=0;o.Power=0;
-            clock=22999;state.Pet.Configure(true,"Q");e=Hunter(o,state,true);Check(Step(e,o,0).Action==QuickAction.None);
-            clock=23000;c=Step(e,o,100);Check(c.Key==56&&QuickCombat.Matches(c,o));e.HunterInputCompleted(c);Check(!e.HunterRecoveryPending);
-        });
-        Test("fixed revival is not interrupted by damage and never shortens a cast longer than eleven seconds",()=>{
+        Test("fixed recovery countdown uses accepted Q and survives engine retry with fresh quiet verification",()=>{
             long clock=0;var o=Observation();var state=new QuickHunterState(()=>clock);state.Pet.Configure(true,"Q");state.Pet.PlayerDied();var e=Hunter(o,state,true);
-            var c=Step(e,o,0);e.HunterInputCompleted(c);clock=1500;o.InCombat=true;o.Health=60;c=Step(e,o,100);
-            Check(c.Key==81&&QuickCombat.Matches(c,o));c.InputStarted=true;o.Casting=true;Check(QuickCombat.Matches(c,o));e.HunterInputCompleted(c);
-            clock=12500;Check(Step(e,o,200).Action==QuickAction.None);o.Health=40;clock=16000;Check(Step(e,o,300).Action==QuickAction.None);
-            o.Casting=false;c=Step(e,o,400);Check(c.Key==56&&QuickCombat.Matches(c,o));
+            var c=Step(e,o,0);clock=5000;Check(Step(e,o,clock).Key==69);e.HunterInputCompleted(c);
+            c=WaitUntil(e,o,ref clock,6500);Check(c.Key==81);clock=12000;e.HunterInputCompleted(c);
+            WaitUntil(e,o,ref clock,22000);state.Pet.Configure(true,"Q");e=Hunter(o,state,true);
+            Check(WaitUntil(e,o,ref clock,23000).Action==QuickAction.None&&state.Pet.InputLocked);
+            c=WaitUntil(e,o,ref clock,23100);Check(c.Key==56);e.HunterInputCompleted(c);Check(!e.HunterRecoveryPending);
+        });
+        Test("fixed revive never acts on a single idle cast frame or while a long cast continues",()=>{
+            long clock=0;var o=Observation();var state=new QuickHunterState(()=>clock);state.Pet.Configure(true,"Q");state.Pet.PlayerDied();var e=Hunter(o,state,true);
+            var c=Step(e,o,0);e.HunterInputCompleted(c);c=WaitUntil(e,o,ref clock,1500);o.InCombat=true;o.Health=50;Check(QuickCombat.Matches(c,o));e.HunterInputCompleted(c);o.Casting=true;
+            WaitUntil(e,o,ref clock,16000);o.Casting=false;clock=16100;Check(Step(e,o,clock).Action==QuickAction.None&&state.Pet.InputLocked);
+            o.Casting=true;clock=16300;Check(Step(e,o,clock).Action==QuickAction.None);o.Casting=false;clock=16500;Check(Step(e,o,clock).Action==QuickAction.None);
+            c=WaitUntil(e,o,ref clock,17500);Check(c.Key==56&&!state.Pet.InputLocked);
             o.ChatOpenKnown=o.ChatOpen=true;Check(!QuickCombat.Matches(c,o));o.ChatOpen=false;o.PlayerGhost=true;Check(!QuickCombat.Matches(c,o));
         });
         Test("a new player death resets fixed recovery to food then E rather than remaining Q wait",()=>{
@@ -132,11 +128,10 @@ class QuickCombatTests
             o.PlayerDead=true;Check(Step(e,o,200).Action==QuickAction.Stop);o.PlayerDead=false;o.Health=30;o.FoodCount=10;e=Hunter(o,state,true);
             Check(Step(e,o,0).Action==QuickAction.Food);o.Health=100;Check(Step(e,o,100).Action==QuickAction.None);c=Step(e,o,200);Check(c.Key==69);
         });
-        Test("old dead pet feedback cannot immediately restart revival after fixed sequence but a new death still can",()=>{
+        Test("old dead pet feedback cannot restart Q after fixed sequence but a later new death can",()=>{
             long clock=0;var o=Observation();o.PetStateKnown=o.PetDead=true;var state=new QuickHunterState(()=>clock);state.Pet.Configure(true,"Q");state.Pet.PlayerDied();var e=Hunter(o,state,true);
-            var c=Step(e,o,0);e.HunterInputCompleted(c);clock=1500;c=Step(e,o,100);e.HunterInputCompleted(c);clock=12500;c=Step(e,o,200);e.HunterInputCompleted(c);
-            Step(e,o,300);Check(!e.HunterRecoveryPending);o.PetExists=true;o.PetDead=false;Step(e,o,400);o.PetDead=true;
-            c=Step(e,o,500);Check(c.Key==81&&c.PriorityPetRecovery&&!c.FixedPostDeath);
+            var c=Step(e,o,0);e.HunterInputCompleted(c);c=WaitUntil(e,o,ref clock,1500);e.HunterInputCompleted(c);c=WaitUntil(e,o,ref clock,12500);e.HunterInputCompleted(c);
+            Step(e,o,12600);Check(!e.HunterRecoveryPending);o.PetExists=true;o.PetDead=false;Step(e,o,12700);o.PetDead=true;c=Step(e,o,12800);Check(c.Key==81&&c.PriorityPetRecovery&&!c.FixedPostDeath);
         });
         Test("hunter full health aggro preserves 4567 and waits for each global cooldown",()=>{
             var o=Observation();o.ActionRangeKnownMask=o.ActionsInRangeMask=o.KnownActionsMask=o.ReadyActionsMask=o.UsableActionsMask=127;

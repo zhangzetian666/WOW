@@ -94,7 +94,7 @@ namespace WoWProbe
         {
             if(stopped)return Cmd(QuickAction.Stop,"运行已停止。",0);
             if(now<0||now<last)return Stop("运行时钟异常。");last=now;
-            if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0)return Stop("插件状态失效，停止输入。");
+            if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0){hunterState.Pet.ObservationLost();return Stop("插件状态失效，停止输入。");}
             hunterState.Observe(o);
             if(o.PlayerDead||o.PlayerGhost)return Stop("角色死亡或处于灵魂状态。");
             if(o.ChatOpenKnown&&o.ChatOpen)return Stop("聊天输入框打开，停止战斗按键。");
@@ -458,7 +458,7 @@ namespace WoWProbe
             if(c.RouteContext!=null&&!c.RouteContext.CanOperate(o))return false;
             if(!ownedChat&&o.ChatOpenKnown&&o.ChatOpen)return false;
             if(c.FixedPostDeath)return o.Health>0&&o.Health<=100&&o.CastingKnown&&(c.InputStarted||!o.Casting&&!o.Channeling)&&(c.Action==QuickAction.HunterSummonPet?!o.InCombat&&o.Health==100:c.Action==QuickAction.HunterRevivePet||c.Action==QuickAction.HunterAspect);
-            if(c.Action==QuickAction.HunterRevivePet||c.Action==QuickAction.HunterSummonPet)return (!o.InCombat||c.InputStarted)&&o.Health>0&&o.Health<=100&&o.CastingKnown&&(c.InputStarted||!o.Casting&&!o.Channeling&&o.PetStateKnown&&(c.Action==QuickAction.HunterRevivePet?o.PetDead:!o.PetDead));
+            if(c.Action==QuickAction.HunterRevivePet||c.Action==QuickAction.HunterSummonPet)return (!o.InCombat||c.InputStarted)&&o.Health>0&&o.Health<=100&&o.CastingKnown&&(c.InputStarted||!o.Casting&&!o.Channeling&&o.PetStateKnown&&(c.Action==QuickAction.HunterRevivePet?(o.PetDead||c.PriorityPetRecovery&&!o.PetExists):!o.PetDead));
             if(c.Action==QuickAction.HunterAspect)return !o.InCombat&&o.Health==100&&o.CastingKnown&&!o.Casting&&!o.Channeling;
             if(c.HunterSkill)
             {

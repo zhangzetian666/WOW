@@ -7,7 +7,7 @@ namespace WoWProbe
         public QuickHunterState(System.Func<long> clock=null){Pet=new QuickPetRecovery(clock);}
         public bool AspectPending {get;private set;}
         public void Observe(FarmObservation o)
-        {if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0)return;if(o.PlayerDead||o.PlayerGhost){AspectPending=true;Pet.PlayerDied();}else Pet.Observe(o);}
+        {if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0){Pet.ObservationLost();return;}if(o.PlayerDead||o.PlayerGhost){AspectPending=true;Pet.PlayerDied();}else Pet.Observe(o);}
         public void AspectInputCompleted(){AspectPending=false;}
     }
 
@@ -15,6 +15,7 @@ namespace WoWProbe
     {
         bool enabled,pending,attempted,sawCast,petKeySent,reviveWithCommand,afterPlayerDeath;
         bool ignoreManaUntilCombat,waitForLivingPet;int fixedStage;long fixedSentAt;
+        bool reviveBarrier;long reviveSentAt,quietSince=-1;int quietSequence=-1,quietFrames;
         readonly System.Func<long> clock;
         ushort reviveKey,summonKey;long issuedAt,nextTry,nextReport;uint failedBase;bool failuresKnown;
         public bool Required {get{return enabled&&pending;}}
@@ -22,13 +23,24 @@ namespace WoWProbe
         public bool PriorityRequired {get{return Required&&!afterPlayerDeath;}}
         public bool PostDeathRequired {get{return Required&&afterPlayerDeath;}}
         public bool PostDeathStarted {get{return PostDeathRequired&&fixedStage>0;}}
-        public bool InputLocked {get{return PostDeathRequired&&fixedStage==2&&clock()-fixedSentAt<11000||PriorityRequired&&attempted&&clock()-issuedAt<11000;}}
+        public bool InputLocked {get{return reviveBarrier;}}
         public bool IgnoreManaRest {get{return PostDeathRequired||ignoreManaUntilCombat;}}
         public QuickPetRecovery(System.Func<long> clock=null)
         {var watch=System.Diagnostics.Stopwatch.StartNew();this.clock=clock??(()=>watch.ElapsedMilliseconds);}
         public void Configure(bool enable,string binding,string summonBinding="E",bool useCommand=false)
-        {enabled=enable;reviveWithCommand=useCommand;reviveKey=enable&&!useCommand?QuickCombatHotkeys.Key(binding,"复活宠物"): (ushort)0;summonKey=enable?QuickCombatHotkeys.Key(summonBinding,"召唤宠物"):(ushort)0;nextReport=0;}
-        public void PlayerDied(){pending=afterPlayerDeath=true;attempted=sawCast=petKeySent=ignoreManaUntilCombat=waitForLivingPet=false;fixedStage=0;nextTry=nextReport=0;}
+        {enabled=enable;reviveWithCommand=useCommand;reviveKey=enable&&!useCommand?QuickCombatHotkeys.Key(binding,"复活宠物"): (ushort)0;summonKey=enable?QuickCombatHotkeys.Key(summonBinding,"召唤宠物"):(ushort)0;if(!enable)reviveBarrier=false;ObservationLost();nextReport=0;}
+        public void PlayerDied(){pending=afterPlayerDeath=true;attempted=sawCast=petKeySent=ignoreManaUntilCombat=waitForLivingPet=reviveBarrier=false;fixedStage=0;nextTry=nextReport=0;ObservationLost();}
+        public void ObservationLost(){quietSince=-1;quietSequence=-1;quietFrames=0;}
+        void ReviveInputAccepted(){reviveBarrier=true;reviveSentAt=clock();ObservationLost();}
+        QuickCommand WaitForRevive(FarmObservation o,long now)
+        {
+            if(!reviveBarrier)return null;
+            if(!o.Fresh||!o.CastingKnown||o.Casting||o.Channeling)ObservationLost();
+            else if(o.Sequence!=quietSequence){quietSequence=o.Sequence;quietFrames++;if(quietSince<0)quietSince=clock();}
+            if(clock()-reviveSentAt<11000||quietSince<0||clock()-quietSince<1000||quietFrames<3)
+                return Wait("复活宠物输入锁：至少等待11秒，并连续确认读条结束1秒；期间不发送其他动作。",now);
+            reviveBarrier=false;return null;
+        }
         public void Observe(FarmObservation o)
         {
             if(o.InCombat)ignoreManaUntilCombat=false;
@@ -42,11 +54,12 @@ namespace WoWProbe
             {
                 if(!PostDeathRequired)return;
                 if(fixedStage==0&&c.Action==QuickAction.HunterSummonPet){fixedStage=1;fixedSentAt=clock();}
-                else if(fixedStage==1&&c.Action==QuickAction.HunterRevivePet){fixedStage=2;fixedSentAt=clock();}
+                else if(fixedStage==1&&c.Action==QuickAction.HunterRevivePet){fixedStage=2;fixedSentAt=clock();ReviveInputAccepted();}
                 else if(fixedStage==2&&c.Action==QuickAction.HunterAspect){pending=false;ignoreManaUntilCombat=waitForLivingPet=true;}
                 return;
             }
             attempted=petKeySent=true;sawCast=false;issuedAt=clock();failedBase=c.CastFailuresAtIssue;failuresKnown=c.CastFailuresKnown;
+            if(c.Action==QuickAction.HunterRevivePet)ReviveInputAccepted();
         }
         QuickCommand PostDeathStep(FarmObservation o,long now)
         {
@@ -61,6 +74,7 @@ namespace WoWProbe
         public QuickCommand Step(FarmObservation o,long now)
         {
             if(!Required)return null;
+            var locked=WaitForRevive(o,now);if(locked!=null)return locked;
             if(PostDeathRequired)return PostDeathStep(o,now);
             if(attempted&&clock()-issuedAt<11000)return Wait("Q复活宠物已发送：原地等待11秒，不移动、不转向、不切目标、不执行其他技能。",now);
             if(o.Casting||o.Channeling){if(attempted)sawCast=true;return Wait("恢复宠物：等待当前读条结束，保持原地。",now);}
@@ -75,8 +89,7 @@ namespace WoWProbe
             if(!o.PetStateKnown)return Wait("宠物状态暂不可读，保持原地等待插件数据。",now);
             if(o.InCombat)return Wait("宝宝死亡：先完成当前战斗，脱战后立即复活。",now);
             if(clock()<nextTry)return Wait("等待宠物技能重试间隔。",now);
-            string prefix=afterPlayerDeath?"吃喝已结束，":"循环中优先恢复宠物，";
-            return new QuickCommand{Action=o.PetDead?QuickAction.HunterRevivePet:QuickAction.HunterSummonPet,PriorityPetRecovery=PriorityRequired,Key=o.PetDead?reviveKey:summonKey,UsePetReviveChat=o.PetDead&&reviveWithCommand,Reason=prefix+(o.PetDead?(reviveWithCommand?"宝宝死亡：输入/cast 复活宠物，等待确认存活。":"宝宝死亡：按"+((char)reviveKey)+"复活宠物，等待确认存活。"):"宝宝未确认死亡：施放召唤宠物，等待确认出现并存活。"),CastFailuresKnown=o.CastEventsKnown,CastFailuresAtIssue=o.CastFailed};
+            return new QuickCommand{Action=QuickAction.HunterRevivePet,PriorityPetRecovery=true,Key=reviveKey,UsePetReviveChat=reviveWithCommand,Reason=reviveWithCommand?"已记录宝宝死亡：输入/cast 复活宠物，尸体消失仍继续复活。":"已记录宝宝死亡：站稳后按"+((char)reviveKey)+"复活宠物；不因尸体消失改按召唤。",CastFailuresKnown=o.CastEventsKnown,CastFailuresAtIssue=o.CastFailed};
         }
     }
 }
