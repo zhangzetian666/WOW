@@ -152,9 +152,9 @@ namespace WoWProbe
                     if(breakSchedule!=null)write(breakSchedule.Summary);
                     if(plan.RandomRoutes){string variants=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"random-routes");QuickRouteVariants.Export(variants,"patrol",QuickRouteVariants.For(plan,plan.Route,20));if(plan.Vendor.RouteComplete)QuickRouteVariants.Export(variants,"npc",QuickRouteVariants.For(plan,QuickRouteVariants.Service(plan,plan.Vendor),10));}
                     if(plan.RevivePetAfterDeath&&!anchor.PetCallFeedbackSupported)throw new InvalidOperationException("召唤/复活宠物需要新版状态数据，请/reload加载0.5.16插件。");
-                    if(plan.RevivePetAfterDeath)write("宠物恢复已启用：循环中宝宝死亡优先复活；角色复活后先吃喝，未死亡按"+plan.SummonPetKey+"召唤；死亡使用"+(plan.RevivePetWithCommand?"/cast 复活宠物":plan.RevivePetKey)+"，确认宠物存活再巡航。");
+                    if(plan.RevivePetAfterDeath)write("宠物恢复已启用：循环中宝宝死亡优先复活；角色复活后吃喝至满血，不等蓝，固定E→Q→等待11秒→8雄鹰守护，然后循环打怪。");
                     if(plan.HunterMode&&(!anchor.ExtendedActionRanges||!anchor.RangeErrorSupported||!anchor.ExtendedActionStates))throw new InvalidOperationException("猎人模式需要新版射程和技能冷却数据，请在游戏输入/reload加载0.5.14插件后开始。");
-                    if(plan.HunterMode)write("猎人模式：复活后恢复满血按8；战斗中实际掉血才切换1、2；正常按技能行执行，冷却等待、距离不足先接近。");
+                    if(plan.HunterMode)write("猎人模式：复活后恢复满血按8雄鹰守护；战斗中实际掉血才切换1、2；正常按技能行执行，冷却等待、距离不足先接近。");
                     if(anchor.BagFull&&!plan.Vendor.Enabled)throw new InvalidOperationException("背包已满，请先填写并启用售卖NPC坐标。");
                     if(!anchor.ChatOpenKnown||anchor.ChatOpen)throw new InvalidOperationException("请先关闭聊天输入框，并确认新版插件已加载。");
                     if(anchor.InteractBindingKnown&&!anchor.InteractBindingCorrect)throw new InvalidOperationException(GrindInputGuard.InteractBindingError);
@@ -283,7 +283,7 @@ namespace WoWProbe
                         QuickCommand command=engine.Step(observed,clock.ElapsedMilliseconds);
                         if(!engine.IsResting)restMovementStopped=false;
                         else searchMotion.Stop();
-                        if(engine.HunterRecoveryPending&&(!observed.InCombat||hunterState.Pet.PriorityRequired))searchMotion.Stop();
+                        if(engine.HunterRecoveryPending&&(!observed.InCombat||hunterState.Pet.PriorityRequired||hunterState.Pet.PostDeathStarted))searchMotion.Stop();
                         if(completedKills+engine.Kills!=reportedKills){reportedKills=completedKills+engine.Kills;killCounter.Record(reportedKills);CancelQuickMovement(backend);write("已确认目标死亡，窗口累计击杀="+killCounter.Total);}
                         if(completedLoots+engine.Loots!=reportedLoots){reportedLoots=completedLoots+engine.Loots;write("已确认拾取窗口完成，累计拾取="+reportedLoots);}
                         if(completedSkins+engine.Skins!=reportedSkins){reportedSkins=completedSkins+engine.Skins;write("已确认剥皮成功，累计剥皮="+reportedSkins);}
@@ -336,7 +336,7 @@ namespace WoWProbe
                                 if(command.RouteMovement&&command.Action==QuickAction.Turn&&!command.PauseForward)searchMotion.Start();
                                 int hold=command.Hold>0?command.Hold:command.Action==QuickAction.Turn?260:command.Action==QuickAction.BackOff?300:command.Action==QuickAction.DetourTurn?220:command.Action==QuickAction.DetourForward?600:80;
                                 var beforeFace=command.Action==QuickAction.Face?read():null;
-                                if(command.Action==QuickAction.HunterRevivePet||command.Action==QuickAction.HunterSummonPet||command.Action==QuickAction.Skill&&(command.RangedSkill||command.HunterSkill))RequireInput().Pulse(command.Key,hold,()=>command.InputStarted=true);else Pulse(backend,command.Key,hold);
+                                if(command.FixedPostDeath||command.Action==QuickAction.HunterRevivePet||command.Action==QuickAction.HunterSummonPet||command.Action==QuickAction.Skill&&(command.RangedSkill||command.HunterSkill))RequireInput().Pulse(command.Key,hold,()=>{command.InputStarted=true;if(command.FixedPostDeath)engine.HunterInputCompleted(command);});else Pulse(backend,command.Key,hold);
                                 if(beforeFace!=null)
                                 {
                                     Pause(250);var afterFace=read();write("原交互流程：F后朝向="+beforeFace.Facing.ToString("F3")+"→"+afterFace.Facing.ToString("F3")+"；位置="+beforeFace.X.ToString("F5")+","+beforeFace.Y.ToString("F5")+"→"+afterFace.X.ToString("F5")+","+afterFace.Y.ToString("F5"));
@@ -349,7 +349,7 @@ namespace WoWProbe
                                     }
                                 }
                                 if(command.Action==QuickAction.Face&&(plan.RangedCombat||plan.HunterMode)&&!command.AllowApproach)CancelQuickMovement(backend);
-                                if(command.HunterSkill||command.Action==QuickAction.HunterAspect||command.Action==QuickAction.HunterRevivePet||command.Action==QuickAction.HunterSummonPet)engine.HunterInputCompleted(command);
+                                if(!command.FixedPostDeath&&(command.HunterSkill||command.Action==QuickAction.HunterAspect||command.Action==QuickAction.HunterRevivePet||command.Action==QuickAction.HunterSummonPet))engine.HunterInputCompleted(command);
                                 if(command.Action==QuickAction.Food||command.Action==QuickAction.Drink)engine.RestInputCompleted(clock.ElapsedMilliseconds,command.Action==QuickAction.Food);
                                 // Recheck target, contact and chase limits on the next frame;
                                 // an accepted interaction key is not movement evidence.
