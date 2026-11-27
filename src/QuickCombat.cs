@@ -8,7 +8,7 @@ namespace WoWProbe
     {
         public bool AttackHostile;public bool MeleeConfirmed;public bool RangedSkill;public bool AllowApproach;public bool InputStarted;
         public bool HunterSkill,HunterDefense;public int HealthAtIssue;
-        public bool UsePetReviveChat;public bool CastFailuresKnown;public uint CastFailuresAtIssue;
+        public bool UsePetReviveChat,PriorityPetRecovery;public bool CastFailuresKnown;public uint CastFailuresAtIssue;
         public QuickAction Action; public ushort Key; public uint Token;public HashSet<uint> IgnoredTargets; public string Reason,SelectName;public int Hold;public bool Report,MouseTurn,RouteMovement,PauseForward,CombatRecovery;public QuickRouteFollower RouteContext;
     }
 
@@ -99,6 +99,16 @@ namespace WoWProbe
             if(o.BagFull&&!o.InCombat&&!permitFullBags&&!HunterRecoveryPending)return Stop("背包已满。");
             if(o.Health<0||o.Health>100)return Stop("生命值不可读，不能确认恢复完成。");
             if(!MapIdentity.Matches(o.MapId,o.MapMode,o.Zone,map,mode,zone))return Stop("地图发生变化。");
+            if(hunterState.Pet.PriorityRequired)
+            {
+                if(!o.CastingKnown)return Stop("施法状态不可读。");
+                if(sequence==o.Sequence)return Cmd(QuickAction.None,"等待新一帧宠物状态。",0);sequence=o.Sequence;
+                // Pause patrol/combat timers as well as inputs while reviving, including in combat.
+                started=progressAt=combatCastAt=now;resting=foodStealth=enterStealthPending=false;initialRest=true;
+                if(!hunterState.Pet.Waiting&&(o.Casting||o.Channeling)&&o.PetStateKnown&&o.PetDead)
+                    return new QuickCommand{Action=QuickAction.InterruptSkin,Key=27,PriorityPetRecovery=true,Reason="宝宝死亡：中断其他读条，优先复活宠物。"};
+                return hunterState.Pet.Step(o,now);
+            }
             if(route!=null)
             {
                 route.TickNearbySearch(o,now,token==0&&!resting);route.ObserveCombat(o);
@@ -442,7 +452,7 @@ namespace WoWProbe
             if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0||o.PlayerDead||o.PlayerGhost)return false;
             if(c.RouteContext!=null&&!c.RouteContext.CanOperate(o))return false;
             if(!ownedChat&&o.ChatOpenKnown&&o.ChatOpen)return false;
-            if(c.Action==QuickAction.HunterRevivePet||c.Action==QuickAction.HunterSummonPet)return !o.InCombat&&o.Health==100&&o.CastingKnown&&(c.InputStarted||!o.Casting&&!o.Channeling&&o.PetStateKnown&&(c.Action==QuickAction.HunterRevivePet?o.PetDead:!o.PetDead));
+            if(c.Action==QuickAction.HunterRevivePet||c.Action==QuickAction.HunterSummonPet)return (c.PriorityPetRecovery?o.Health>0&&o.Health<=100:!o.InCombat&&o.Health==100)&&o.CastingKnown&&(c.InputStarted||!o.Casting&&!o.Channeling&&o.PetStateKnown&&(c.Action==QuickAction.HunterRevivePet?o.PetDead:!o.PetDead));
             if(c.Action==QuickAction.HunterAspect)return !o.InCombat&&o.Health==100&&o.CastingKnown&&!o.Casting&&!o.Channeling;
             if(c.HunterSkill)
             {
@@ -457,7 +467,7 @@ namespace WoWProbe
             if(c.Action==QuickAction.Skill&&!c.HunterSkill&&!c.RangedSkill&&!c.MeleeConfirmed&&(!o.RangeKnown||!o.TargetInRange))return false;
             if(c.Action==QuickAction.Skill&&c.RangedSkill&&!RangedKeyAllowed(c.Key,o,c.MeleeConfirmed,c.InputStarted))return false;
             if(!o.InCombat&&Contested(o)&&(c.Action==QuickAction.Face||c.Action==QuickAction.Skill||c.Action==QuickAction.RouteProbe))return false;
-            if(c.Action==QuickAction.InterruptSkin)return o.InCombat&&(o.Casting||o.Channeling);
+            if(c.Action==QuickAction.InterruptSkin)return (c.PriorityPetRecovery?o.PetStateKnown&&o.PetDead&&o.CastingKnown:o.InCombat)&&(o.Casting||o.Channeling);
             if(c.RouteMovement)return !o.InCombat&&!(CanAcquire(o,c.AttackHostile)&&c.RouteContext.MayAcquire(o)&&(c.IgnoredTargets==null||!c.IgnoredTargets.Contains(o.TargetToken)));
             if(c.Action==QuickAction.ReturnToRoute)return c.RouteContext!=null&&c.RouteContext.Returning&&!o.InCombat;
             if(c.Action==QuickAction.RouteProbe)return c.RouteContext!=null&&!c.RouteContext.Returning&&!o.InCombat&&CanAcquire(o,c.AttackHostile)&&o.TargetToken==c.Token&&!o.TargetPositionKnown;

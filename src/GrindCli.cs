@@ -152,7 +152,7 @@ namespace WoWProbe
                     if(breakSchedule!=null)write(breakSchedule.Summary);
                     if(plan.RandomRoutes){string variants=Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"random-routes");QuickRouteVariants.Export(variants,"patrol",QuickRouteVariants.For(plan,plan.Route,20));if(plan.Vendor.RouteComplete)QuickRouteVariants.Export(variants,"npc",QuickRouteVariants.For(plan,QuickRouteVariants.Service(plan,plan.Vendor),10));}
                     if(plan.RevivePetAfterDeath&&!anchor.PetCallFeedbackSupported)throw new InvalidOperationException("召唤/复活宠物需要新版状态数据，请/reload加载0.5.16插件。");
-                    if(plan.RevivePetAfterDeath)write("死亡复活后恢复宠物已启用：吃喝结束，未死亡按"+plan.SummonPetKey+"召唤；死亡使用"+(plan.RevivePetWithCommand?"/cast 复活宠物":plan.RevivePetKey)+"，确认宠物存活再巡航。");
+                    if(plan.RevivePetAfterDeath)write("宠物恢复已启用：循环中宝宝死亡优先复活；角色复活后先吃喝，未死亡按"+plan.SummonPetKey+"召唤；死亡使用"+(plan.RevivePetWithCommand?"/cast 复活宠物":plan.RevivePetKey)+"，确认宠物存活再巡航。");
                     if(plan.HunterMode&&(!anchor.ExtendedActionRanges||!anchor.RangeErrorSupported||!anchor.ExtendedActionStates))throw new InvalidOperationException("猎人模式需要新版射程和技能冷却数据，请在游戏输入/reload加载0.5.14插件后开始。");
                     if(plan.HunterMode)write("猎人模式：复活后恢复满血按8；战斗中实际掉血才切换1、2；正常按技能行执行，冷却等待、距离不足先接近。");
                     if(anchor.BagFull&&!plan.Vendor.Enabled)throw new InvalidOperationException("背包已满，请先填写并启用售卖NPC坐标。");
@@ -215,7 +215,7 @@ namespace WoWProbe
                         if(observationLostAt>=0){observationLostAt=-1;write("游戏状态已恢复，继续核验当前动作。");}
                         hunterState.Observe(observed);
                         searchMotion.Observe(observed);
-                        if(breakSchedule!=null&&breakSchedule.RequestLogout(observed.InCombat,observed.PlayerDead||observed.PlayerGhost||recovery!=null,observed.Casting||observed.Channeling)){searchMotion.Stop();CancelQuickMovement(backend);breakSchedule.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-session.json"),true);write("已脱战，转入定时下线流程；NPC断点保留。");return;}
+                        if(breakSchedule!=null&&breakSchedule.RequestLogout(observed.InCombat,observed.PlayerDead||observed.PlayerGhost||recovery!=null||hunterState.Pet.Required,observed.Casting||observed.Channeling)){searchMotion.Stop();CancelQuickMovement(backend);breakSchedule.Save(Path.Combine(AppDomain.CurrentDomain.BaseDirectory,"quick-session.json"),true);write("已脱战，转入定时下线流程；NPC断点保留。");return;}
                         if(observed.Sequence!=frameSequence)
                         {
                             frameSequence=observed.Sequence;
@@ -283,7 +283,7 @@ namespace WoWProbe
                         QuickCommand command=engine.Step(observed,clock.ElapsedMilliseconds);
                         if(!engine.IsResting)restMovementStopped=false;
                         else searchMotion.Stop();
-                        if(engine.HunterRecoveryPending&&!observed.InCombat)searchMotion.Stop();
+                        if(engine.HunterRecoveryPending&&(!observed.InCombat||hunterState.Pet.PriorityRequired))searchMotion.Stop();
                         if(completedKills+engine.Kills!=reportedKills){reportedKills=completedKills+engine.Kills;killCounter.Record(reportedKills);CancelQuickMovement(backend);write("已确认目标死亡，窗口累计击杀="+killCounter.Total);}
                         if(completedLoots+engine.Loots!=reportedLoots){reportedLoots=completedLoots+engine.Loots;write("已确认拾取窗口完成，累计拾取="+reportedLoots);}
                         if(completedSkins+engine.Skins!=reportedSkins){reportedSkins=completedSkins+engine.Skins;write("已确认剥皮成功，累计剥皮="+reportedSkins);}

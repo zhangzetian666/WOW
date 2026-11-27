@@ -14,7 +14,7 @@ namespace WoWProbe
         public string OpeningKeys="242223",LoopKeys="2";
         public int SkillIntervalMs=750;
         public string[] SkillRows;public bool RandomRoutes,TimedBreaks;public double RouteVariation=.0006;public int RandomRouteSeed=20261123;
-        public bool RevivePetAfterDeath;public bool RevivePetWithCommand;public string RevivePetKey="",SummonPetKey="E";
+        public bool RevivePetAfterDeath;public bool RevivePetWithCommand;public string RevivePetKey="Q",SummonPetKey="E";
         public bool HunterMode;public bool UseRogueVanish=true;public bool RangedCombat;public bool AttackHostile;public bool NoChatCombat=true;public bool SkinWithInteract;public string StartAttackKey="1",LastTargetKey="F8",StopAttackKey="F9";
         public int RestBelowPercent=80;public string DrinkKey="";
         public QuickVendorSettings Vendor=new QuickVendorSettings();

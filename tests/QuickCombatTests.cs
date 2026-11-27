@@ -11,6 +11,52 @@ class QuickCombatTests
     {return new QuickCombat(o,750,false,null,"4563","4563",80,0,false,null,ranged,true,state);}
     static int Main()
     {
+        Test("pet dying during combat prioritizes Q and holds through damage until confirmed alive",()=>{
+            var o=Observation();o.PetStateKnown=o.PetExists=true;o.InCombat=true;o.Health=70;
+            var state=new QuickHunterState();state.Pet.Configure(true,"Q","E");var e=Hunter(o,state,true);
+            Step(e,o,0);o.PetDead=true;var c=Step(e,o,100);
+            Check(c.Action==QuickAction.HunterRevivePet&&c.Key==81&&c.PriorityPetRecovery&&!c.UsePetReviveChat&&QuickCombat.Matches(c,o));
+            c.InputStarted=true;o.Casting=true;Check(QuickCombat.Matches(c,o));e.HunterInputCompleted(c);
+            for(int t=200;t<12000;t+=1000){o.Health--;Check(Step(e,o,t).Action==QuickAction.None&&e.HunterRecoveryPending);}
+            o.Casting=false;o.PetDead=false;Check(Step(e,o,12100).Action==QuickAction.None&&!e.HunterRecoveryPending);
+            bool resumed=false;for(int t=12200;t<16000;t+=200){var next=Step(e,o,t);if(next.Action==QuickAction.Skill){resumed=true;Check(next.Key==49||next.Key==50);break;}}
+            Check(resumed);
+            o.PetDead=true;Check(Step(e,o,17000).Action==QuickAction.HunterRevivePet);
+        });
+        Test("routine pet death preempts resting and corpse work without full health or target requirements",()=>{
+            foreach(bool corpse in new[]{false,true}){
+                var o=Observation();o.PetStateKnown=o.PetDead=true;o.Health=50;o.FoodCount=10;o.TargetExists=corpse;o.TargetDead=corpse;o.LootKnown=o.Lootable=corpse;
+                var state=new QuickHunterState();state.Pet.Configure(true,"Q");var e=new QuickCombat(o,750,true,null,"4","4",80,0,false,null,true,false,state);
+                var c=Step(e,o,0);Check(c.Action==QuickAction.HunterRevivePet&&QuickCombat.Matches(c,o)&&!e.IsResting);
+                o.PetDead=false;Check(!QuickCombat.Matches(c,o));o.PetDead=true;o.PlayerGhost=true;Check(!QuickCombat.Matches(c,o));
+            }
+        });
+        Test("dead pet interrupts unrelated casts once and revive failure retries with interval in combat",()=>{
+            var o=Observation();o.PetStateKnown=o.PetDead=o.Casting=o.CastEventsKnown=true;
+            var state=new QuickHunterState();state.Pet.Configure(true,"Q");var e=Hunter(o,state,true);
+            var c=Step(e,o,0);Check(c.Action==QuickAction.InterruptSkin&&QuickCombat.Matches(c,o));
+            o.PetDead=false;Check(!QuickCombat.Matches(c,o));o.PetDead=true;o.Casting=false;o.InCombat=true;
+            c=Step(e,o,100);Check(c.Action==QuickAction.HunterRevivePet);e.HunterInputCompleted(c);o.CastFailed++;
+            Check(Step(e,o,200).Action==QuickAction.None);Check(Step(e,o,2100).Action==QuickAction.None);
+            c=Step(e,o,2200);Check(c.Action==QuickAction.HunterRevivePet&&QuickCombat.Matches(c,o));
+        });
+        Test("routine pet recovery only arms from fresh known death and is independent of hunter rotation",()=>{
+            var o=Observation();var state=new QuickHunterState();state.Pet.Configure(true,"Q");
+            o.PetDead=true;state.Observe(o);Check(!state.Pet.Required);
+            o.PetStateKnown=true;o.Fresh=false;state.Observe(o);Check(!state.Pet.Required);
+            o.Fresh=true;o.ReadFailures=1;state.Observe(o);Check(!state.Pet.Required);
+            o.ReadFailures=0;o.PetDead=false;state.Observe(o);Check(!state.Pet.Required);
+            o.PetDead=true;state.Observe(o);Check(state.Pet.PriorityRequired);
+            var disabled=new QuickHunterState();disabled.Observe(o);Check(!disabled.Pet.Required);
+            o.PetExists=true;o.PetDead=false;var e=new QuickCombat(o,750,false,null,"4","4",80,0,false,null,true,false,state);
+            Check(Step(e,o,0).Action==QuickAction.None&&!e.HunterRecoveryPending);
+        });
+        Test("player death replaces routine pet priority with food first recovery across retry",()=>{
+            var o=Observation();o.PetStateKnown=o.PetDead=true;var state=new QuickHunterState();state.Pet.Configure(true,"Q");state.Observe(o);Check(state.Pet.PriorityRequired);
+            o.PlayerDead=true;state.Observe(o);Check(state.Pet.Required&&!state.Pet.PriorityRequired);
+            state.Pet.Configure(true,"Q");o.PlayerDead=false;o.Health=40;o.FoodCount=10;
+            var e=Hunter(o,state,true);Check(Step(e,o,0).Action==QuickAction.Food);
+        });
         Test("dead pet may use explicit revive command while summon remains a keyboard action",()=>{
             var o=Observation();o.ChatOpenKnown=o.PetStateKnown=o.PetDead=true;var state=new QuickHunterState();state.Pet.Configure(true,"","E",true);state.Pet.PlayerDied();
             var e=new QuickCombat(o,750,false,null,"4","4",80,0,false,null,true,false,state);var c=Step(e,o,0);
