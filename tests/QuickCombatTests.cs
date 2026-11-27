@@ -13,6 +13,25 @@ class QuickCombatTests
     {return new QuickCombat(o,750,false,null,"4563","4563",80,0,false,null,ranged,true,state);}
     static int Main()
     {
+        Test("ranged opening does not retarget merely because player combat flag precedes target aggro",()=>{
+            var o=Observation();o.TargetVictimKnown=o.TargetCombatKnown=true;
+            o.RangedActionsMask=8;o.ActionRangeKnownMask=o.ActionsInRangeMask=127;
+            var e=new QuickCombat(o,750,false,null,"","4567",80,0,false,null,true);
+            Step(e,o,0);Step(e,o,40);Check(Step(e,o,100).Key==52);
+            o.InCombat=true; // Recorded live: player combat=true while target combat/victim have not updated.
+            var next=Step(e,o,900);Check(next.Action==QuickAction.Skill&&next.Key==53);
+            o.TargetInCombat=true;next=Step(e,o,1700);Check(next.Action==QuickAction.Skill&&next.Key==54);
+            o.Health=98;Check(Step(e,o,1800).Action==QuickAction.Scan);
+            o.TargetTargetsPlayer=true;Step(e,o,2200);Check(Step(e,o,2300).Action==QuickAction.Face);
+        });
+        Test("ranged defensive retarget latch clears after combat so next pull stays selected",()=>{
+            var o=Observation();o.TargetVictimKnown=o.TargetCombatKnown=true;
+            o.RangedActionsMask=8;o.ActionRangeKnownMask=o.ActionsInRangeMask=127;
+            var e=new QuickCombat(o,750,false,null,"","45",80,0,false,null,true);
+            Step(e,o,0);o.InCombat=true;o.Health=98;Check(Step(e,o,100).Action==QuickAction.Scan);
+            o.InCombat=false;o.Health=100;Step(e,o,500);Step(e,o,600);Check(Step(e,o,700).Key==52);
+            o.InCombat=true;Check(Step(e,o,1500).Key==53);
+        });
         Test("dead pet waits for combat to end then Q holds eleven seconds even if attacked or pet appears early",()=>{
             long clock=0;var o=Observation();o.PetStateKnown=o.PetExists=true;o.InCombat=o.TargetVictimKnown=o.TargetTargetsPlayer=true;o.Health=70;
             var state=new QuickHunterState(()=>clock);state.Pet.Configure(true,"Q","E");var e=Hunter(o,state,true);

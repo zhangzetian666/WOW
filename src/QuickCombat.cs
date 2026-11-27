@@ -32,7 +32,7 @@ namespace WoWProbe
         readonly int restBelow;readonly ushort drinkKey;
         readonly bool permitFullBags;readonly bool attackHostile;
         readonly bool hunterMode;readonly QuickHunterState hunterState;
-        bool hunterDefending,hunterPetMelee,hunterAnnounced;int hunterIndex,lastHealth=255;
+        bool hunterDefending,hunterPetMelee,hunterAnnounced,rangedDefenseNeeded;int hunterIndex,lastHealth=255;
         bool HunterUsingMelee {get{return hunterDefending||hunterPetMelee;}}
         bool hunterIssued,hunterIssuedDefense,hunterRangeBlocked,hunterErrorSeen;
         int hunterIssuedOpening,hunterIssuedLoop,hunterIssuedIndex;long hunterIssuedAt;uint hunterIssuedToken;
@@ -125,13 +125,17 @@ namespace WoWProbe
             if(resting&&(o.FoodCount==0||o.PowerType==0&&drinkKey==0))naturalRecovery=true;
             if(resting&&!naturalRecovery&&!foodStealth&&!o.InCombat&&now-restStarted>=60000)return Stop("60秒内未恢复满，检查食物和饮水绑定。");
             if(sequence==o.Sequence)return Cmd(QuickAction.None,"等待新一帧状态。",0);sequence=o.Sequence;
+            // A ranged pull can set player combat before the mob acquires its victim.
+            // Do not cancel that pull with Tab unless actual player damage calls for defense.
+            if(!o.InCombat)rangedDefenseNeeded=false;
+            else if(rangedCombat&&HealthDropped(o,lastHealth))rangedDefenseNeeded=true;
             if(hunterMode)
             {
                 if(!o.InCombat){hunterDefending=false;if(!hunterPetMelee){hunterAnnounced=false;hunterIndex=0;}}
                 else if(!hunterDefending&&HealthDropped(o,lastHealth))
                 {hunterDefending=true;hunterRangeBlocked=false;hunterIndex=0;openingPending=false;sliceRecovery=0;nextSkill=now;nextFace=now+1500;escapePhase=0;escapeCombat=false;}
-                lastHealth=o.Health;
             }
+            lastHealth=o.Health;
             bool petMelee=(hunterMode||rangedCombat)&&PetMeleeNeeded(o);
             if(petMelee!=hunterPetMelee)
             {hunterPetMelee=petMelee;hunterAnnounced=hunterIssued=hunterRangeBlocked=false;hunterIndex=0;nextSkill=nextFace=now;}
@@ -156,7 +160,7 @@ namespace WoWProbe
             if(urgentDefenseScan){urgentDefenseScan=false;if(o.InCombat)return Cmd(QuickAction.Scan,"剥皮中断后立即选择附近攻击者。",9);}
             bool lockedDead=token!=0&&(HasDeathEvidence(o,token)||o.TargetExists&&o.TargetIdentityKnown&&o.TargetToken==token&&o.TargetDeadKnown&&o.TargetDead);
             if(o.InCombat&&token!=0&&!looted&&!lockedDead&&!o.TargetExists){if(route!=null)route.Interrupt(o);token=0;nextScan=Math.Min(nextScan,now);}
-            if(o.InCombat&&(!hunterMode||hunterDefending)&&!looted&&!lockedDead&&o.TargetExists&&o.TargetDeadKnown&&!o.TargetDead&&o.TargetVictimKnown&&!o.TargetTargetsPlayer&&!AttackingOwnPet(o))
+            if(o.InCombat&&(!hunterMode||hunterDefending)&&(!rangedCombat||rangedDefenseNeeded)&&!looted&&!lockedDead&&o.TargetExists&&o.TargetDeadKnown&&!o.TargetDead&&o.TargetVictimKnown&&!o.TargetTargetsPlayer&&!AttackingOwnPet(o))
             {
                 if(route!=null)route.Interrupt(o);token=0;resting=false;initialRest=true;
                 if(now-lastDefenseScan<300)return Cmd(QuickAction.None,"已受攻击，等待切换到攻击本人的怪物。",0);
