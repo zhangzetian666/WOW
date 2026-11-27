@@ -47,8 +47,8 @@ class QuickRouteTests
                 var p=Plan();p.UseRogueVanish=enabled;var o=O();o.PowerType=powerType;o.Power=100;o.Health=25;
                 var e=new QuickCombat(o,750,false,new QuickRouteFollower(p,o));Check(Step(e,o,0).Action==QuickAction.Food);e.RestInputCompleted(1500,true);
                 bool stealth=enabled&&powerType==3;Check(Step(e,o,1600).Action==(stealth?QuickAction.StealthEnter:QuickAction.None));
-                o.Health=100;Check(Step(e,o,11400).Action==QuickAction.None&&e.IsResting);
-                Check(Step(e,o,11500).Action==(stealth?QuickAction.StealthExit:QuickAction.None)&&!e.IsResting);
+                o.Health=99;o.Power=5;Check(Step(e,o,1700).Action==QuickAction.None&&e.IsResting);
+                o.Health=100;Check(Step(e,o,1800).Action==(stealth?QuickAction.StealthExit:QuickAction.None)&&!e.IsResting);
             }
         });
         Test("multiple failed targets stay skipped while patrol advances but attackers override cooldown",()=>{var o=O();Target(o);var f=new QuickRouteFollower(Plan(),o);f.TickNearbySearch(o,0,true);f.TickNearbySearch(o,2600,true);Step(f,o,2600);var e=new QuickCombat(o,750,false,f);Step(e,o,2700);Check(Step(e,o,14700).Action==QuickAction.ReturnToRoute);Step(e,o,14800);o.TargetToken=9;Step(e,o,14900);Check(Step(e,o,26900).Action==QuickAction.ReturnToRoute);o.TargetToken=8;var c=Step(e,o,27000);Check(c.RouteMovement&&QuickCombat.Matches(c,o)&&!e.ShouldAcquire(o,27000));o.TargetToken=9;Check(QuickCombat.Matches(c,o)&&!e.ShouldAcquire(o,27100));o.TargetToken=10;Check(!QuickCombat.Matches(c,o)&&e.ShouldAcquire(o,27200));o.TargetToken=8;o.InCombat=true;Check(e.ShouldAcquire(o,27300)&&!QuickCombat.Matches(c,o));o.InCombat=false;Check(e.ShouldAcquire(o,44700));o.TargetToken=9;Check(!e.ShouldAcquire(o,44700)&&e.ShouldAcquire(o,56900));});

@@ -14,7 +14,7 @@ namespace WoWProbe
     public sealed class QuickPetRecovery
     {
         bool enabled,pending,attempted,sawCast,petKeySent,reviveWithCommand,afterPlayerDeath;
-        bool ignoreManaUntilCombat,waitForLivingPet;int fixedStage;long fixedSentAt;
+        bool waitForLivingPet;int fixedStage;long fixedSentAt;
         bool reviveBarrier;long reviveSentAt,quietSince=-1;int quietSequence=-1,quietFrames;
         readonly System.Func<long> clock;
         ushort reviveKey,summonKey;long issuedAt,nextTry,nextReport;uint failedBase;bool failuresKnown;
@@ -24,12 +24,11 @@ namespace WoWProbe
         public bool PostDeathRequired {get{return Required&&afterPlayerDeath;}}
         public bool PostDeathStarted {get{return PostDeathRequired&&fixedStage>0;}}
         public bool InputLocked {get{return reviveBarrier;}}
-        public bool IgnoreManaRest {get{return PostDeathRequired||ignoreManaUntilCombat;}}
         public QuickPetRecovery(System.Func<long> clock=null)
         {var watch=System.Diagnostics.Stopwatch.StartNew();this.clock=clock??(()=>watch.ElapsedMilliseconds);}
         public void Configure(bool enable,string binding,string summonBinding="E",bool useCommand=false)
         {enabled=enable;reviveWithCommand=useCommand;reviveKey=enable&&!useCommand?QuickCombatHotkeys.Key(binding,"复活宠物"): (ushort)0;summonKey=enable?QuickCombatHotkeys.Key(summonBinding,"召唤宠物"):(ushort)0;if(!enable)reviveBarrier=false;ObservationLost();nextReport=0;}
-        public void PlayerDied(){pending=afterPlayerDeath=true;attempted=sawCast=petKeySent=ignoreManaUntilCombat=waitForLivingPet=reviveBarrier=false;fixedStage=0;nextTry=nextReport=0;ObservationLost();}
+        public void PlayerDied(){pending=afterPlayerDeath=true;attempted=sawCast=petKeySent=waitForLivingPet=reviveBarrier=false;fixedStage=0;nextTry=nextReport=0;ObservationLost();}
         public void ObservationLost(){quietSince=-1;quietSequence=-1;quietFrames=0;}
         void ReviveInputAccepted(){reviveBarrier=true;reviveSentAt=clock();ObservationLost();}
         QuickCommand WaitForRevive(FarmObservation o,long now)
@@ -43,7 +42,6 @@ namespace WoWProbe
         }
         public void Observe(FarmObservation o)
         {
-            if(o.InCombat)ignoreManaUntilCombat=false;
             if(waitForLivingPet){if(o.PetStateKnown&&o.PetExists&&!o.PetDead)waitForLivingPet=false;return;}
             if(enabled&&!pending&&o.PetStateKnown&&o.PetDead){pending=true;afterPlayerDeath=attempted=sawCast=petKeySent=false;nextTry=nextReport=0;}
         }
@@ -55,7 +53,7 @@ namespace WoWProbe
                 if(!PostDeathRequired)return;
                 if(fixedStage==0&&c.Action==QuickAction.HunterSummonPet){fixedStage=1;fixedSentAt=clock();}
                 else if(fixedStage==1&&c.Action==QuickAction.HunterRevivePet){fixedStage=2;fixedSentAt=clock();ReviveInputAccepted();}
-                else if(fixedStage==2&&c.Action==QuickAction.HunterAspect){pending=false;ignoreManaUntilCombat=waitForLivingPet=true;}
+                else if(fixedStage==2&&c.Action==QuickAction.HunterAspect){pending=false;waitForLivingPet=true;}
                 return;
             }
             attempted=petKeySent=true;sawCast=false;issuedAt=clock();failedBase=c.CastFailuresAtIssue;failuresKnown=c.CastFailuresKnown;
