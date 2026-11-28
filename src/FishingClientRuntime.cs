@@ -73,7 +73,7 @@ namespace WoWProbe
                         if(settings.WhisperReply&&info.Known){string answer=replies.Pending(info.WhisperCount,info.SenderHash);if(answer!=null){CancelSession("回复新私信。");host.Chat(answer,true,info.SenderHash,info.WhisperCount);replies.Sent(info.WhisperCount,info.SenderHash);continue;}}
                         if(settings.ChatAtLap&&picker.CompletedLaps>lastSpokenLap){CancelSession("三段轮换完成，发送圈末交流。");host.Chat(phrases.Next(),false);lastSpokenLap=picker.CompletedLaps;continue;}
                         if(periodicKey.Due(now)){CancelSession("定时技能已到期，当前杆已结束。");auxiliary.Start(FishingAuxiliaryKind.TimedKey,(ushort)(48+settings.TimedKey));Report("准备定时按键"+settings.TimedKey+"，按下后保留10秒施法时间。");continue;}
-                        if(activity.BagDue(now)){CancelSession("执行到期背包查看。");auxiliary.Start(FishingAuxiliaryKind.Bag,66);Report("准备按B查看背包，3秒后再按B。");continue;}
+                        if(activity.BagDue(now)){CancelSession("执行到期背包查看。");auxiliary.Start(FishingAuxiliaryKind.Bag,66,(long)Math.Round(settings.BagOpenSeconds*1000));Report("准备按B查看背包，保持"+settings.BagOpenSeconds.ToString("0.0")+"秒后再按B。");continue;}
                         if(settings.RandomSpots&&arrived>=0&&(stay.Due(now)||settings.ChangeAfterCatch&&seenSessionCatches>0))
                         {CancelSession("本钓点驻留结束，沿连线换点。");int previous=picker.Segment;point=picker.Next();stay.Select(settings.StayInterval());BeginTravel(o.Farm,previous);continue;}
                     }

@@ -18,7 +18,7 @@ namespace WoWProbe
         readonly FishingRestartSchedule restart=new FishingRestartSchedule();readonly Stopwatch restartClock=Stopwatch.StartNew();
         public FishingClientForm()
         {
-            Text="独立钓鱼客户端 · FISHING 1.0.10";Font=new Font("Microsoft YaHei UI",10);Size=new Size(1050,820);MinimumSize=new Size(950,730);StartPosition=FormStartPosition.CenterScreen;
+            Text="独立钓鱼客户端 · FISHING 1.0.11";Font=new Font("Microsoft YaHei UI",10);Size=new Size(1050,820);MinimumSize=new Size(950,730);StartPosition=FormStartPosition.CenterScreen;
             settings=LoadSettings();var root=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,Padding=new Padding(12)};root.RowStyles.Add(new RowStyle(SizeType.Absolute,60));root.RowStyles.Add(new RowStyle(SizeType.Percent,70));root.RowStyles.Add(new RowStyle(SizeType.Percent,30));Controls.Add(root);
             var top=Row();top.Controls.Add(Button("开始钓鱼",StartFishing));top.Controls.Add(Button("停止 / F12",StopFishing));top.Controls.Add(Button("保存设置",Save));top.Controls.Add(Button("导入方案",Import));top.Controls.Add(Button("导出方案",Export));top.Controls.Add(status);root.Controls.Add(top,0,0);
             var tabs=new TabControl{Dock=DockStyle.Fill};root.Controls.Add(tabs,0,1);root.Controls.Add(log,0,2);
@@ -28,7 +28,7 @@ namespace WoWProbe
             Pair(page,"reelMin","reelMax","鱼讯后随机收杆延迟（秒，最高1秒）",settings.ReelDelay,0,1,2);
             Check(page,"audio","声音识别（系统播放声音，不采集麦克风）",settings.UseAudio);Check(page,"visual","水花图像识别（静音可用，需要选择观察区域）",settings.UseVisual);
             Check(page,"random","启用三条连线随机钓点（不勾选则在最近的已保存点钓鱼）",settings.RandomSpots);Pair(page,"stayMin","stayMax","每个随机钓点驻留（分钟）",settings.StayInterval(),.1m,1440,1,true);
-            Check(page,"bags","定时按B查看背包，3秒后再按B（无需扩展插件反馈）",settings.PeekBags);Pair(page,"bagMin","bagMax","查看背包间隔（分钟）",settings.BagMinutes,.1m,1440,1,true);
+            Check(page,"bags","定时按B查看背包，等待后再按B（无需扩展插件反馈）",settings.PeekBags);Pair(page,"bagMin","bagMax","查看背包间隔（分钟）",settings.BagMinutes,.1m,1440,1,true);Number(page,"bagOpenSeconds","背包保持打开（秒）",.1m,3600,settings.BagOpenSeconds,1);
             Check(page,"timed","启用随机下线和重新上线",settings.TimedSessions);Pair(page,"onMin","onMax","每轮上线时长（小时）",settings.OnlineHours,.01m,24,2);Pair(page,"offMin","offMax","每次离线等待（小时）",settings.OfflineHours,.01m,24,2);
             Info(page,"背包查看、换点、普通聊天及定时下线都等当前杆结束。重新上线后重新抽取在线时长。账号登录需要凭据时会等待，不保存密码。");
             page=Page(tabs,"定时按键");Check(page,"periodicKey","启用定时施放快捷键",settings.TimedKeyEnabled);
@@ -69,6 +69,7 @@ namespace WoWProbe
             settings.Fishing.Settings.CastKey=(ushort)(48+V("cast"));settings.CastDelay=Range("castMin","castMax");settings.ReelDelay=Range("reelMin","reelMax");settings.BagMinutes=Range("bagMin","bagMax");settings.OnlineHours=Range("onMin","onMax");settings.OfflineHours=Range("offMin","offMax");
             settings.RandomSpots=C("random");settings.StayRange=Range("stayMin","stayMax");settings.StayMinutes=settings.StayRange.Min;settings.PeekBags=C("bags");settings.TimedSessions=C("timed");settings.UseAudio=C("audio");settings.UseVisual=C("visual");settings.ChatAtLap=C("chat");settings.WhisperReply=C("whisper");settings.SplashSensitivity=V("splash");
             settings.AutoRetry=C("retry");settings.RetrySeconds=(int)V("retrySeconds");
+            settings.BagOpenSeconds=V("bagOpenSeconds");
             settings.TimedKeyEnabled=C("periodicKey");settings.TimedKey=(int)V("periodicKeyValue");settings.KeyMinutes=Range("keyMin","keyMax");
             var cal=settings.Fishing.Calibration;cal.AxisScale=V("axis");cal.TurnRadiansPerSecond=V("turn");cal.ForwardUnitsPerSecond=V("speed");cal.Confirmed=true;settings.Service.Calibration=cal.Clone();settings.Service.Vendor.Enabled=C("vendor");settings.Service.Repair.Enabled=C("repair");settings.Service.Vendor.Name=npc.Text.Trim();settings.Service.Repair.Name=npc.Text.Trim();
         }
@@ -134,6 +135,7 @@ namespace WoWProbe
             SetNumber("cast",settings.Fishing.Settings.CastKey-48);SetRange("cast",settings.CastDelay);SetRange("reel",settings.ReelDelay);SetRange("bag",settings.BagMinutes);SetRange("on",settings.OnlineHours);SetRange("off",settings.OfflineHours);
             SetRange("stay",settings.StayInterval());SetNumber("splash",settings.SplashSensitivity);SetNumber("axis",settings.Fishing.Calibration.AxisScale);SetNumber("turn",settings.Fishing.Calibration.TurnRadiansPerSecond);SetNumber("speed",settings.Fishing.Calibration.ForwardUnitsPerSecond);
             checks["retry"].Checked=settings.AutoRetry;SetNumber("retrySeconds",settings.RetrySeconds);
+            SetNumber("bagOpenSeconds",settings.BagOpenSeconds);
             checks["periodicKey"].Checked=settings.TimedKeyEnabled;SetNumber("periodicKeyValue",settings.TimedKey);SetRange("key",settings.KeyMinutes);
             checks["audio"].Checked=settings.UseAudio;checks["visual"].Checked=settings.UseVisual;checks["random"].Checked=settings.RandomSpots;checks["bags"].Checked=settings.PeekBags;checks["timed"].Checked=settings.TimedSessions;checks["chat"].Checked=settings.ChatAtLap;checks["whisper"].Checked=settings.WhisperReply;checks["vendor"].Checked=settings.Service.Vendor.Enabled;checks["repair"].Checked=settings.Service.Repair.Enabled;npc.Text=settings.Service.Vendor.Name;RefreshSummary();
         }

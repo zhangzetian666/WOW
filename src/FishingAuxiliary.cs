@@ -6,14 +6,14 @@ namespace WoWProbe
     // Foreground loss suspends input without forgetting a key that was already sent.
     public sealed class FishingAuxiliaryCycle
     {
-        public FishingAuxiliaryKind Kind{get;private set;}int phase;ushort key;long readyAt;
+        public FishingAuxiliaryKind Kind{get;private set;}int phase;ushort key;long readyAt,bagWaitMs=3000;
         public bool Active{get{return Kind!=FishingAuxiliaryKind.None;}}
-        public void Start(FishingAuxiliaryKind kind,ushort value)
-        {if(Active||kind==FishingAuxiliaryKind.None)throw new InvalidOperationException("已有定时动作正在进行。");Kind=kind;key=value;phase=1;readyAt=0;}
+        public void Start(FishingAuxiliaryKind kind,ushort value,long bagOpenMs=3000)
+        {if(Active||kind==FishingAuxiliaryKind.None)throw new InvalidOperationException("已有定时动作正在进行。");if(bagOpenMs<100||bagOpenMs>3600000)throw new ArgumentOutOfRangeException("bagOpenMs");Kind=kind;key=value;phase=1;readyAt=0;bagWaitMs=bagOpenMs;}
         public ushort KeyDue(long now,bool casting)
         {if(!Active||casting)return 0;if(phase==1||Kind==FishingAuxiliaryKind.Bag&&phase==2&&now>=readyAt)return key;return 0;}
         public void InputSent(long now)
-        {if(phase==1){phase=2;readyAt=checked(now+(Kind==FishingAuxiliaryKind.Bag?3000:10000));}else if(Kind==FishingAuxiliaryKind.Bag&&phase==2&&now>=readyAt)phase=3;else throw new InvalidOperationException("定时按键顺序无效。");}
+        {if(phase==1){phase=2;readyAt=checked(now+(Kind==FishingAuxiliaryKind.Bag?bagWaitMs:10000));}else if(Kind==FishingAuxiliaryKind.Bag&&phase==2&&now>=readyAt)phase=3;else throw new InvalidOperationException("定时按键顺序无效。");}
         public bool Finished(long now,bool casting)
         {return Active&&!casting&&(Kind==FishingAuxiliaryKind.Bag?phase==3:phase==2&&now>=readyAt);}
         public void Clear(){Kind=FishingAuxiliaryKind.None;phase=0;}

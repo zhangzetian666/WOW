@@ -101,6 +101,9 @@ class FishingClientTests
             try{s.Save(path);var loaded=FishingClientSettings.Load(path);Check(loaded.StayInterval().Min==10&&loaded.StayInterval().Max==15&&loaded.AutoRetry&&loaded.RetrySeconds==47);var copy=loaded.Clone();copy.StayRange.Min=11;Check(loaded.StayRange.Min==10);}finally{File.Delete(path);}
         });
         Test("invalid stay bounds or restart delay cannot start",()=>{var s=Settings();s.StayRange=new FishingRange(15,10);Reject(()=>s.Validate(false));s=Settings();s.RetrySeconds=0;Reject(()=>s.Validate(false));s.RetrySeconds=3601;Reject(()=>s.Validate(false));});
+        Test("custom bag open seconds save and import while old profiles default to three seconds",()=>{
+            var s=Settings();Check(s.BagOpenSeconds==3);s.BagOpenSeconds=7.5;string path=Path.GetTempFileName();try{s.Save(path);Check(FishingClientSettings.Load(path).BagOpenSeconds==7.5);var json=System.Text.RegularExpressions.Regex.Replace(File.ReadAllText(path),",?\"BagOpenSeconds\":7\\.5","");File.WriteAllText(path,json);Check(FishingClientSettings.Load(path).BagOpenSeconds==3);}finally{File.Delete(path);}s.BagOpenSeconds=0;Reject(()=>s.Validate(false));s.BagOpenSeconds=Double.NaN;Reject(()=>s.Validate(false));
+        });
         Console.WriteLine("Fishing client: "+passed+" passed, "+failed+" failed. Pure/synthetic checks; no game input.");return failed==0?0:1;
     }
 }

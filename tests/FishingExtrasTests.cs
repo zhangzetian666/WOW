@@ -127,6 +127,9 @@ class FishingExtrasTests
         Test("stop emergency nonretryable failures and disabled retry cancel automatic launches",()=>{
             var c=new FishingRestartSchedule();c.RequestStart();c.Cancel();Check(!c.Ready(100000,false,true,true,1)&&!c.Armed);c.RequestStart();c.Ready(0,false,false,true,1);Check(!c.Ready(1000,false,false,true,1)&&c.DueAt<0);Check(!c.Ready(2000,false,true,false,1));Check(!c.Ready(3000,false,true,true,1));c.Cancel();Check(!c.Ready(10000,false,true,true,1));
         });
+        Test("custom bag duration starts after B and survives delayed foreground return",()=>{
+            foreach(long delay in new long[]{100,7500,45000}){var c=new FishingAuxiliaryCycle();c.Start(FishingAuxiliaryKind.Bag,66,delay);Check(c.KeyDue(1000,false)==66);c.InputSent(1000);Check(c.KeyDue(1000+delay-1,false)==0);Check(c.KeyDue(1000+delay,false)==66);Check(c.KeyDue(1000+delay+2000,true)==0);Check(c.KeyDue(1000+delay+3000,false)==66);c.InputSent(1000+delay+3000);Check(c.Finished(1000+delay+3000,false)&&c.KeyDue(1000+delay+4000,false)==0);}
+        });
         Console.WriteLine("Fishing extras: "+passed+" passed, "+failed+" failed. Synthetic observations only; no game input.");return failed==0?0:1;
     }
     static void PaintBobber(Bitmap image,int x,int y){using(var g=Graphics.FromImage(image)){g.Clear(Color.FromArgb(45,77,105));using(var brush=new SolidBrush(Color.FromArgb(100,35,30)))g.FillRectangle(brush,x,y,14,6);}}
