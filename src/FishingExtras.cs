@@ -34,12 +34,15 @@ namespace WoWProbe
         public bool ChangeAfterCatch;public double StayMinutes=10;public FishingRange CastDelay=new FishingRange(.3,1),ReelDelay=new FishingRange(0,1),BagMinutes=new FishingRange(10,15),OnlineHours=new FishingRange(1,2),OfflineHours=new FishingRange(1,2);
         public FishingRegion VisualRegion=new FishingRegion();public double SplashSensitivity=3.5;
         public bool TimedKeyEnabled;public int TimedKey=8;public FishingRange KeyMinutes=new FishingRange(10,15);
+        public FishingRange StayRange;public bool AutoRetry;public int RetrySeconds=30;
+        public FishingRange StayInterval(){return StayRange??new FishingRange(StayMinutes,StayMinutes);}
         public bool RequiresSocialFeedback(){return ChatAtLap||WhisperReply;}
         public void Validate(bool ready)
         {
             if(Version!=1||Fishing==null||Service==null||Points==null||Points.Count>3||VisualRegion==null||CastDelay==null||ReelDelay==null||BagMinutes==null||OnlineHours==null||OfflineHours==null)throw new FormatException("钓鱼配置无效。");
             CastDelay.Validate(0,60,"抛竿延迟（秒）");ReelDelay.Validate(0,1,"收杆延迟（秒）");BagMinutes.Validate(.1,1440,"背包间隔（分）");OnlineHours.Validate(.01,24,"在线时长（小时）");OfflineHours.Validate(.01,24,"离线时长（小时）");
             if(KeyMinutes==null||TimedKey<0||TimedKey>9)throw new FormatException("定时快捷键请填写0至9，间隔范围不能为空。");KeyMinutes.Validate(.1,1440,"定时按键间隔（分）");
+            StayInterval().Validate(.1,1440,"随机钓点驻留（分）");if(RetrySeconds<1||RetrySeconds>3600)throw new FormatException("自动重试间隔请填写1至3600秒。");
             if(!NavigationMath.InRange(StayMinutes,.1,1440)||!NavigationMath.InRange(SplashSensitivity,1.5,10))throw new FormatException("驻留时间或水花灵敏度无效。");
             foreach(var p in Points)if(p==null||!NavigationMath.InRange(p.X,0,1)||!NavigationMath.InRange(p.Y,0,1)||!NavigationMath.InRange(p.Facing,0,Math.PI*2))throw new FormatException("钓点坐标或朝向无效。");
             if(!ready)return;

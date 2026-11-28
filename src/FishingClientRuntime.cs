@@ -11,14 +11,16 @@ namespace WoWProbe
         readonly object cacheGate=new object();FishingObservation cached;volatile bool stopping;Thread worker;
         readonly FishingFocusRecovery focusRecovery=new FishingFocusRecovery();long lastLootNotice=-10000;
         readonly FishingAuxiliaryCycle auxiliary=new FishingAuxiliaryCycle();FishingPeriodicKeyClock periodicKey;
+        readonly FishingStayClock stay=new FishingStayClock();readonly InputFailureLatch fishingSafety=new InputFailureLatch();bool focusOnStart=true;long focusResumeAt;
         FishingNativeHost host;FishingSession session;FishingSoundDetector sound;FishingSplashDetector splash;WindowsFishingAudioCapture audio;
         FishingActivityClock activity;FishingSpotPicker picker;FishingPoint point;FishingPhrases phrases;readonly FishingWhisperPolicy replies=new FishingWhisperPolicy();
         Navigator travel;QuickVendorEngine vendor;FarmObservation forwardAnchor;int forwardHold;double measuredTravelSpeed=.04;long arrived=-1,castStarted=-1,nextFrame,lastAudible=-100000,lastNotice=-100000;int countedCasts,countedReels,countedCatches,lastSpokenLap;
         string lastLog="";int seenSessionCasts,seenSessionReels,seenSessionCatches;bool bagSuppressed;long lastSignalReport=-1,lastSignalNotice=-10000;
         public volatile bool Running;public string Status="未开始";public int Casts{get{return countedCasts;}}public int Reels{get{return countedReels;}}public int Catches{get{return countedCatches;}}public int VendorVisits{get;private set;}public int Laps{get{return picker==null?0:picker.CompletedLaps;}}
         public FishingClientRuntime(FishingClientSettings settings,string directory,Action<string> log){this.settings=settings.Clone();this.directory=directory;this.log=log;}
-        public void Start(){if(worker!=null)throw new InvalidOperationException("钓鱼已启动。");settings.Validate(true);worker=new Thread(Run){IsBackground=true,Name="Independent fishing client"};worker.SetApartmentState(ApartmentState.MTA);Running=true;worker.Start();}
-        public void Stop(){stopping=true;if(session!=null)session.Stop("用户停止钓鱼。");}
+        public bool WorkerAlive{get{return worker!=null&&worker.IsAlive;}}public volatile bool Retryable;
+        public void Start(bool focus=true){if(worker!=null)throw new InvalidOperationException("钓鱼已启动。");settings.Validate(true);focusOnStart=focus;worker=new Thread(Run){IsBackground=true,Name="Independent fishing client"};worker.SetApartmentState(ApartmentState.MTA);Running=true;worker.Start();}
+        public void Stop(){stopping=true;Retryable=false;if(session!=null)session.Stop("用户停止钓鱼。");}
         public void Dispose(){Stop();if(worker!=null&&worker!=Thread.CurrentThread)worker.Join(5000);}
         void Report(string text){Status=text;if(text!=lastLog||clock.ElapsedMilliseconds-lastNotice>30000){lastLog=text;lastNotice=clock.ElapsedMilliseconds;log(text);}}
         void Run()
@@ -26,8 +28,8 @@ namespace WoWProbe
             bool owner=false;Mutex exclusive=null;
             try{
                 exclusive=new Mutex(true,"WoWProbe-QuickCombat",out owner);if(!owner)throw new InvalidOperationException("请先关闭自动打怪客户端，避免同时控制游戏。");
-                host=new FishingNativeHost(settings.Fishing.Calibration,()=>stopping,()=>clock.ElapsedMilliseconds,Report);host.Focus();
-                var first=host.Read();ValidateWorld(first);activity=new FishingActivityClock(settings,clock.ElapsedMilliseconds);periodicKey=new FishingPeriodicKeyClock(settings,clock.ElapsedMilliseconds);picker=new FishingSpotPicker(settings);point=picker.Start(first.Farm);
+                host=new FishingNativeHost(settings.Fishing.Calibration,()=>stopping,()=>clock.ElapsedMilliseconds,Report);if(focusOnStart)host.Focus();else if(!host.Foreground)throw new InvalidOperationException("自动重试等待游戏回到前台，不切换其他窗口。");
+                var first=host.Read();ValidateWorld(first);activity=new FishingActivityClock(settings,clock.ElapsedMilliseconds);periodicKey=new FishingPeriodicKeyClock(settings,clock.ElapsedMilliseconds);picker=new FishingSpotPicker(settings);point=picker.Start(first.Farm);stay.Select(settings.StayInterval());
                 splash=new FishingSplashDetector(settings.SplashSensitivity);if(settings.ChatAtLap)phrases=new FishingPhrases(Path.Combine(directory,"assets","fishing","chat-phrases.txt"));
                 if(settings.UseAudio){sound=new FishingSoundDetector(Path.Combine(directory,"assets","fishing"));audio=new WindowsFishingAudioCapture((samples,rate,end,broken)=>{if(broken){sound.Reset();return;}double energy=0;foreach(float v in samples)energy+=v*v;if(samples.Length>0&&energy/samples.Length>.00000001)Interlocked.Exchange(ref lastAudible,end);sound.Push(samples,rate,end);},()=>clock.ElapsedMilliseconds);try{audio.Start();}catch(Exception e){Report("声音监听不可用，使用水花图像："+e.Message);}}
                 var social=settings.RequiresSocialFeedback()?host.Social(first):new FishingSocialObservation();if(settings.RequiresSocialFeedback()&&!social.Known)throw new InvalidOperationException("自动聊天需要配套插件反馈，请在游戏输入 /reload；定时B和定时技能不需要此扩展反馈。");replies.Discard(social.WhisperCount);
@@ -44,7 +46,7 @@ namespace WoWProbe
                     if(!host.ModifiersReleased){SuspendInput("检测到Alt/Ctrl/Shift仍按住");host.Idle(200);continue;}
                     var o=host.Read();if(!host.Foreground){SuspendInput("读取画面期间游戏失去前台");continue;}ValidateWorld(o);long now=clock.ElapsedMilliseconds;
                     if(o.Farm.ChatOpen){CancelSession("用户打开了聊天框。");focusRecovery.Suspend();Report("等待用户关闭聊天框。");host.Idle(200);continue;}
-                    if(focusRecovery.Waiting){if(!focusRecovery.ResumeReady(now,host.Foreground,host.ModifiersReleased,!o.Farm.ChatOpen)){host.Idle(100);continue;}
+                    if(focusRecovery.Waiting){if(now<focusResumeAt||!focusRecovery.ResumeReady(now,host.Foreground,host.ModifiersReleased,!o.Farm.ChatOpen)){host.Idle(100);continue;}
                         if(vendor!=null)vendor=new QuickVendorEngine(vendor.Checkpoint,o);else if(travel!=null)BeginTravel(o.Farm,picker.Segment);
                         Report("游戏已回到前台且按键已松开，自动恢复钓鱼任务。");}
                     if(auxiliary.Active){TickAuxiliary(o,now);host.Idle(50);continue;}
@@ -72,8 +74,8 @@ namespace WoWProbe
                         if(settings.ChatAtLap&&picker.CompletedLaps>lastSpokenLap){CancelSession("三段轮换完成，发送圈末交流。");host.Chat(phrases.Next(),false);lastSpokenLap=picker.CompletedLaps;continue;}
                         if(periodicKey.Due(now)){CancelSession("定时技能已到期，当前杆已结束。");auxiliary.Start(FishingAuxiliaryKind.TimedKey,(ushort)(48+settings.TimedKey));Report("准备定时按键"+settings.TimedKey+"，按下后保留10秒施法时间。");continue;}
                         if(activity.BagDue(now)){CancelSession("执行到期背包查看。");auxiliary.Start(FishingAuxiliaryKind.Bag,66);Report("准备按B查看背包，3秒后再按B。");continue;}
-                        if(settings.RandomSpots&&arrived>=0&&(now-arrived>=settings.StayMinutes*60000||settings.ChangeAfterCatch&&seenSessionCatches>0))
-                        {CancelSession("本钓点驻留结束，沿连线换点。");int previous=picker.Segment;point=picker.Next();BeginTravel(o.Farm,previous);continue;}
+                        if(settings.RandomSpots&&arrived>=0&&(stay.Due(now)||settings.ChangeAfterCatch&&seenSessionCatches>0))
+                        {CancelSession("本钓点驻留结束，沿连线换点。");int previous=picker.Segment;point=picker.Next();stay.Select(settings.StayInterval());BeginTravel(o.Farm,previous);continue;}
                     }
                     if(session==null)
                     {
@@ -92,11 +94,11 @@ namespace WoWProbe
                 }
             }
             catch(OperationCanceledException){Report("钓鱼已停止。");}
-            catch(Exception e){Report("钓鱼暂停："+e.Message);}
-            finally{if(session!=null)session.Stop("钓鱼退出，释放按键。");if(audio!=null)audio.Dispose();if(owner&&exclusive!=null)exclusive.ReleaseMutex();if(exclusive!=null)exclusive.Dispose();Running=false;}
+            catch(Exception e){Retryable=!stopping&&!fishingSafety.Faulted&&(host==null||!host.InputFaulted)&&e.Message.IndexOf("emergency",StringComparison.OrdinalIgnoreCase)<0;Report("钓鱼暂停："+e.Message);}
+            finally{if(session!=null)session.Stop("钓鱼退出，释放按键。");if(fishingSafety.Faulted||stopping)Retryable=false;if(audio!=null)audio.Dispose();if(owner&&exclusive!=null)exclusive.ReleaseMutex();if(exclusive!=null)exclusive.Dispose();Running=false;}
         }
         void SuspendInput(string cause)
-        {CancelSession(cause+"，释放本轮按键。");focusRecovery.Suspend();Report("等待恢复："+cause+"；任务仍保留。游戏回到前台且松开修饰键后自动继续；停止/F12才结束任务。");}
+        {CancelSession(cause+"，释放本轮按键。");if(!focusRecovery.Waiting)focusResumeAt=clock.ElapsedMilliseconds+(settings.AutoRetry?settings.RetrySeconds*1000L:0);focusRecovery.Suspend();Report("等待恢复："+cause+"；任务仍保留。"+(settings.AutoRetry?"暂停至少"+settings.RetrySeconds+"秒后，":"")+"游戏回到前台且松开修饰键后自动继续；停止/F12才结束任务。");}
         void TickAuxiliary(OperationObservation o,long now)
         {
             bool casting=o.Farm.Casting||o.Farm.Channeling;ushort key=auxiliary.KeyDue(now,casting);
@@ -124,8 +126,8 @@ namespace WoWProbe
         void BeginTravel(FarmObservation from,int previous)
         {
             forwardAnchor=null;var route=picker.Travel(from,point,previous);travel=route.Points.Count<2?null:new Navigator(route,settings.Fishing.Calibration,false,false,1,NavigationPurpose.VendorReturn){ForwardPulseLimit=1500};
-            if(travel==null)arrived=clock.ElapsedMilliseconds;else arrived=-1;
-            Report((settings.RandomSpots?"随机钓点：第"+(picker.Segment+1)+"条连线":"固定钓点"+(char)('A'+picker.Segment))+"，目标("+(point.X*100).ToString("F2")+", "+(point.Y*100).ToString("F2")+")；驻留"+settings.StayMinutes+"分钟。");
+            if(travel==null){arrived=clock.ElapsedMilliseconds;stay.Arrive(arrived);}else{arrived=-1;stay.Depart();}
+            Report((settings.RandomSpots?"随机钓点：第"+(picker.Segment+1)+"条连线":"固定钓点"+(char)('A'+picker.Segment))+"，目标("+(point.X*100).ToString("F2")+", "+(point.Y*100).ToString("F2")+")"+(settings.RandomSpots?"；本点随机驻留"+(stay.DurationMs/60000.0).ToString("F2")+"分钟，到点开始计时。":"；固定驻留。"));
         }
         void TickTravel(OperationObservation o,long now)
         {
@@ -133,7 +135,7 @@ namespace WoWProbe
             if(forwardAnchor!=null&&f.Sequence!=forwardAnchor.Sequence){double moved=NavigationMath.Distance(f.X-forwardAnchor.X,f.Y-forwardAnchor.Y,settings.Fishing.Calibration.AxisScale);if(moved>.0001&&forwardHold>0)measuredTravelSpeed=Math.Max(measuredTravelSpeed,Math.Min(.2,moved*1000/forwardHold*1.15));forwardAnchor=null;}
             var action=travel.Step(new NavigationSample{Fresh=f.Fresh,KnownCore=f.KnownCore,ReadFailures=f.ReadFailures,Sequence=f.Sequence,MapId=f.MapId,MapMode=f.MapMode,Zone=f.Zone,X=f.X,Y=f.Y,Facing=f.Facing,Dead=f.PlayerDead,Ghost=f.PlayerGhost,Combat=f.InCombat},now);
             if(action.Action==NavigationAction.Stop)throw new InvalidOperationException(action.Reason);
-            if(action.Action==NavigationAction.Completed){travel=null;arrived=now;Report("已到达钓点并停稳，恢复面水朝向后按抛竿键。");return;}
+            if(action.Action==NavigationAction.Completed){travel=null;arrived=now;stay.Arrive(now);Report("已到达钓点并停稳，恢复面水朝向后按抛竿键。");return;}
             if(action.Action==NavigationAction.None)return;
             var target=travel.WorkingRoute.Points[action.TargetIndex];var cal=settings.Fishing.Calibration;double distance=NavigationMath.Distance(target.X-f.X,target.Y-f.Y,cal.AxisScale);
             int hold=action.HoldMilliseconds;Func<FarmObservation,bool> release=null;
@@ -147,7 +149,7 @@ namespace WoWProbe
         {
             var plan=settings.At(point);plan.Settings.BindingsConfirmed=plan.Settings.AutoLootConfirmed=plan.Settings.AudioConfirmed=true;plan.Calibration.Confirmed=true;
             castStarted=-1;nextFrame=0;lastSignalReport=-1;lastSignalNotice=lastLootNotice=-10000;splash.Reset();if(sound!=null)sound.Reset();seenSessionCasts=seenSessionReels=seenSessionCatches=0;UpdateObservation(o,now);
-            session=new FishingSession(host.Backend,()=>clock.ElapsedMilliseconds,()=>{lock(cacheGate)return cached==null?null:cached.Clone();},message=>{if(message.StartsWith("Fishing pulse"))Report(message);},new InputFailureLatch());session.Start(plan);
+            session=new FishingSession(host.Backend,()=>clock.ElapsedMilliseconds,()=>{lock(cacheGate)return cached==null?null:cached.Clone();},message=>{if(message.StartsWith("Fishing pulse"))Report(message);},fishingSafety);session.Start(plan);
         }
         void UpdateObservation(OperationObservation o,long now)
         {

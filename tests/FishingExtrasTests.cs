@@ -115,6 +115,18 @@ class FishingExtrasTests
         Test("active auxiliary cycles cannot overlap or repeat a confirmed skill",()=>{
             var a=new FishingAuxiliaryCycle();a.Start(FishingAuxiliaryKind.TimedKey,56);bool rejected=false;try{a.Start(FishingAuxiliaryKind.Bag,66);}catch(InvalidOperationException){rejected=true;}Check(rejected);a.InputSent(0);for(int t=100;t<10000;t+=100)Check(a.Active&&a.KeyDue(t,false)==0&&!a.Finished(t,false));
         });
+        Test("stay duration is drawn once per selected point and begins only after arrival",()=>{
+            int draws=0;var c=new FishingStayClock(n=>draws++==0?0:n-1);c.Select(new FishingRange(10,15));Check(draws==1&&c.DurationMs==600000&&!c.Due(999999));c.Arrive(10000);Check(!c.Due(609999)&&c.Due(610000));c.Depart();Check(!c.Due(999999));c.Arrive(1000000);Check(draws==1&&c.DueAt==1600000);c.Select(new FishingRange(10,15));Check(draws==2&&c.DurationMs==900000&&c.DueAt<0);
+        });
+        Test("manual restart waits for old worker exit and repeated start requests cannot overlap workers",()=>{
+            var c=new FishingRestartSchedule();c.RequestStart();Check(!c.Ready(0,true,false,true,30)&&c.ManualPending);c.RequestStart();Check(!c.Ready(1000,true,false,true,30));Check(c.Ready(1100,false,false,true,30)&&!c.ManualPending);Check(!c.Ready(1200,true,false,true,30));
+        });
+        Test("failed runs retry at configured interval and each later failure starts a new delay",()=>{
+            var c=new FishingRestartSchedule();c.RequestStart();Check(c.Ready(0,false,false,true,13));Check(!c.Ready(100,false,true,true,13)&&c.DueAt==13100);Check(!c.Ready(13099,false,true,true,13));Check(c.Ready(13100,false,true,true,13));Check(!c.Ready(13200,true,false,true,13));Check(!c.Ready(14000,false,true,true,13)&&c.DueAt==27000);
+        });
+        Test("stop emergency nonretryable failures and disabled retry cancel automatic launches",()=>{
+            var c=new FishingRestartSchedule();c.RequestStart();c.Cancel();Check(!c.Ready(100000,false,true,true,1)&&!c.Armed);c.RequestStart();c.Ready(0,false,false,true,1);Check(!c.Ready(1000,false,false,true,1)&&c.DueAt<0);Check(!c.Ready(2000,false,true,false,1));Check(!c.Ready(3000,false,true,true,1));c.Cancel();Check(!c.Ready(10000,false,true,true,1));
+        });
         Console.WriteLine("Fishing extras: "+passed+" passed, "+failed+" failed. Synthetic observations only; no game input.");return failed==0?0:1;
     }
     static void PaintBobber(Bitmap image,int x,int y){using(var g=Graphics.FromImage(image)){g.Clear(Color.FromArgb(45,77,105));using(var brush=new SolidBrush(Color.FromArgb(100,35,30)))g.FillRectangle(brush,x,y,14,6);}}

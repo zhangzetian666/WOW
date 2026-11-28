@@ -96,6 +96,11 @@ class FishingClientTests
             var p=FishingFixtures.Plan();var o=FishingFixtures.Observation(p);o.Game.LootWindowKnown=merged.LootWindowKnown;o.Game.LootWindowOpen=merged.LootWindowOpen;var e=new FishingEngine(p);e.Step(o,0);
             FishingFixtures.Frame(o,1000);o.Game.Farm.Channeling=true;o.LastBiteAtMs=1000;o.BiteConfidence=.95;e.Step(o,1000);FishingFixtures.Frame(o,1200);o.Game.Farm.Channeling=false;e.Step(o,1200);FishingFixtures.Frame(o,1700);e.Step(o,1700);FishingFixtures.Frame(o,1800);Check(e.Step(o,1800).Purpose==FishingPurpose.Cast&&e.Casts==2&&e.ConfirmedCatches==0);
         });
+        Test("legacy single stay duration imports as equal bounds and new ranges and retry settings roundtrip",()=>{
+            var s=Settings();s.StayMinutes=12.5;Check(s.StayInterval().Min==12.5&&s.StayInterval().Max==12.5&&!s.AutoRetry&&s.RetrySeconds==30);s.StayRange=new FishingRange(10,15);s.AutoRetry=true;s.RetrySeconds=47;string path=Path.GetTempFileName();
+            try{s.Save(path);var loaded=FishingClientSettings.Load(path);Check(loaded.StayInterval().Min==10&&loaded.StayInterval().Max==15&&loaded.AutoRetry&&loaded.RetrySeconds==47);var copy=loaded.Clone();copy.StayRange.Min=11;Check(loaded.StayRange.Min==10);}finally{File.Delete(path);}
+        });
+        Test("invalid stay bounds or restart delay cannot start",()=>{var s=Settings();s.StayRange=new FishingRange(15,10);Reject(()=>s.Validate(false));s=Settings();s.RetrySeconds=0;Reject(()=>s.Validate(false));s.RetrySeconds=3601;Reject(()=>s.Validate(false));});
         Console.WriteLine("Fishing client: "+passed+" passed, "+failed+" failed. Pure/synthetic checks; no game input.");return failed==0?0:1;
     }
 }
