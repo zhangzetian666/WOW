@@ -19,7 +19,7 @@ namespace WoWProbe
         readonly FishingRestartSchedule restart=new FishingRestartSchedule();readonly Stopwatch restartClock=Stopwatch.StartNew();
         public FishingClientForm()
         {
-            Text="独立钓鱼客户端 · FISHING 1.0.13";Font=new Font("Microsoft YaHei UI",10);Size=new Size(1050,820);MinimumSize=new Size(950,730);StartPosition=FormStartPosition.CenterScreen;
+            Text="独立钓鱼客户端 · FISHING 1.0.14";Font=new Font("Microsoft YaHei UI",10);Size=new Size(1050,820);MinimumSize=new Size(950,730);StartPosition=FormStartPosition.CenterScreen;
             settings=LoadSettings();var root=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,Padding=new Padding(12)};root.RowStyles.Add(new RowStyle(SizeType.Absolute,60));root.RowStyles.Add(new RowStyle(SizeType.Percent,70));root.RowStyles.Add(new RowStyle(SizeType.Percent,30));Controls.Add(root);
             var top=Row();top.Controls.Add(Button("开始钓鱼",StartFishing));top.Controls.Add(Button("停止 / F12",StopFishing));top.Controls.Add(Button("保存设置",Save));top.Controls.Add(Button("导入方案",Import));top.Controls.Add(Button("导出方案",Export));top.Controls.Add(status);root.Controls.Add(top,0,0);
             var tabs=new TabControl{Dock=DockStyle.Fill};root.Controls.Add(tabs,0,1);root.Controls.Add(log,0,2);
@@ -36,7 +36,8 @@ namespace WoWProbe
             Number(page,"periodicKeyValue","定时快捷键（数字0–9）",0,9,settings.TimedKey,0);Pair(page,"keyMin","keyMax","每次施放的随机间隔（分钟）",settings.KeyMinutes,.1m,1440,1);
             Info(page,"例如键8、间隔10至15分钟：每轮重新抽取执行时间。到期后等当前杆结束再按一次8，随后至少等待10秒且确认读条结束，再继续钓鱼并重新计时。等待期间不插入移动、抛竿、背包或聊天动作。");
             page=Page(tabs,"恢复与重启");Check(page,"retry","异常暂停后自动重新开始钓鱼",settings.AutoRetry);Number(page,"retrySeconds","暂停后的重试间隔（秒）",1,3600,settings.RetrySeconds,0);
-            Info(page,"异常退出后按此间隔重新检查并启动；游戏失焦时保留任务，至少等待此间隔并等游戏回到前台后继续。不会弹出客户端或切走其他窗口。手动停止、F12急停、输入发送故障不会自动重试。点击“开始钓鱼”会先停止旧任务，待按键释放及线程退出后启动新任务，无需先点停止。");
+            Check(page,"returnFocus","失焦后无人操作达到上述秒数，自动切回游戏（需启用自动重试）",settings.ReturnFocusWhenIdle);
+            Info(page,"游戏失焦立即松键；键鼠无人操作达到重试秒数且修饰键/鼠标键松开后，可自动切回游戏。你正在操作时不会抢焦点；切回并稳定0.5秒后恢复，不再额外等待重试秒数。日志记录失焦时的前台窗口。停止/F12和输入发送故障不自动重试。点击开始会先结束旧任务，再启动新任务。");
             page=Page(tabs,"钓点与售卖路线");var row=Row();row.Controls.Add(Button("保存坐标（追加钓点）",SaveSpot));row.Controls.Add(Button("删除最后一个钓点",RemoveLastSpot));page.Controls.Add(row);page.Controls.Add(pointsLabel);
             Info(page,"每次保存都会追加一个钓点并立即列出坐标和朝向，支持最多500点。保存时面朝水面；所有点同图，相邻连线应可通行。按保存顺序连接，末点自动连接首点，无需重复保存起点；每条线轮换一次算一圈。");
             row=Row();row.Controls.Add(Button("开始录制NPC路线",BeginRecording));row.Controls.Add(Button("结束并保存路线",EndRecording));cancelRecording=Button("取消本次录制",CancelRecording);cancelRecording.Enabled=false;row.Controls.Add(cancelRecording);row.Controls.Add(Button("继续上次录制",ResumeRecording));row.Controls.Add(Button("保存当前NPC",SaveNpc));page.Controls.Add(row);page.Controls.Add(routeLabel);
@@ -72,7 +73,7 @@ namespace WoWProbe
         {
             settings.Fishing.Settings.CastKey=(ushort)(48+V("cast"));settings.CastDelay=Range("castMin","castMax");settings.ReelDelay=Range("reelMin","reelMax");settings.BagMinutes=Range("bagMin","bagMax");settings.OnlineHours=Range("onMin","onMax");settings.OfflineHours=Range("offMin","offMax");
             settings.RandomSpots=C("random");settings.StayRange=Range("stayMin","stayMax");settings.StayMinutes=settings.StayRange.Min;settings.PeekBags=C("bags");settings.TimedSessions=C("timed");settings.UseAudio=C("audio");settings.UseVisual=C("visual");settings.ChatAtLap=C("chat");settings.WhisperReply=C("whisper");settings.SplashSensitivity=V("splash");
-            settings.AutoRetry=C("retry");settings.RetrySeconds=(int)V("retrySeconds");
+            settings.AutoRetry=C("retry");settings.RetrySeconds=(int)V("retrySeconds");settings.ReturnFocusWhenIdle=C("returnFocus");
             settings.BagOpenSeconds=V("bagOpenSeconds");
             settings.AutoCorpse=C("corpse");
             settings.TimedKeyEnabled=C("periodicKey");settings.TimedKey=(int)V("periodicKeyValue");settings.KeyMinutes=Range("keyMin","keyMax");
@@ -145,7 +146,7 @@ namespace WoWProbe
         {
             SetNumber("cast",settings.Fishing.Settings.CastKey-48);SetRange("cast",settings.CastDelay);SetRange("reel",settings.ReelDelay);SetRange("bag",settings.BagMinutes);SetRange("on",settings.OnlineHours);SetRange("off",settings.OfflineHours);
             SetRange("stay",settings.StayInterval());SetNumber("splash",settings.SplashSensitivity);SetNumber("axis",settings.Fishing.Calibration.AxisScale);SetNumber("turn",settings.Fishing.Calibration.TurnRadiansPerSecond);SetNumber("speed",settings.Fishing.Calibration.ForwardUnitsPerSecond);
-            checks["retry"].Checked=settings.AutoRetry;SetNumber("retrySeconds",settings.RetrySeconds);
+            checks["retry"].Checked=settings.AutoRetry;SetNumber("retrySeconds",settings.RetrySeconds);checks["returnFocus"].Checked=settings.ReturnFocusWhenIdle;
             SetNumber("bagOpenSeconds",settings.BagOpenSeconds);
             checks["corpse"].Checked=settings.AutoCorpse;
             checks["periodicKey"].Checked=settings.TimedKeyEnabled;SetNumber("periodicKeyValue",settings.TimedKey);SetRange("key",settings.KeyMinutes);

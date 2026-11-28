@@ -35,6 +35,7 @@ namespace WoWProbe
         public FishingRegion VisualRegion=new FishingRegion();public double SplashSensitivity=3.5;
         public bool TimedKeyEnabled;public int TimedKey=8;public FishingRange KeyMinutes=new FishingRange(10,15);
         public FishingRange StayRange;public bool AutoRetry;public int RetrySeconds=30;
+        public bool ReturnFocusWhenIdle=true;
         public double BagOpenSeconds=3;
         public bool AutoCorpse;public RouteDocument CorpseRoute;
         public FishingRange StayInterval(){return StayRange??new FishingRange(StayMinutes,StayMinutes);}
@@ -121,6 +122,8 @@ namespace WoWProbe
     }
     public sealed class FishingFocusRecovery
     {
+        public static bool MayReturn(bool enabled,bool foreground,bool released,long idleMilliseconds,int seconds)
+        {return enabled&&!foreground&&released&&idleMilliseconds>=Math.Max(1,seconds)*1000L;}
         public bool Waiting{get;private set;}long readySince=-1;
         public void Suspend(){Waiting=true;readySince=-1;}
         public bool ResumeReady(long now,bool foreground,bool modifiersReleased,bool chatClosed)
@@ -132,7 +135,7 @@ namespace WoWProbe
         }
         public static bool Transient(string reason)
         {
-            return reason=="Target window lost foreground."||reason=="Target window lost foreground during CLI operation."||reason=="Target window lost foreground during CLI checks."||reason=="游戏失去前台；切回游戏后继续。"||reason=="A user-held modifier stopped fishing."||reason=="等待用户松开修饰键。";
+            return reason=="Target window lost foreground."||reason=="Target window lost foreground during CLI operation."||reason=="Target window lost foreground during CLI checks."||reason=="游戏失去前台；切回游戏后继续。"||reason=="A user-held modifier stopped fishing."||reason=="等待用户松开修饰键。"||reason=="用户正按住鼠标。"||reason=="用户正按住菜单键。"||reason=="菜单识别期间窗口尺寸变化，等待重新识别。";
         }
     }
     public sealed class FishingActivityClock

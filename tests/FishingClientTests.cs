@@ -13,6 +13,14 @@ class FishingClientTests
     static void Sum(byte[] b){int a=0,c=0;for(int i=0;i<126;i++){a=(a+b[i])%255;c=(c+a)%255;}b[126]=(byte)a;b[127]=(byte)c;}
     static int Main()
     {
+        Test("automatic focus return waits for idle input and never overrides held keys or disabled setting",()=>{
+            Check(!FishingFocusRecovery.MayReturn(true,false,true,14999,15));Check(FishingFocusRecovery.MayReturn(true,false,true,15000,15));
+            Check(!FishingFocusRecovery.MayReturn(false,false,true,60000,15)&&!FishingFocusRecovery.MayReturn(true,true,true,60000,15)&&!FishingFocusRecovery.MayReturn(true,false,false,60000,15));
+            var gate=new FishingFocusRecovery();gate.Suspend();Check(!gate.ResumeReady(20000,true,true,true));Check(gate.ResumeReady(20500,true,true,true));
+        });
+        Test("idle focus option defaults on for older profiles but retains an explicit off choice",()=>{
+            var s=Settings();Check(s.ReturnFocusWhenIdle);s.ReturnFocusWhenIdle=false;Check(!s.Clone().ReturnFocusWhenIdle);string path=Path.GetTempFileName();try{s.Save(path);Check(!FishingClientSettings.Load(path).ReturnFocusWhenIdle);}finally{File.Delete(path);}
+        });
         Test("expanded forward calibration survives settings clone and disk roundtrip",()=>{
             foreach(double speed in new[]{.0001,.008,.2,.5,1.0}){var s=Settings();s.Fishing.Calibration.ForwardUnitsPerSecond=speed;s.Service.Calibration=s.Fishing.Calibration.Clone();s.Validate(true);Check(s.Clone().Fishing.Calibration.ForwardUnitsPerSecond==speed);
                 string path=Path.GetTempFileName();try{s.Save(path);var copy=FishingClientSettings.Load(path);Check(copy.Fishing.Calibration.ForwardUnitsPerSecond==speed&&copy.Service.Calibration.ForwardUnitsPerSecond==speed);}finally{File.Delete(path);}}

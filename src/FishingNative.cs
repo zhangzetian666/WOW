@@ -15,8 +15,17 @@ namespace WoWProbe
         internal static QuickScreenText[] FishingMenus(Func<bool> cancel){return MenuRead(Native.ClientBounds(target),cancel);}
         internal static void FishingForgetPanels(){located=false;heartbeat=new Heartbeat();}
         internal static bool FishingTryWorld(){return SessionObservation()!=null;}
+        internal static bool PrepareFishingWindow(bool manual,bool autoReturn,int seconds)
+        {
+            var window=FindWowWindow();if(window==null)throw new InvalidOperationException("未找到魔兽世界窗口。");
+            var keys=new WindowsInputBackend(window,null);if(keys.IsEmergencyPressed())throw new OperationCanceledException("F12急停。");
+            bool released=!keys.IsKeyAlreadyDown(16)&&!keys.IsKeyAlreadyDown(17)&&!keys.IsKeyAlreadyDown(18)&&!keys.IsKeyAlreadyDown(1)&&!keys.IsKeyAlreadyDown(2);
+            if(manual||FishingFocusRecovery.MayReturn(autoReturn,keys.IsTargetForeground(),released,Native.IdleMilliseconds(),seconds)){Native.RequireInputIntegrity(window.ProcessId);Activate(window.Handle);Thread.Sleep(150);}
+            return keys.IsTargetForeground();
+        }
+        internal static void FocusFishingWindow(WindowInfo window){if(Native.Matches(window))Activate(window.Handle);}
     }
-    public sealed class FishingNativeHost
+    public sealed class FishingNativeHost:IFishingLoginHost
     {
         readonly Func<bool> cancel;readonly Func<long> clock;readonly InputFailureLatch safety=new InputFailureLatch();readonly NavigationCalibration map;
         readonly Action<string> report;public readonly WindowInfo Window;public readonly WindowsInputBackend Backend;
@@ -29,8 +38,35 @@ namespace WoWProbe
         public bool Foreground{get{return Backend.IsTargetForeground();}}
         public bool InputFaulted{get{return safety.Faulted;}}
         public bool ModifiersReleased{get{return !Backend.IsKeyAlreadyDown(16)&&!Backend.IsKeyAlreadyDown(17)&&!Backend.IsKeyAlreadyDown(18);}}
-        public void Focus(){GrindCli.FocusGameWindow();}
+        public void Focus(){CheckCancelled();GrindCli.FocusFishingWindow(Window);}
+        long nextFocusAttempt;
+        Rectangle menuBounds;
+        public bool TryReturnFocus(bool enabled,int seconds)
+        {
+            CheckCancelled();long now=clock();if(now<nextFocusAttempt||!FishingFocusRecovery.MayReturn(enabled,Foreground,ModifiersReleased&&!Backend.IsKeyAlreadyDown(1)&&!Backend.IsKeyAlreadyDown(2),Native.IdleMilliseconds(),seconds))return false;
+            nextFocusAttempt=now+5000;Focus();return Foreground;
+        }
         public void CheckCancelled(){if(cancel()||Backend.IsEmergencyPressed())throw new OperationCanceledException("钓鱼已停止。");}
+        public void ForgetPanels(){GrindCli.FishingForgetPanels();}
+        QuickScreenText[] ReadMenu()
+        {
+            Destination();var bounds=Native.ClientBounds(Window);var lines=GrindCli.FishingMenus(cancel);Destination();
+            if(bounds!=Native.ClientBounds(Window))throw new InvalidOperationException("菜单识别期间窗口尺寸变化，等待重新识别。");menuBounds=bounds;return lines;
+        }
+        public bool TryDismissAddonPopup()
+        {
+            Destination();var button=FishingLoginScreen.AddonIgnore(ReadMenu());if(button==null)return false;
+            var verified=FishingLoginScreen.AddonIgnore(ReadMenu());if(!FishingLoginScreen.Same(button,verified))return false;
+            MenuClick(verified);report("已核对插件错误/受限UI提示，点击“忽略”；没有禁用插件。");Idle(500);return true;
+        }
+        public FishingLoginFrame ReadLoginFrame()
+        {
+            Destination();var frame=new FishingLoginFrame{Lines=ReadMenu(),Foreground=Foreground,Released=ModifiersReleased};
+            frame.World=GrindCli.FishingTryWorld();if(frame.World){var o=Read();var f=o.Farm;frame.Sequence=o.Sequence;
+                frame.ReadyWorld=o.Fresh&&f.Fresh&&f.KnownCore&&o.CursorKnown&&o.CursorEmpty&&o.ConfirmationKnown&&!o.ConfirmationVisible&&o.IncomingResurrectionKnown&&!o.IncomingResurrection&&f.ChatOpenKnown&&!f.ChatOpen;
+                frame.CanLogout=frame.ReadyWorld&&!f.PlayerDead&&!f.PlayerGhost&&!f.InCombat&&!f.Casting&&!f.Channeling;}
+            Destination();return frame;
+        }
         public void Idle(int ms){for(int n=0;n<ms;n+=50){CheckCancelled();Thread.Sleep(Math.Min(50,ms-n));}}
         public void Destination()
         {CheckCancelled();if(!Foreground)throw new InvalidOperationException("游戏失去前台；切回游戏后继续。");foreach(ushort k in new ushort[]{16,17,18})if(Backend.IsKeyAlreadyDown(k))throw new InvalidOperationException("等待用户松开修饰键。");}
@@ -49,7 +85,7 @@ namespace WoWProbe
         public void MenuKey(ushort key)
         {Destination();if(Backend.IsKeyAlreadyDown(key))throw new InvalidOperationException("用户正按住菜单键。");try{Backend.KeyDown(key);Thread.Sleep(80);}finally{Backend.KeyUp(key);}}
         public void MenuClick(QuickScreenText text)
-        {Destination();var bounds=Native.ClientBounds(Window);var p=new Point(bounds.X+text.X+text.Width/2,bounds.Y+text.Y+text.Height/2);if(!bounds.Contains(p))throw new InvalidOperationException("菜单按钮超出游戏窗口。");if(Backend.IsKeyAlreadyDown(1)||Backend.IsKeyAlreadyDown(2))throw new InvalidOperationException("用户正按住鼠标。");Native.MoveMouse(p);Destination();try{Native.SendMouseButton(false,false);Thread.Sleep(80);}finally{Native.SendMouseButton(false,true);}}
+        {Destination();var bounds=Native.ClientBounds(Window);if(bounds!=menuBounds)throw new InvalidOperationException("菜单识别期间窗口尺寸变化，等待重新识别。");var p=new Point(bounds.X+text.X+text.Width/2,bounds.Y+text.Y+text.Height/2);if(!bounds.Contains(p))throw new InvalidOperationException("菜单按钮超出游戏窗口。");if(Backend.IsKeyAlreadyDown(1)||Backend.IsKeyAlreadyDown(2))throw new InvalidOperationException("用户正按住鼠标。");Native.MoveMouse(p);Destination();try{Native.SendMouseButton(false,false);Thread.Sleep(80);}finally{Native.SendMouseButton(false,true);}}
         public void Chat(string message,bool whisper,uint expectedSender=0,uint expectedEvent=0,bool command=false)
         {
             if(String.IsNullOrWhiteSpace(message)||message.Length>160)throw new FormatException("聊天文本为空或过长。");Destination();var before=Read();if(before.Farm.ChatOpen||before.Farm.Casting||before.Farm.Channeling)throw new InvalidOperationException("已有聊天或施法，暂不自动聊天。");
@@ -92,36 +128,50 @@ namespace WoWProbe
         public static bool Login(QuickScreenText[] l){return Contains(l,"账号","帐户","account","战网")&&Contains(l,"密码","password")&&Find(l,"登录","登入","登录游戏","log in","login")!=null;}
         public static bool Disconnected(QuickScreenText[] l){return Contains(l,"断开连接","连接中断","disconnected","连接已断开")&&Find(l,"确定","确认","okay","ok")!=null;}
         public static bool Same(QuickScreenText a,QuickScreenText b){return a!=null&&b!=null&&Math.Abs(a.X-b.X)<=8&&Math.Abs(a.Y-b.Y)<=8&&Clean(a.Text)==Clean(b.Text);}
+        public static bool LogoutCountdown(QuickScreenText[] lines)
+        {return Find(lines,"取消","cancel")!=null&&Contains(lines,"登出","logout","loggingout")&&Contains(lines,"秒","second");}
+        public static QuickScreenText AddonIgnore(QuickScreenText[] lines)
+        {
+            string text="";foreach(var line in lines??new QuickScreenText[0])text+=Clean(line.Text);
+            bool error=(text.Contains("错误")||text.Contains("error"))&&(text.Contains("插件")||text.Contains("lua")||text.Contains("addon")||text.Contains("脚本")||text.Contains("script"));
+            bool blocked=(text.Contains("wowprobe")||text.Contains("插件")||text.Contains("addon"))&&(text.Contains("禁用")||text.Contains("blocked"))&&(text.Contains("只对暴雪")||text.Contains("blizzard")&&text.Contains("ui"));
+            if(!error&&!blocked)return null;
+            return Find(lines,"忽略","ignore");
+        }
     }
     public sealed class FishingLoginRunner
     {
-        readonly FishingNativeHost host;readonly FishingActivityClock schedule;readonly Action<string> log;readonly Func<long> now;readonly Func<bool> cancelled;
-        public FishingLoginRunner(FishingNativeHost h,FishingActivityClock schedule,Func<long> now,Func<bool> cancelled,Action<string> log){host=h;this.schedule=schedule;this.now=now;this.cancelled=cancelled;this.log=log;}
+        readonly IFishingLoginHost host;readonly FishingActivityClock schedule;readonly Action<string> log;readonly Func<long> now;readonly Func<bool> cancelled;
+        readonly bool autoReturn;readonly int idleSeconds;string lastText;long lastNotice=-60000;
+        public FishingLoginRunner(IFishingLoginHost h,FishingActivityClock schedule,Func<long> now,Func<bool> cancelled,Action<string> log,bool autoReturn=false,int idleSeconds=30)
+        {host=h;this.schedule=schedule;this.now=now;this.cancelled=cancelled;this.log=log;this.autoReturn=autoReturn;this.idleSeconds=idleSeconds;}
+        void Report(string text){long time=now();if(text!=lastText||time-lastNotice>=30000){log(text);lastText=text;lastNotice=time;}}
         public void Run()
         {
-            long lastAction=-60000,lastNotice=-60000;int loginAttempts=0;
+            var flow=new FishingLoginFlow(schedule);
             while(!cancelled())
             {
-                host.CheckCancelled();long time=now();
-                if(schedule.Phase=="Offline"&&time<schedule.OfflineDue){if(time-lastNotice>60000){log("离线等待，剩余"+Math.Ceiling((schedule.OfflineDue-time)/60000.0)+"分钟。");lastNotice=time;}host.Idle(250);continue;}
-                if(!host.Foreground){host.Idle(250);continue;}
-                if(schedule.Phase!="Logout"&&GrindCli.FishingTryWorld()){schedule.Online(now());log("已确认重新上线，重新计时并恢复钓鱼。");return;}
-                var lines=GrindCli.FishingMenus(cancelled);host.Destination();
-                bool select=QuickMenuText.HasContext(lines,true);bool login=FishingLoginScreen.Login(lines),disconnected=FishingLoginScreen.Disconnected(lines);
-                if(schedule.Phase=="Logout"&&(select||login||disconnected)&&!GrindCli.FishingTryWorld()){schedule.OfflineConfirmed(now());GrindCli.FishingForgetPanels();log("已确认离开角色，开始随机离线等待。");continue;}
-                if(time-lastAction<10000){host.Idle(250);continue;}
-                QuickScreenText action=null;string[] words=null;
-                if(schedule.Phase=="Logout")
-                {
-                    if(QuickMenuText.HasContext(lines,false)){words=new[]{"登出","返回角色选择","返回角色菜单","返回角色列表","logout"};action=FishingLoginScreen.Find(lines,words);}
-                    else if(GrindCli.FishingTryWorld()){var o=host.Read();if(!o.Farm.Casting&&!o.Farm.Channeling&&!o.Farm.InCombat&&!o.Farm.ChatOpen){host.MenuKey(27);lastAction=now();log("打开ESC菜单，等待确认登出按钮。");}}
+                try{
+                    host.CheckCancelled();long time=now();
+                    if(schedule.Phase=="Offline"&&time<schedule.OfflineDue){Report("离线等待，剩余"+Math.Ceiling((schedule.OfflineDue-time)/60000.0)+"分钟。");host.Idle(250);continue;}
+                    if(!host.Foreground){if(host.TryReturnFocus(autoReturn,idleSeconds))Report("上下线：键鼠已空闲，自动切回游戏。");else Report("上下线任务保留：等待游戏前台或键鼠空闲后自动切回。");host.Idle(250);continue;}
+                    if(!host.ModifiersReleased){Report("上下线任务保留：等待Alt/Ctrl/Shift松开。");host.Idle(250);continue;}
+                    var frame=host.ReadLoginFrame();string previous=schedule.Phase;var action=flow.Step(frame,now());
+                    if(previous=="Logout"&&schedule.Phase=="Offline")host.ForgetPanels();
+                    Report(action.Reason);if(action.Action==FishingLoginAction.Complete)return;
+                    if(action.Action==FishingLoginAction.Wait){host.Idle(250);continue;}
+                    // Confirm the same screen and button immediately before each input.
+                    var fresh=host.ReadLoginFrame();var verified=flow.Step(fresh,now());if(!FishingLoginFlow.Same(action,verified)){host.Idle(250);continue;}
+                    host.Destination();
+                    if(action.Action==FishingLoginAction.OpenMenu)host.MenuKey(27);
+                    else if(action.Action==FishingLoginAction.Enter)host.MenuKey(13);
+                    else host.MenuClick(verified.Button);
+                    flow.Sent(verified,now());Report("上下线动作已发送："+verified.Reason);host.Idle(250);
+                }catch(InvalidOperationException ex){
+                    if(cancelled()||host.InputFaulted)throw;
+                    if(!FishingFocusRecovery.Transient(ex.Message)&&ex.Message!="菜单识别超时。"&&!ex.Message.StartsWith("菜单文字识别不可用："))throw;
+                    Report("上下线任务保留："+ex.Message);host.Idle(500);
                 }
-                else if(select){var verified=GrindCli.FishingMenus(cancelled);if(QuickMenuText.HasContext(verified,true)&&QuickMenuText.Find(verified,true)!=null){host.MenuKey(13);lastAction=now();log("已确认角色选择界面，回车进入游戏。");}}
-                else if(disconnected){words=new[]{"确定","确认","okay","ok"};action=FishingLoginScreen.Find(lines,words);}
-                else if(login&&loginAttempts<3){words=new[]{"登录","登入","登录游戏","login"};action=FishingLoginScreen.Find(lines,words);loginAttempts++;}
-                else if(time-lastNotice>30000){log(login?"登录尚未成功，等待账号登录条件满足；不会输入或保存密码。":"等待可识别的登录或角色选择界面。");lastNotice=time;}
-                if(action!=null){var fresh=GrindCli.FishingMenus(cancelled);var button=FishingLoginScreen.Find(fresh,words);if(FishingLoginScreen.Same(action,button)&&(schedule.Phase=="Logout"?QuickMenuText.HasContext(fresh,false):disconnected?FishingLoginScreen.Disconnected(fresh):FishingLoginScreen.Login(fresh))){host.MenuClick(button);lastAction=now();log("已点击已核对的按钮："+button.Text);}}
-                host.Idle(300);
             }
         }
     }

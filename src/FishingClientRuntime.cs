@@ -11,13 +11,13 @@ namespace WoWProbe
         readonly object cacheGate=new object();FishingObservation cached;volatile bool stopping;Thread worker;
         readonly FishingFocusRecovery focusRecovery=new FishingFocusRecovery();long lastLootNotice=-10000;
         readonly FishingAuxiliaryCycle auxiliary=new FishingAuxiliaryCycle();FishingPeriodicKeyClock periodicKey;
-        readonly FishingStayClock stay=new FishingStayClock();readonly InputFailureLatch fishingSafety=new InputFailureLatch();bool focusOnStart=true;long focusResumeAt;
+        readonly FishingStayClock stay=new FishingStayClock();readonly InputFailureLatch fishingSafety=new InputFailureLatch();bool focusOnStart=true;
         QuickRecovery recovery;FishingDeathCheckpoint death;string DeathPath{get{return Path.Combine(directory,"fishing-death-checkpoint.json");}}
         FishingNativeHost host;FishingSession session;FishingSoundDetector sound;FishingSplashDetector splash;WindowsFishingAudioCapture audio;
         FishingActivityClock activity;FishingSpotPicker picker;FishingPoint point;FishingPhrases phrases;readonly FishingWhisperPolicy replies=new FishingWhisperPolicy();
         Navigator travel;QuickVendorEngine vendor;FarmObservation forwardAnchor;int forwardHold;double measuredTravelSpeed=.04;long arrived=-1,castStarted=-1,nextFrame,lastAudible=-100000,lastNotice=-100000;int countedCasts,countedReels,countedCatches;
         string lastLog="";int seenSessionCasts,seenSessionReels,seenSessionCatches;bool bagSuppressed;long lastSignalReport=-1,lastSignalNotice=-10000;
-        readonly FishingSocialGate socialGate=new FishingSocialGate();bool socialChecked;long nextSocialCheck;
+        readonly FishingSocialGate socialGate=new FishingSocialGate();bool socialChecked;long nextSocialCheck,nextPopupCheck;
         public volatile bool Running;public string Status="未开始";public int Casts{get{return countedCasts;}}public int Reels{get{return countedReels;}}public int Catches{get{return countedCatches;}}public int VendorVisits{get;private set;}public int Laps{get{return picker==null?0:picker.CompletedLaps;}}
         public FishingClientRuntime(FishingClientSettings settings,string directory,Action<string> log){this.settings=settings.Clone();this.directory=directory;this.log=log;}
         public bool WorkerAlive{get{return worker!=null&&worker.IsAlive;}}public volatile bool Retryable;
@@ -30,8 +30,9 @@ namespace WoWProbe
             bool owner=false;Mutex exclusive=null;
             try{
                 exclusive=new Mutex(true,"WoWProbe-QuickCombat",out owner);if(!owner)throw new InvalidOperationException("请先关闭自动打怪客户端，避免同时控制游戏。");
-                host=new FishingNativeHost(settings.Fishing.Calibration,()=>stopping,()=>clock.ElapsedMilliseconds,Report);if(focusOnStart)host.Focus();else if(!host.Foreground)throw new InvalidOperationException("自动重试等待游戏回到前台，不切换其他窗口。");
-                var first=host.Read();ValidateWorld(first);activity=new FishingActivityClock(settings,clock.ElapsedMilliseconds);periodicKey=new FishingPeriodicKeyClock(settings,clock.ElapsedMilliseconds);picker=new FishingSpotPicker(settings);point=picker.Start(first.Farm);stay.Select(settings.StayInterval());
+                if(!GrindCli.PrepareFishingWindow(focusOnStart,settings.AutoRetry&&settings.ReturnFocusWhenIdle,settings.RetrySeconds))throw new InvalidOperationException("等待游戏前台；启用自动切回时，键鼠空闲"+settings.RetrySeconds+"秒后重试。当前前台："+Native.ForegroundDescription());
+                host=new FishingNativeHost(settings.Fishing.Calibration,()=>stopping,()=>clock.ElapsedMilliseconds,Report);
+                var first=host.Read();if(first.ConfirmationKnown&&first.ConfirmationVisible&&host.TryDismissAddonPopup())first=host.Read();ValidateWorld(first);activity=new FishingActivityClock(settings,clock.ElapsedMilliseconds);periodicKey=new FishingPeriodicKeyClock(settings,clock.ElapsedMilliseconds);picker=new FishingSpotPicker(settings);point=picker.Start(first.Farm);stay.Select(settings.StayInterval());
                 splash=new FishingSplashDetector(settings.SplashSensitivity);if(settings.ChatAtLap)phrases=new FishingPhrases(Path.Combine(directory,"assets","fishing","chat-phrases.txt"));
                 if(settings.UseAudio){sound=new FishingSoundDetector(Path.Combine(directory,"assets","fishing"));audio=new WindowsFishingAudioCapture((samples,rate,end,broken)=>{if(broken){sound.Reset();return;}double energy=0;foreach(float v in samples)energy+=v*v;if(samples.Length>0&&energy/samples.Length>.00000001)Interlocked.Exchange(ref lastAudible,end);sound.Push(samples,rate,end);},()=>clock.ElapsedMilliseconds);try{audio.Start();}catch(Exception e){Report("声音监听不可用，使用水花图像："+e.Message);}}
                 if(settings.RequiresSocialFeedback())ObserveSocial(host.Social(first));
@@ -43,11 +44,12 @@ namespace WoWProbe
                 {
                     try{
                     host.CheckCancelled();
-                    if(!host.Foreground){SuspendInput("游戏窗口失去前台");host.Idle(200);continue;}
+                    if(!host.Foreground){SuspendInput("游戏窗口失去前台");if(host.TryReturnFocus(settings.AutoRetry&&settings.ReturnFocusWhenIdle,settings.RetrySeconds))Report("键鼠已空闲，已自动切回游戏；核对当前状态后恢复。");host.Idle(200);continue;}
                     if(!host.ModifiersReleased){SuspendInput("检测到Alt/Ctrl/Shift仍按住");host.Idle(200);continue;}
                     var o=host.Read();if(!host.Foreground){SuspendInput("读取画面期间游戏失去前台");continue;}ValidateWorld(o);long now=clock.ElapsedMilliseconds;
+                    if(o.ConfirmationKnown&&o.ConfirmationVisible&&now>=nextPopupCheck){nextPopupCheck=now+5000;CancelSession("核对游戏中的插件弹窗。");if(host.TryDismissAddonPopup())continue;}
                     if(o.Farm.ChatOpen){CancelSession("用户打开了聊天框。");focusRecovery.Suspend();Report("等待用户关闭聊天框。");host.Idle(200);continue;}
-                    if(focusRecovery.Waiting){if(now<focusResumeAt||!focusRecovery.ResumeReady(now,host.Foreground,host.ModifiersReleased,!o.Farm.ChatOpen)){host.Idle(100);continue;}
+                    if(focusRecovery.Waiting){if(!focusRecovery.ResumeReady(now,host.Foreground,host.ModifiersReleased,!o.Farm.ChatOpen)){host.Idle(100);continue;}
                         if(!o.Farm.PlayerDead&&!o.Farm.PlayerGhost){if(vendor!=null)vendor=new QuickVendorEngine(vendor.Checkpoint,o);else if(travel!=null)BeginTravel(o.Farm,picker.Segment);}
                         Report("游戏已回到前台且按键已松开，自动恢复钓鱼任务。");}
                     if(settings.AutoCorpse&&(recovery!=null||o.Farm.PlayerDead||o.Farm.PlayerGhost)){TickRecovery(o,now,checkpoint);host.Idle(60);continue;}
@@ -56,7 +58,7 @@ namespace WoWProbe
                         {
                             CancelSession("本轮在线时长达到随机下线点。");activity.LogoutRequested();Report("已结束当前杆，开始登出。");
                             var vendorProgress=vendor==null?null:vendor.Checkpoint;
-                            new FishingLoginRunner(host,activity,()=>clock.ElapsedMilliseconds,()=>stopping,Report).Run();if(stopping)break;
+                            new FishingLoginRunner(host,activity,()=>clock.ElapsedMilliseconds,()=>stopping,Report,settings.AutoRetry&&settings.ReturnFocusWhenIdle,settings.RetrySeconds).Run();if(stopping)break;
                             GrindCli.OpenTelemetry();var online=host.Read();ValidateWorld(online);if(vendorProgress!=null){vendor=new QuickVendorEngine(vendorProgress,online);Report("重新上线，继续未完成的商人路线。");}else BeginTravel(online.Farm,picker.Segment);continue;
                         }
                     if(vendor!=null){TickVendor(o,now,checkpoint);host.Idle(50);continue;}
@@ -98,7 +100,7 @@ namespace WoWProbe
             finally{if(session!=null)session.Stop("钓鱼退出，释放按键。");if(fishingSafety.Faulted||stopping)Retryable=false;if(audio!=null)audio.Dispose();if(owner&&exclusive!=null)exclusive.ReleaseMutex();if(exclusive!=null)exclusive.Dispose();Running=false;}
         }
         void SuspendInput(string cause)
-        {CancelSession(cause+"，释放本轮按键。");if(!focusRecovery.Waiting)focusResumeAt=clock.ElapsedMilliseconds+(settings.AutoRetry?settings.RetrySeconds*1000L:0);focusRecovery.Suspend();Report("等待恢复："+cause+"；任务仍保留。"+(settings.AutoRetry?"暂停至少"+settings.RetrySeconds+"秒后，":"")+"游戏回到前台且松开修饰键后自动继续；停止/F12才结束任务。");}
+        {CancelSession(cause+"，释放本轮按键。");if(!focusRecovery.Waiting)log("暂停输入诊断："+cause+"；当前前台："+Native.ForegroundDescription());focusRecovery.Suspend();Report("等待恢复："+cause+"；任务仍保留。"+(settings.AutoRetry&&settings.ReturnFocusWhenIdle?"键鼠空闲"+settings.RetrySeconds+"秒后自动切回游戏；":"请切回游戏；")+"前台稳定且按键松开后继续，停止/F12结束任务。");}
         void ObserveSocial(FishingSocialObservation info)
         {
             bool previous=socialGate.Available;socialGate.Observe(info,picker.CompletedLaps,replies);

@@ -159,8 +159,8 @@ namespace WoWProbe
         {int delay=Draw(plan.Settings.CastDelayMinMs,plan.Settings.CastDelayMaxMs);Status="PreCast";delayUntil=checked(quietSince+delay);return None("本杆已结束但未确认收获；从结束时计抛竿前随机等待 "+delay+" 毫秒，再次抛竿。");}
         FishingCommand TimeoutCast(FarmObservation current,long now,bool distinct)
         {
-            if(now-castDeadline>300)return Fail("The old fishing cast did not provide a usable completion frame within its 300ms timeout grace.");
-            if(current.Casting||current.Channeling)return None("Waiting at most 300ms for the old fishing channel to end; no reel or cancellation input is sent.");
+            if(now-castDeadline>2000)return Fail("旧钓鱼读条到期后2秒仍未确认结束，保留自动重试；不额外按F或ESC。");
+            if(current.Casting||current.Channeling)return None("等待旧杆读条结束（最多2秒缓冲），期间不重复收杆或按ESC。");
             if(!distinct)return None("The cast deadline was reached; awaiting a distinct completed-cast frame inside the bounded grace.");
             return QueueCast(now);
         }
