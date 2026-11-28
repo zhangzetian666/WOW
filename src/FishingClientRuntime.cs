@@ -12,7 +12,7 @@ namespace WoWProbe
         FishingNativeHost host;FishingSession session;FishingSoundDetector sound;FishingSplashDetector splash;WindowsFishingAudioCapture audio;
         FishingActivityClock activity;FishingSpotPicker picker;FishingPoint point;FishingPhrases phrases;readonly FishingWhisperPolicy replies=new FishingWhisperPolicy();
         Navigator travel;QuickVendorEngine vendor;FarmObservation forwardAnchor;int forwardHold;double measuredTravelSpeed=.04;long arrived=-1,castStarted=-1,nextFrame,lastAudible=-100000,lastNotice=-100000;int countedCasts,countedReels,countedCatches,lastSpokenLap;
-        string lastLog="";int seenSessionCasts,seenSessionReels,seenSessionCatches;bool bagSuppressed;
+        string lastLog="";int seenSessionCasts,seenSessionReels,seenSessionCatches;bool bagSuppressed;long lastSignalReport=-1,lastSignalNotice=-10000;
         public volatile bool Running;public string Status="未开始";public int Casts{get{return countedCasts;}}public int Reels{get{return countedReels;}}public int Catches{get{return countedCatches;}}public int VendorVisits{get;private set;}public int Laps{get{return picker==null?0:picker.CompletedLaps;}}
         public FishingClientRuntime(FishingClientSettings settings,string directory,Action<string> log){this.settings=settings.Clone();this.directory=directory;this.log=log;}
         public void Start(){if(worker!=null)throw new InvalidOperationException("钓鱼已启动。");settings.Validate(true);worker=new Thread(Run){IsBackground=true,Name="Independent fishing client"};worker.SetApartmentState(ApartmentState.MTA);Running=true;worker.Start();}
@@ -116,7 +116,7 @@ namespace WoWProbe
         void PrepareSession(OperationObservation o,long now)
         {
             var plan=settings.At(point);plan.Settings.BindingsConfirmed=plan.Settings.AutoLootConfirmed=plan.Settings.AudioConfirmed=true;plan.Calibration.Confirmed=true;
-            castStarted=-1;nextFrame=0;splash.Reset();if(sound!=null)sound.Reset();seenSessionCasts=seenSessionReels=seenSessionCatches=0;UpdateObservation(o,now);
+            castStarted=-1;nextFrame=0;lastSignalReport=-1;lastSignalNotice=-10000;splash.Reset();if(sound!=null)sound.Reset();seenSessionCasts=seenSessionReels=seenSessionCatches=0;UpdateObservation(o,now);
             session=new FishingSession(host.Backend,()=>clock.ElapsedMilliseconds,()=>{lock(cacheGate)return cached==null?null:cached.Clone();},message=>{if(message.StartsWith("Fishing pulse"))Report(message);},new InputFailureLatch());session.Start(plan);
         }
         void UpdateObservation(OperationObservation o,long now)
@@ -125,6 +125,10 @@ namespace WoWProbe
             var s=sound==null?null:sound.Snapshot();bool audioReady=audio!=null&&audio.Running&&now-audio.LastPacketMs<1000&&now-Interlocked.Read(ref lastAudible)<5000;
             long bite=audioReady&&s!=null?s.LastBiteAtMs:-1;double confidence=audioReady&&s!=null?s.BiteConfidence:0;
             if(settings.UseVisual&&splash.LastBiteAtMs>bite){bite=splash.LastBiteAtMs;confidence=splash.Confidence;}
+            if(session!=null&&session.EngineStatus=="WaitBite"){
+                if(bite>=0&&bite!=lastSignalReport){lastSignalReport=bite;Report((settings.UseVisual&&bite==splash.LastBiteAtMs?"视觉鱼讯："+splash.Evidence:"声音鱼讯")+"；进入收竿延迟核验。");}
+                else if(now-lastSignalNotice>=5000){lastSignalNotice=now;Report("鱼讯监测：声音"+(audioReady?"有信号":"无有效信号")+"；"+(settings.UseVisual?"图像"+(splash.Ready?"可用":"未就绪")+"，浮标"+(splash.TrackingBobber?"已跟踪":"未锁定，检测局部水花")+String.Format(System.Globalization.CultureInfo.InvariantCulture,"，水花{0:F3}/阈值{1:F3}",splash.LocalWhiteChange,splash.Threshold):"图像未启用"));}
+            }
             var observation=new FishingObservation{Game=o,CapturedAtMs=now,AudioReady=audioReady,VisualReady=settings.UseVisual&&splash.Ready,LastBiteAtMs=bite,BiteConfidence=confidence,LastBagVoiceAtMs=s==null?-1:s.LastBagVoiceAtMs,BagVoiceConfidence=s==null?0:s.BagVoiceConfidence};
             lock(cacheGate)cached=observation;
         }

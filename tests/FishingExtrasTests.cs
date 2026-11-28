@@ -49,6 +49,41 @@ class FishingExtrasTests
                 d.Reset();using(var g=Graphics.FromImage(img))g.Clear(Color.DarkBlue);for(int i=0;i<8;i++)d.Push(img,r,i*200,0,true);using(var g=Graphics.FromImage(img))g.Clear(Color.White);d.Push(img,r,1600,0,true);d.Push(img,r,1800,0,true);Check(d.LastBiteAtMs<0);
             }
         });
+        Test("muted dark-water bobber dip emits one visual bite and delayed F",()=>{
+            var d=new FishingSplashDetector(5.6);var r=new FishingRegion{Width=1,Height=1};using(var img=new Bitmap(384,240)){
+                PaintBobber(img,180,100);for(int i=0;i<10;i++)d.Push(img,r,i*200,0,true);Check(d.TrackingBobber&&d.LastBiteAtMs<0);
+                PaintBobber(img,180,110);d.Push(img,r,2000,0,true);Check(d.LastBiteAtMs<0);d.Push(img,r,2200,0,true);Check(d.LastBiteAtMs==2200&&d.Evidence=="浮标下沉");
+                var p=FishingFixtures.Plan();p.Settings.ReelDelayMinMs=p.Settings.ReelDelayMaxMs=100;var e=new FishingEngine(p);var o=FishingFixtures.Observation(p);o.AudioReady=false;o.VisualReady=true;e.Step(o,0);
+                FishingFixtures.Frame(o,2200);o.LastBiteAtMs=d.LastBiteAtMs;o.BiteConfidence=d.Confidence;e.Step(o,2200);FishingFixtures.Frame(o,2300);Check(e.Step(o,2300).Purpose==FishingPurpose.Reel);
+                d.Push(img,r,2400,0,true);Check(d.LastBiteAtMs==2200);FishingFixtures.Frame(o,2400);Check(e.Step(o,2400).Purpose!=FishingPurpose.Reel&&e.Reels==1);
+            }
+        });
+        Test("small splash is not diluted by the entire water selection",()=>{
+            var d=new FishingSplashDetector(5.6);var r=new FishingRegion{Width=1,Height=1};using(var img=new Bitmap(480,300)){
+                using(var g=Graphics.FromImage(img))g.Clear(Color.FromArgb(45,77,105));for(int i=0;i<10;i++)d.Push(img,r,i*200,0,true);
+                using(var g=Graphics.FromImage(img))g.FillRectangle(Brushes.LightGray,240,150,12,8);d.Push(img,r,2000,0,true);Check(d.LastBiteAtMs<0&&d.WhiteChange<.006);
+                using(var g=Graphics.FromImage(img)){g.Clear(Color.FromArgb(45,77,105));g.FillRectangle(Brushes.LightGray,244,150,12,8);}d.Push(img,r,2200,0,true);Check(d.LastBiteAtMs==2200&&d.Evidence=="局部水花");
+            }
+        });
+        Test("horizontal drift and small bobbing do not count as a dip",()=>{
+            foreach(bool horizontal in new[]{true,false}){var d=new FishingSplashDetector(3.5);var r=new FishingRegion{Width=1,Height=1};using(var img=new Bitmap(384,240)){
+                PaintBobber(img,180,100);for(int i=0;i<10;i++)d.Push(img,r,i*200,0,true);
+                for(int i=0;i<8;i++){PaintBobber(img,horizontal?190+i:180,horizontal?100:100+i%2);d.Push(img,r,2000+i*150,0,true);}Check(d.LastBiteAtMs<0);
+            }}
+        });
+        Test("new cast and inactive fishing cannot reuse a previous bobber dip",()=>{
+            var d=new FishingSplashDetector(3.5);var r=new FishingRegion{Width=1,Height=1};using(var img=new Bitmap(384,240)){
+                PaintBobber(img,180,100);for(int i=0;i<10;i++)d.Push(img,r,i*200,0,true);PaintBobber(img,180,110);d.Push(img,r,2000,0,false);d.Push(img,r,2200,0,false);Check(d.LastBiteAtMs<0);
+                d.Push(img,r,2400,2400,true);Check(d.LastBiteAtMs<0&&!d.TrackingBobber);d.Push(img,r,2600,2400,true);Check(d.LastBiteAtMs<0);
+            }
+        });
+        Test("camera-wide change and splash outside the selection do not reel",()=>{
+            var d=new FishingSplashDetector(3.5);var r=new FishingRegion{X=.25,Y=.25,Width=.5,Height=.5};using(var img=new Bitmap(384,240)){
+                PaintBobber(img,180,100);for(int i=0;i<10;i++)d.Push(img,r,i*200,0,true);using(var g=Graphics.FromImage(img))g.FillRectangle(Brushes.White,0,0,30,30);d.Push(img,r,2000,0,true);d.Push(img,r,2200,0,true);Check(d.LastBiteAtMs<0);
+                using(var g=Graphics.FromImage(img))g.Clear(Color.White);d.Push(img,r,2400,0,true);d.Push(img,r,2600,0,true);Check(d.LastBiteAtMs<0&&!d.TrackingBobber);
+            }
+        });
         Console.WriteLine("Fishing extras: "+passed+" passed, "+failed+" failed. Synthetic observations only; no game input.");return failed==0?0:1;
     }
+    static void PaintBobber(Bitmap image,int x,int y){using(var g=Graphics.FromImage(image)){g.Clear(Color.FromArgb(45,77,105));using(var brush=new SolidBrush(Color.FromArgb(100,35,30)))g.FillRectangle(brush,x,y,14,6);}}
 }
