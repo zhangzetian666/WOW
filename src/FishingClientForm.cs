@@ -17,7 +17,7 @@ namespace WoWProbe
         string DraftPath{get{return Path.Combine(directory,"fishing-npc-recording.json");}}
         public FishingClientForm()
         {
-            Text="独立钓鱼客户端 · FISHING 1.0.8";Font=new Font("Microsoft YaHei UI",10);Size=new Size(1050,820);MinimumSize=new Size(950,730);StartPosition=FormStartPosition.CenterScreen;
+            Text="独立钓鱼客户端 · FISHING 1.0.9";Font=new Font("Microsoft YaHei UI",10);Size=new Size(1050,820);MinimumSize=new Size(950,730);StartPosition=FormStartPosition.CenterScreen;
             settings=LoadSettings();var root=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,Padding=new Padding(12)};root.RowStyles.Add(new RowStyle(SizeType.Absolute,60));root.RowStyles.Add(new RowStyle(SizeType.Percent,70));root.RowStyles.Add(new RowStyle(SizeType.Percent,30));Controls.Add(root);
             var top=Row();top.Controls.Add(Button("开始钓鱼",StartFishing));top.Controls.Add(Button("停止 / F12",StopFishing));top.Controls.Add(Button("保存设置",Save));top.Controls.Add(Button("导入方案",Import));top.Controls.Add(Button("导出方案",Export));top.Controls.Add(status);root.Controls.Add(top,0,0);
             var tabs=new TabControl{Dock=DockStyle.Fill};root.Controls.Add(tabs,0,1);root.Controls.Add(log,0,2);

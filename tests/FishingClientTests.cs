@@ -85,6 +85,17 @@ class FishingClientTests
                 }
             }
         });
+        Test("matched real packet merge preserves WP1 loot state through WO4 application and cloning",()=>{
+            var combat=CombatPacket.Decode(File.ReadAllBytes("test-output/lua-operations-combat.bin"));var ops=OperationsPacket.Decode(File.ReadAllBytes("test-output/lua-operations-packet.bin"));
+            for(int state=0;state<3;state++){var core=File.ReadAllBytes("test-output/lua-operations-core.bin");core[125]=(byte)((core[125]&~64)|(state==0?0:64));core[6]=(byte)((core[6]&~64)|(state==2?64:0));Sum(core);
+                var merged=OperationObservation.FromPackets(ProbePacket.Decode(core),combat,ops,true);Check(merged.Fresh&&merged.LootWindowKnown==(state!=0)&&merged.LootWindowOpen==(state==2));ops.ApplyTo(merged);var copy=merged.Clone();Check(copy.LootWindowKnown==(state!=0)&&copy.LootWindowOpen==(state==2));
+            }
+        });
+        Test("decoded closed loot state permits empty reel recast without inventing a catch",()=>{
+            var core=File.ReadAllBytes("test-output/lua-operations-core.bin");core[125]|=64;core[6]=(byte)(core[6]&~64);Sum(core);var merged=OperationObservation.FromPackets(ProbePacket.Decode(core),CombatPacket.Decode(File.ReadAllBytes("test-output/lua-operations-combat.bin")),OperationsPacket.Decode(File.ReadAllBytes("test-output/lua-operations-packet.bin")),true);
+            var p=FishingFixtures.Plan();var o=FishingFixtures.Observation(p);o.Game.LootWindowKnown=merged.LootWindowKnown;o.Game.LootWindowOpen=merged.LootWindowOpen;var e=new FishingEngine(p);e.Step(o,0);
+            FishingFixtures.Frame(o,1000);o.Game.Farm.Channeling=true;o.LastBiteAtMs=1000;o.BiteConfidence=.95;e.Step(o,1000);FishingFixtures.Frame(o,1200);o.Game.Farm.Channeling=false;e.Step(o,1200);FishingFixtures.Frame(o,1700);e.Step(o,1700);FishingFixtures.Frame(o,1800);Check(e.Step(o,1800).Purpose==FishingPurpose.Cast&&e.Casts==2&&e.ConfirmedCatches==0);
+        });
         Console.WriteLine("Fishing client: "+passed+" passed, "+failed+" failed. Pure/synthetic checks; no game input.");return failed==0?0:1;
     }
 }

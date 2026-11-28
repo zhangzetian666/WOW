@@ -66,7 +66,7 @@ namespace WoWProbe
         {
             if(o==null)throw new ArgumentNullException("observation");var c=value.Clone();
             foreach(FieldInfo f in typeof(OperationObservation).GetFields(BindingFlags.Public|BindingFlags.Instance))
-                if(f.Name!="Farm"&&f.Name!="Fresh"&&f.Name!="MapId"&&f.Name!="CorpseKnown"&&f.Name!="CorpseX"&&f.Name!="CorpseY"&&f.Name!="FreeSlotsKnown"&&f.Name!="FreeSlots"&&f.Name!="ClientVersion"&&f.Name!="ClientBuild"&&f.Name!="ClientInterfaceVersion")f.SetValue(o,f.GetValue(c));
+                if(f.Name!="Farm"&&f.Name!="Fresh"&&f.Name!="MapId"&&f.Name!="CorpseKnown"&&f.Name!="CorpseX"&&f.Name!="CorpseY"&&f.Name!="FreeSlotsKnown"&&f.Name!="FreeSlots"&&f.Name!="ClientVersion"&&f.Name!="ClientBuild"&&f.Name!="ClientInterfaceVersion"&&f.Name!="LootWindowKnown"&&f.Name!="LootWindowOpen")f.SetValue(o,f.GetValue(c));
         }
         public static OperationsPacket Decode(byte[] bytes)
         {

@@ -259,7 +259,7 @@ namespace WoWProbe
                 if(nowMs>=castDeadline)return TimeoutCast(f,nowMs,distinct);
                 if(distinct&&!reelUsed&&o.SignalReady&&o.LastBiteAtMs>eventFloor&&o.LastBiteAtMs!=rejectedBite&&Event(o.LastBiteAtMs,o.BiteConfidence,nowMs,900)&&o.LastBiteAtMs>=castAt+s.MinimumBiteDelayMs&&o.LastBiteAtMs>lastBite&&(lastBite<0||o.LastBiteAtMs-lastBite>=s.BiteDebounceMs))
                 {reelUsed=true;lastBite=pendingBite=o.LastBiteAtMs;int delay=Draw(s.ReelDelayMinMs,s.ReelDelayMaxMs);long remaining=castDeadline-nowMs-s.TapMs-100;if(remaining<0)return None("鱼讯距离本杆截止过近，不发送过期收杆。");delay=(int)Math.Min(delay,remaining);if(delay==0)return Reel(o,nowMs);reelDue=nowMs+delay;Status="ReelDelay";return None("本杆收杆随机等待 "+delay+" 毫秒。");}
-                return None("Listening for one recent splash inside the current cast window.");
+                return None("等待本杆鱼讯（水花或已启用的声音识别），正常运行中。");
             }
             return Fail("Unsupported fishing state.");
         }

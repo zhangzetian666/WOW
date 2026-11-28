@@ -40,8 +40,9 @@ namespace WoWProbe
                 {
                     try{
                     host.CheckCancelled();
-                    if(!host.Foreground||!host.ModifiersReleased){SuspendInput();host.Idle(200);continue;}
-                    var o=host.Read();if(!host.Foreground){SuspendInput();continue;}ValidateWorld(o);long now=clock.ElapsedMilliseconds;
+                    if(!host.Foreground){SuspendInput("游戏窗口失去前台");host.Idle(200);continue;}
+                    if(!host.ModifiersReleased){SuspendInput("检测到Alt/Ctrl/Shift仍按住");host.Idle(200);continue;}
+                    var o=host.Read();if(!host.Foreground){SuspendInput("读取画面期间游戏失去前台");continue;}ValidateWorld(o);long now=clock.ElapsedMilliseconds;
                     if(o.Farm.ChatOpen){CancelSession("用户打开了聊天框。");focusRecovery.Suspend();Report("等待用户关闭聊天框。");host.Idle(200);continue;}
                     if(focusRecovery.Waiting){if(!focusRecovery.ResumeReady(now,host.Foreground,host.ModifiersReleased,!o.Farm.ChatOpen)){host.Idle(100);continue;}
                         if(vendor!=null)vendor=new QuickVendorEngine(vendor.Checkpoint,o);else if(travel!=null)BeginTravel(o.Farm,picker.Segment);
@@ -87,15 +88,15 @@ namespace WoWProbe
                     if(!session.IsActive){string reason=session.LastReason;CancelSession(reason);throw new InvalidOperationException(reason);}
                     var command=session.LastCommand;if(command!=null&&command.Action==FishingAction.None)Report(command.Reason);
                     host.Idle(60);
-                    }catch(InvalidOperationException ex){if(stopping||host.InputFaulted||!FishingFocusRecovery.Transient(ex.Message))throw;SuspendInput();host.Idle(100);}
+                    }catch(InvalidOperationException ex){if(stopping||host.InputFaulted||!FishingFocusRecovery.Transient(ex.Message))throw;SuspendInput(ex.Message.Contains("modifier")||ex.Message.Contains("修饰键")?"输入检查发现Alt/Ctrl/Shift按住":"输入检查发现游戏失去前台");host.Idle(100);}
                 }
             }
             catch(OperationCanceledException){Report("钓鱼已停止。");}
             catch(Exception e){Report("钓鱼暂停："+e.Message);}
             finally{if(session!=null)session.Stop("钓鱼退出，释放按键。");if(audio!=null)audio.Dispose();if(owner&&exclusive!=null)exclusive.ReleaseMutex();if(exclusive!=null)exclusive.Dispose();Running=false;}
         }
-        void SuspendInput()
-        {CancelSession("游戏失焦或用户正在使用修饰键，释放本轮按键。");focusRecovery.Suspend();Report("任务保留：等待游戏回到前台并松开Alt/Ctrl/Shift，随后自动恢复；停止/F12仍会结束任务。");}
+        void SuspendInput(string cause)
+        {CancelSession(cause+"，释放本轮按键。");focusRecovery.Suspend();Report("等待恢复："+cause+"；任务仍保留。游戏回到前台且松开修饰键后自动继续；停止/F12才结束任务。");}
         void TickAuxiliary(OperationObservation o,long now)
         {
             bool casting=o.Farm.Casting||o.Farm.Channeling;ushort key=auxiliary.KeyDue(now,casting);
