@@ -11,13 +11,13 @@ namespace WoWProbe
         readonly string directory=AppDomain.CurrentDomain.BaseDirectory;FishingClientSettings settings;FishingClientRuntime runtime;
         readonly Dictionary<string,NumericUpDown> numbers=new Dictionary<string,NumericUpDown>();readonly Dictionary<string,CheckBox> checks=new Dictionary<string,CheckBox>();
         readonly TextBox log=new TextBox{Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,Dock=DockStyle.Fill};readonly Label status=new Label{AutoSize=true},pointsLabel=new Label{AutoSize=true},routeLabel=new Label{AutoSize=true};
-        readonly Button cancelRecording;
+        readonly Button cancelRecording;readonly Label regionStatus=new Label{AutoSize=true,MaximumSize=new Size(900,0),Margin=new Padding(4,6,4,8)};
         readonly ComboBox slot=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,Width=90};readonly TextBox npc=new TextBox{Width=200};
         readonly System.Windows.Forms.Timer timer=new System.Windows.Forms.Timer{Interval=300};readonly object logGate=new object();FishingRouteRecorder recorder;bool busy;DateTime nextRecord;string recordingWarning="";DateTime lastRecordingWarning;
         string DraftPath{get{return Path.Combine(directory,"fishing-npc-recording.json");}}
         public FishingClientForm()
         {
-            Text="独立钓鱼客户端 · FISHING 1.0.2";Font=new Font("Microsoft YaHei UI",10);Size=new Size(1050,820);MinimumSize=new Size(950,730);StartPosition=FormStartPosition.CenterScreen;
+            Text="独立钓鱼客户端 · FISHING 1.0.3";Font=new Font("Microsoft YaHei UI",10);Size=new Size(1050,820);MinimumSize=new Size(950,730);StartPosition=FormStartPosition.CenterScreen;
             settings=LoadSettings();var root=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,Padding=new Padding(12)};root.RowStyles.Add(new RowStyle(SizeType.Absolute,60));root.RowStyles.Add(new RowStyle(SizeType.Percent,70));root.RowStyles.Add(new RowStyle(SizeType.Percent,30));Controls.Add(root);
             var top=Row();top.Controls.Add(Button("开始钓鱼",StartFishing));top.Controls.Add(Button("停止 / F12",StopFishing));top.Controls.Add(Button("保存设置",Save));top.Controls.Add(Button("导入方案",Import));top.Controls.Add(Button("导出方案",Export));top.Controls.Add(status);root.Controls.Add(top,0,0);
             var tabs=new TabControl{Dock=DockStyle.Fill};root.Controls.Add(tabs,0,1);root.Controls.Add(log,0,2);
@@ -38,7 +38,7 @@ namespace WoWProbe
             row=Row();row.Controls.Add(Button("导入打怪客户端的路线/标定",ImportService));page.Controls.Add(row);
             Number(page,"axis","地图横纵比例",.1m,10,settings.Fishing.Calibration.AxisScale,3);Number(page,"turn","转向速度（弧度/秒）",.1m,10,settings.Fishing.Calibration.TurnRadiansPerSecond,3);Number(page,"speed","前进速度（地图单位/秒）",.0001m,.2m,settings.Fishing.Calibration.ForwardUnitsPerSecond,4);
             Info(page,"录制开始后手动走到商人旁，客户端自动连续采样。结束录制只保存真实走过的路线。默认方向键↑前进、←/→转向。");
-            page=Page(tabs,"水花与聊天");row=Row();row.Controls.Add(Button("框选浮标出现的水面",SelectRegion));row.Controls.Add(Button("查看已保存识别区域",ShowRegion));page.Controls.Add(row);Number(page,"splash","水花检测阈值（较高更保守）",1.5m,10,settings.SplashSensitivity,1);
+            page=Page(tabs,"水花与聊天");row=Row();row.Controls.Add(Button("框选浮标出现的水面",SelectRegion));row.Controls.Add(Button("查看 / 修改识别区域",SelectRegion));page.Controls.Add(row);page.Controls.Add(regionStatus);Number(page,"splash","水花检测阈值（较高更保守）",1.5m,10,settings.SplashSensitivity,1);
             Info(page,"框选小范围水面，尽量只包含自己的浮标，避开聊天框、姓名板和岸边动画。声音和水花只提供鱼讯候选；看到拾取事件才计收获。不会保存截图或原始录音。");
             Check(page,"chat","每完成AB、BC、CA一圈，随机发一句普通说话",settings.ChatAtLap);Check(page,"whisper","自动回复新私信（首次电话回复，再次回复稍等）",settings.WhisperReply);
             Info(page,"话术库为assets/fishing/chat-phrases.txt，共1000句，可查看。私信按R前核对最后发送者，回复前再次核对收件人。聊天和背包状态需要配套0.5.18-fishing插件。");
@@ -116,10 +116,9 @@ namespace WoWProbe
             }finally{busy=false;}
         }
         void SaveNpc(){IdleRequired();var f=Observe(true).Farm;if(!f.TargetExists||f.TargetIsPlayer||f.TargetCanAttack||f.TargetDead)throw new InvalidOperationException("请先选中售卖NPC。");npc.Text=f.TargetName;Save();}
-        void RefreshSummary(){cancelRecording.Enabled=recorder!=null;string text="";for(int i=0;i<settings.Points.Count;i++){var p=settings.Points[i];text+=(char)('A'+i)+"："+(p.X*100).ToString("F3")+", "+(p.Y*100).ToString("F3")+"  朝向 "+p.Facing.ToString("F3")+Environment.NewLine;}pointsLabel.Text=text.Length==0?"尚未保存钓点。":text;routeLabel.Text="NPC路线："+settings.Service.Vendor.Points.Count+"个点"+(recorder==null?(File.Exists(DraftPath)?"；有录制草稿，可继续补录":""):"（录制中："+recorder.Count+"） 最后有效坐标："+recorder.Location);}
+        void RefreshSummary(){cancelRecording.Enabled=recorder!=null;bool areaValid=settings.VisualRegion!=null&&settings.VisualRegion.Valid;regionStatus.Text=areaValid?"水面选区：已保存。可点击上方按钮查看绿色选框或重新框选。":"水面选区：尚未保存。请在图片上按住鼠标左键拖出绿色框，再点击保存选区。";regionStatus.ForeColor=areaValid?Color.DarkGreen:Color.Firebrick;string text="";for(int i=0;i<settings.Points.Count;i++){var p=settings.Points[i];text+=(char)('A'+i)+"："+(p.X*100).ToString("F3")+", "+(p.Y*100).ToString("F3")+"  朝向 "+p.Facing.ToString("F3")+Environment.NewLine;}pointsLabel.Text=text.Length==0?"尚未保存钓点。":text;routeLabel.Text="NPC路线："+settings.Service.Vendor.Points.Count+"个点"+(recorder==null?(File.Exists(DraftPath)?"；有录制草稿，可继续补录":""):"（录制中："+recorder.Count+"） 最后有效坐标："+recorder.Location);}
         Bitmap CaptureGame(){WindowState=FormWindowState.Minimized;try{GrindCli.FocusGameWindow();System.Threading.Thread.Sleep(200);GrindCli.ReadRecordingPoint();return GrindCli.FishingCapture();}finally{WindowState=FormWindowState.Normal;Activate();}}
-        void SelectRegion(){IdleRequired();using(var capture=CaptureGame())using(var select=new FishingRegionForm(capture)){if(select.ShowDialog(this)==DialogResult.OK){settings.VisualRegion=select.SelectedRegion;Save();}}}
-        void ShowRegion(){IdleRequired();using(var image=CaptureGame())using(var select=new FishingRegionForm(image,settings.VisualRegion))select.ShowDialog(this);}
+        void SelectRegion(){IdleRequired();using(var capture=CaptureGame())using(var select=new FishingRegionForm(capture,settings.VisualRegion)){if(select.ShowDialog(this)==DialogResult.OK){settings.VisualRegion=select.SelectedRegion.Clone();Save();RefreshSummary();Write("水面识别选区已保存，下次打开仍保留绿色选框。");}}}
         void ImportService(){IdleRequired();using(var dialog=new OpenFileDialog{Filter="路线配置 (*.json)|*.json"})if(dialog.ShowDialog(this)==DialogResult.OK){var p=QuickRoutePlan.Load(dialog.FileName);settings.Service=p.Clone();settings.Fishing.Calibration=p.Calibration.Clone();numbers["axis"].Value=(decimal)p.Calibration.AxisScale;numbers["speed"].Value=(decimal)p.Calibration.ForwardUnitsPerSecond;numbers["turn"].Value=(decimal)p.Calibration.TurnRadiansPerSecond;checks["vendor"].Checked=p.Vendor.Enabled;checks["repair"].Checked=p.Repair.Enabled;npc.Text=p.Vendor.Name;RefreshSummary();Save();}}
         void Import(){IdleRequired();using(var d=new OpenFileDialog{Filter="钓鱼方案 (*.json)|*.json"})if(d.ShowDialog(this)==DialogResult.OK){var p=FishingClientSettings.Load(d.FileName);settings=p;Populate();p.Save(Path.Combine(directory,"fishing-settings.json"));Write("已导入钓鱼方案，全部设置已立即载入。");}}
         void Populate()
@@ -151,12 +150,20 @@ namespace WoWProbe
         readonly PictureBox picture=new PictureBox{Dock=DockStyle.Fill,SizeMode=PictureBoxSizeMode.StretchImage};Point start,end;bool dragging;public FishingRegion SelectedRegion;
         public FishingRegionForm(Bitmap source,FishingRegion initial=null)
         {
-            Text="框选自己的浮标水面区域（拖动后点击保存）";Size=new Size(1000,730);StartPosition=FormStartPosition.CenterParent;SelectedRegion=initial;picture.Image=(Bitmap)source.Clone();Controls.Add(picture);var save=new Button{Dock=DockStyle.Bottom,Text="保存选区",Height=40};Controls.Add(save);
+            Text="框选浮标水面：按住左键拖出绿色框，再保存";Size=new Size(1000,730);StartPosition=FormStartPosition.CenterParent;
+            SelectedRegion=initial!=null&&initial.Valid?initial.Clone():null;picture.Image=(Bitmap)source.Clone();Controls.Add(picture);
+            var hint=new Label{Dock=DockStyle.Top,Height=52,Padding=new Padding(10,6,10,0),Text="图片是当前游戏画面。请按住鼠标左键拖出绿色矩形，只框自己的浮标附近水面；松开后点击下方保存。"};Controls.Add(hint);
+            var footer=new FlowLayoutPanel{Dock=DockStyle.Bottom,Height=48,Padding=new Padding(6)};Controls.Add(footer);
+            var save=new Button{Text="保存选区",Width=110,Height=32,Enabled=SelectedRegion!=null};var cancel=new Button{Text="取消",Width=80,Height=32,DialogResult=DialogResult.Cancel};var selection=new Label{AutoSize=true,Padding=new Padding(8,7,0,0)};footer.Controls.Add(save);footer.Controls.Add(cancel);footer.Controls.Add(selection);CancelButton=cancel;
+            Action update=()=>{bool valid=SelectedRegion!=null&&SelectedRegion.Valid;save.Enabled=valid;selection.Text=valid?"已有绿色选框，点击保存才会写入设置。":"尚无有效选框，请在图片上按住左键拖动（不要只单击）。";};update();
             save.Click+=delegate{if(SelectedRegion!=null&&SelectedRegion.Valid){DialogResult=DialogResult.OK;Close();}};
-            picture.MouseDown+=delegate(object s,MouseEventArgs e){start=end=e.Location;dragging=true;};picture.MouseMove+=delegate(object s,MouseEventArgs e){if(dragging){end=e.Location;picture.Invalidate();}};picture.MouseUp+=delegate(object s,MouseEventArgs e){if(!dragging)return;end=e.Location;dragging=false;int x=Math.Max(0,Math.Min(start.X,end.X)),y=Math.Max(0,Math.Min(start.Y,end.Y)),right=Math.Min(picture.Width,Math.Max(start.X,end.X)),bottom=Math.Min(picture.Height,Math.Max(start.Y,end.Y));SelectedRegion=new FishingRegion{X=x/(double)picture.Width,Y=y/(double)picture.Height,Width=(right-x)/(double)picture.Width,Height=(bottom-y)/(double)picture.Height};picture.Invalidate();};
-            picture.Paint+=delegate(object s,PaintEventArgs e){Rectangle r=dragging?Rectangle.FromLTRB(Math.Min(start.X,end.X),Math.Min(start.Y,end.Y),Math.Max(start.X,end.X),Math.Max(start.Y,end.Y)):SelectedRegion!=null?new Rectangle((int)(SelectedRegion.X*picture.Width),(int)(SelectedRegion.Y*picture.Height),(int)(SelectedRegion.Width*picture.Width),(int)(SelectedRegion.Height*picture.Height)):Rectangle.Empty;if(r.Width>0&&r.Height>0)using(var pen=new Pen(Color.Lime,2))e.Graphics.DrawRectangle(pen,r);};FormClosed+=delegate{picture.Image.Dispose();};
+            picture.MouseDown+=delegate(object sender,MouseEventArgs e){if(e.Button!=MouseButtons.Left)return;start=end=e.Location;dragging=true;picture.Capture=true;};
+            picture.MouseMove+=delegate(object sender,MouseEventArgs e){if(dragging){end=e.Location;picture.Invalidate();}};
+            picture.MouseUp+=delegate(object sender,MouseEventArgs e){if(!dragging||e.Button!=MouseButtons.Left)return;end=e.Location;dragging=false;picture.Capture=false;SelectedRegion=FishingRegion.FromSelection(start,end,picture.ClientSize);update();picture.Invalidate();};
+            picture.Paint+=delegate(object sender,PaintEventArgs e){Rectangle r=dragging?Rectangle.FromLTRB(Math.Min(start.X,end.X),Math.Min(start.Y,end.Y),Math.Max(start.X,end.X),Math.Max(start.Y,end.Y)):SelectedRegion!=null?new Rectangle((int)(SelectedRegion.X*picture.Width),(int)(SelectedRegion.Y*picture.Height),(int)(SelectedRegion.Width*picture.Width),(int)(SelectedRegion.Height*picture.Height)):Rectangle.Empty;if(r.Width>0&&r.Height>0)using(var pen=new Pen(Color.Lime,2))e.Graphics.DrawRectangle(pen,r);};FormClosed+=delegate{picture.Image.Dispose();};
         }
     }
+
     static class FishingProgram
     {
         [STAThread]static int Main(string[] args){Native.SetProcessDPIAware();Application.EnableVisualStyles();Application.SetCompatibleTextRenderingDefault(false);bool owner;using(var mutex=new System.Threading.Mutex(true,"WoWProbe-IndependentFishing",out owner)){if(!owner)return 0;try{Application.Run(new FishingClientForm());}finally{mutex.ReleaseMutex();}}return 0;}

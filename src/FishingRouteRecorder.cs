@@ -33,7 +33,8 @@ namespace WoWProbe
             double moved=NavigationMath.Distance(f.X-x,f.Y-y,map.AxisScale);
             // Normal movement through a short locator/UI delay is allowed. Long missing
             // sections and implausible jumps still cannot become a completed NPC path.
-            double limit=Math.Min(.025,Math.Max(.004,gap*map.ForwardUnitsPerSecond*2+.001));
+            // Manual recording may use mounts/sprint; navigation calibration is not a walking speed limit.
+            double limit=Math.Min(.06,Math.Max(.006,gap*Math.Max(.06,map.ForwardUnitsPerSecond*2)+.002));
             if(moved>limit||gap>10&&moved>.002)throw new InvalidOperationException("采样缺口或位移过大；最后有效坐标"+Location+String.Format(CultureInfo.InvariantCulture,"，当前({0:F3}, {1:F3})。已录{2}点保留，可结束保存草稿，或回到最后有效坐标补录。",f.X*100,f.Y*100,points.Count));
             if(f.Sequence==sequence&&!endpoint)return false;
             sequence=f.Sequence;last=now;x=f.X;y=f.Y;var p=points[points.Count-1];

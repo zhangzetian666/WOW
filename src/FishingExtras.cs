@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Drawing;
 using System.IO;
 using System.Web.Script.Serialization;
 namespace WoWProbe
@@ -16,6 +17,14 @@ namespace WoWProbe
     public sealed class FishingRegion
     {
         public double X,Y,Width,Height;
+        public FishingRegion Clone(){return new FishingRegion{X=X,Y=Y,Width=Width,Height=Height};}
+        public static FishingRegion FromSelection(Point a,Point b,Size viewport)
+        {
+            if(viewport.Width<=0||viewport.Height<=0)return new FishingRegion();
+            int left=Math.Max(0,Math.Min(viewport.Width,Math.Min(a.X,b.X))),right=Math.Max(0,Math.Min(viewport.Width,Math.Max(a.X,b.X)));
+            int top=Math.Max(0,Math.Min(viewport.Height,Math.Min(a.Y,b.Y))),bottom=Math.Max(0,Math.Min(viewport.Height,Math.Max(a.Y,b.Y)));
+            return new FishingRegion{X=left/(double)viewport.Width,Y=top/(double)viewport.Height,Width=(right-left)/(double)viewport.Width,Height=(bottom-top)/(double)viewport.Height};
+        }
         public bool Valid {get{return NavigationMath.InRange(X,0,1)&&NavigationMath.InRange(Y,0,1)&&NavigationMath.InRange(Width,.01,1)&&NavigationMath.InRange(Height,.01,1)&&X+Width<=1&&Y+Height<=1;}}
     }
     public sealed class FishingClientSettings
@@ -34,7 +43,7 @@ namespace WoWProbe
             if(Points.Count<(RandomSpots?3:1))throw new InvalidOperationException(RandomSpots?"请保存三个同图钓点及面水朝向。":"请保存钓点及面水朝向。");
             if(RandomSpots)for(int i=0;i<3;i++)if(NavigationMath.Distance(Points[i].X-Points[(i+1)%3].X,Points[i].Y-Points[(i+1)%3].Y,Fishing.Calibration.AxisScale)<.001)throw new FormatException("相邻钓点过近，请保存三个不同位置。");
             if(!UseAudio&&!UseVisual)throw new FormatException("至少启用声音或水花图像识别。");
-            if(UseVisual&&!VisualRegion.Valid)throw new FormatException("请先框选浮标出现的水面区域。");
+            if(UseVisual&&!VisualRegion.Valid)throw new FormatException("请到“水花与聊天”在图片上按住左键拖出绿色水面选框，再点击“保存选区”；仅显示图片不代表已保存选区。");
             var plan=At(Points[0]);plan.Validate();if(Service.Vendor.Enabled)Service.Validate(true);
         }
         public FishingPlan At(FishingPoint point)
