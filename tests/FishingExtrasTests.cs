@@ -83,6 +83,23 @@ class FishingExtrasTests
                 using(var g=Graphics.FromImage(img))g.Clear(Color.White);d.Push(img,r,2400,0,true);d.Push(img,r,2600,0,true);Check(d.LastBiteAtMs<0&&!d.TrackingBobber);
             }
         });
+        Test("brief one-frame dip followed by rebound is recognized",()=>{
+            var d=new FishingSplashDetector(3.5);var r=new FishingRegion{Width=1,Height=1};using(var img=new Bitmap(384,240)){
+                PaintBobber(img,180,100);for(int i=0;i<10;i++)d.Push(img,r,i*200,0,true);PaintBobber(img,180,110);d.Push(img,r,2000,0,true);Check(d.LastBiteAtMs<0);
+                PaintBobber(img,180,100);d.Push(img,r,2150,0,true);Check(d.LastBiteAtMs==2150&&d.Evidence=="浮标下沉后回弹");
+            }
+        });
+        Test("dark bobber submerging uses color motion but one missing frame does not reel",()=>{
+            foreach(bool reappears in new[]{true,false}){var d=new FishingSplashDetector(3.5);var r=new FishingRegion{Width=1,Height=1};using(var img=new Bitmap(384,240)){
+                PaintBobber(img,180,100);for(int i=0;i<10;i++)d.Push(img,r,i*200,0,true);using(var g=Graphics.FromImage(img))g.Clear(Color.FromArgb(45,77,105));d.Push(img,r,2000,0,true);Check(d.LastBiteAtMs<0);
+                if(reappears)PaintBobber(img,180,100);d.Push(img,r,2150,0,true);Check(reappears?d.LastBiteAtMs<0:d.LastBiteAtMs==2150&&d.Evidence=="浮标下沉消失");
+            }}
+        });
+        Test("bobber disappearing after fishing ends cannot authorize F",()=>{
+            var d=new FishingSplashDetector(3.5);var r=new FishingRegion{Width=1,Height=1};using(var img=new Bitmap(384,240)){
+                PaintBobber(img,180,100);for(int i=0;i<10;i++)d.Push(img,r,i*200,0,true);using(var g=Graphics.FromImage(img))g.Clear(Color.FromArgb(45,77,105));d.Push(img,r,2000,0,false);d.Push(img,r,2200,0,false);Check(d.LastBiteAtMs<0);
+            }
+        });
         Console.WriteLine("Fishing extras: "+passed+" passed, "+failed+" failed. Synthetic observations only; no game input.");return failed==0?0:1;
     }
     static void PaintBobber(Bitmap image,int x,int y){using(var g=Graphics.FromImage(image)){g.Clear(Color.FromArgb(45,77,105));using(var brush=new SolidBrush(Color.FromArgb(100,35,30)))g.FillRectangle(brush,x,y,14,6);}}

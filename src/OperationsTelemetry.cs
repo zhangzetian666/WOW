@@ -29,6 +29,7 @@ namespace WoWProbe
         public Rectangle ReleaseRegion,ResurrectRegion;
         // Optional external image verification, bound to this observation's sequence and target.
         public bool PortraitCheckKnown,PortraitMatch;
+        public bool LootWindowKnown,LootWindowOpen;
         public int PortraitCheckSequence;public uint PortraitCheckTargetToken;
         public OperationObservation Clone()
         {
@@ -45,6 +46,7 @@ namespace WoWProbe
         {
             var o=new OperationObservation{Farm=FarmObservation.FromPackets(core,combat,fresh)};if(core==null)return o;
             o.Sequence=core.Sequence;o.MapId=core.MapId;o.FreeSlotsKnown=(core.Capabilities&16)!=0;o.FreeSlots=core.FreeSlots;o.ClientVersion=core.ClientVersion;o.ClientBuild=core.Build;o.ClientInterfaceVersion=core.InterfaceVersion;
+            o.LootWindowKnown=(core.KnownFlags&64)!=0;o.LootWindowOpen=o.LootWindowKnown&&(core.Flags&64)!=0;
             o.CorpseKnown=(core.Capabilities&128)!=0;if(o.CorpseKnown){o.CorpseX=core.CorpseX;o.CorpseY=core.CorpseY;}
             if(operations==null||combat==null||core.Sequence!=operations.Sequence||core.Sequence!=combat.Sequence)return o;
             operations.ApplyTo(o);o.Fresh=o.Farm.Fresh;

@@ -99,6 +99,7 @@ namespace WoWProbe
     }
     public sealed class FishingEngine
     {
+        bool channelSeen,lootWindowSeen;long quietSince=-1;
         readonly FishingPlan plan;readonly string fingerprint;readonly Func<int,int> random;long pendingBite=-1,reelDue;Navigator navigator;bool hasTime,hasSequence,reelUsed,merchantSeen,returningToSpot;int sequence,scans,merchantAttempts;long lastTime,castAt,castDeadline,reelAt,delayUntil,nextScan,stateAt,lastBite=-1,lastBag=-1,eventFloor=-1,rejectedBite=-1,rejectedVoice=-1,rejectedText=-1;uint lootOpened,lootClosed,inventoryRevision,npcToken;int slotsBefore;string checkpointPhase="Ready";
         public FishingEngine(FishingPlan plan,Func<int,int> random=null){this.random=random??QuickRandom.Next;if(plan==null)throw new ArgumentNullException("plan");this.plan=plan.Clone();this.plan.Validate();fingerprint=this.plan.Fingerprint();Status="Ready";LastReason="Awaiting a fresh fishing observation.";}
         public string Status{get;private set;}public string LastReason{get;private set;}public int RouteIndex{get;private set;}public int Casts{get;private set;}public int Reels{get;private set;}public int ConfirmedCatches{get;private set;}public int VendorVisits{get;private set;}
@@ -146,12 +147,16 @@ namespace WoWProbe
             return (paired||(slots&&(voice||text)))&&acceptedAt>lastBag;
         }
         FishingCommand Cast(long now)
-        {if(now>Int64.MaxValue-plan.Settings.CastTimeoutMs)return Fail("Fishing deadline overflow.");Casts++;castAt=now;castDeadline=now+plan.Settings.CastTimeoutMs;reelUsed=false;Status="WaitBite";return Key(FishingPurpose.Cast,plan.Settings.CastKey,plan.Settings.TapMs,"One fishing cast begins a new bounded window.");}
+        {if(now>Int64.MaxValue-plan.Settings.CastTimeoutMs)return Fail("Fishing deadline overflow.");Casts++;castAt=now;castDeadline=now+plan.Settings.CastTimeoutMs;reelUsed=channelSeen=lootWindowSeen=false;quietSince=-1;Status="WaitBite";return Key(FishingPurpose.Cast,plan.Settings.CastKey,plan.Settings.TapMs,"One fishing cast begins a new bounded window.");}
         int Draw(int min,int max){return min+(max>min?random(max-min+1):0);}
         FishingCommand QueueCast(long now)
         {int delay=Draw(plan.Settings.CastDelayMinMs,plan.Settings.CastDelayMaxMs);if(delay==0)return Cast(now);Status="PreCast";delayUntil=checked(now+delay);return None("本杆抛竿前随机等待 "+delay+" 毫秒。");}
         FishingCommand Reel(FishingObservation o,long now)
-        {var f=o.Game.Farm;reelAt=now;Reels++;lootOpened=f.LootOpened;lootClosed=f.LootClosed;inventoryRevision=o.Game.InventoryRevision;slotsBefore=o.Game.FreeSlots;Status="LootWait";return Key(FishingPurpose.Reel,plan.Settings.InteractKey,plan.Settings.TapMs,"已确认本杆新鱼讯，随机延迟结束，按F一次收杆。",0,0,pendingBite);}
+        {var f=o.Game.Farm;reelAt=now;Reels++;lootWindowSeen=o.Game.LootWindowKnown&&o.Game.LootWindowOpen;quietSince=-1;lootOpened=f.LootOpened;lootClosed=f.LootClosed;inventoryRevision=o.Game.InventoryRevision;slotsBefore=o.Game.FreeSlots;Status="LootWait";return Key(FishingPurpose.Reel,plan.Settings.InteractKey,plan.Settings.TapMs,"已确认本杆新鱼讯，随机延迟结束，按F一次收杆。",0,0,pendingBite);}
+        bool CastEnded(OperationObservation o,long now,bool distinct)
+        {return distinct&&channelSeen&&quietSince>=0&&now-quietSince>=500&&now-castAt>=1000&&o.LootWindowKnown&&!o.LootWindowOpen&&!o.Farm.Casting&&!o.Farm.Channeling;}
+        FishingCommand RecastAfterCompletion(long now)
+        {Status="RecastDelay";delayUntil=now+plan.Settings.PostCatchDelayMs;return None("钓鱼读条已结束且拾取窗口已关闭；未确认收获，继续准备下一杆。");}
         FishingCommand TimeoutCast(FarmObservation current,long now,bool distinct)
         {
             if(now-castDeadline>300)return Fail("The old fishing cast did not provide a usable completion frame within its 300ms timeout grace.");
@@ -181,6 +186,11 @@ namespace WoWProbe
             if(o.CapturedAtMs<0||o.CapturedAtMs>nowMs||nowMs-o.CapturedAtMs>=900)return Fail("Fishing observation capture is stale or from the future.");
             if(o.LastBiteAtMs>nowMs)rejectedBite=o.LastBiteAtMs;if(o.LastBagVoiceAtMs>nowMs)rejectedVoice=o.LastBagVoiceAtMs;if(o.LastBagTextAtMs>nowMs)rejectedText=o.LastBagTextAtMs;
             bool distinct=!hasSequence||g.Sequence!=sequence;if(distinct){hasSequence=true;sequence=g.Sequence;}
+            if(distinct&&(Status=="WaitBite"||Status=="ReelDelay"||Status=="LootWait")){
+                if(f.Casting||f.Channeling){channelSeen=true;quietSince=-1;}
+                else if(quietSince<0)quietSince=nowMs;
+                if(g.LootWindowKnown&&g.LootWindowOpen){lootWindowSeen=true;quietSince=-1;}
+            }
             bool travelling=Status=="GoSpot"||Status=="ReturnNpc"||Status=="NpcScan"||Status=="VendorWait"||Status=="ReturnSpot";
             long fullAt;if(!travelling&&IsBagFull(o,nowMs,out fullAt))
             {
@@ -234,15 +244,18 @@ namespace WoWProbe
             {if(nowMs<delayUntil)return None("Waiting one second after observed loot completion.");if(f.Casting||f.Channeling)return Fail("An active cast remains after the post-catch delay; fishing will not cast over it.");if(!distinct)return None("Awaiting a fresh frame before recast.");return QueueCast(nowMs);}
             if(Status=="LootWait")
             {
-                bool loot=f.LootEventsKnown&&f.LootOpened!=lootOpened&&f.LootClosed!=lootClosed;
+                bool loot=f.LootEventsKnown&&f.LootOpened!=lootOpened&&f.LootClosed!=lootClosed||lootWindowSeen&&g.LootWindowKnown&&!g.LootWindowOpen;
                 bool inventory=g.InventoryEventsKnown&&g.InventoryRevision!=inventoryRevision&&g.FreeSlotsKnown&&slotsBefore>=0&&g.FreeSlots<slotsBefore;
-                if(distinct&&(loot||inventory)){ConfirmedCatches++;Status="RecastDelay";delayUntil=nowMs+s.PostCatchDelayMs;return None("Loot completion was observed; wait before the next cast.");}
+                if(distinct&&(loot||inventory)&&!(g.LootWindowKnown&&g.LootWindowOpen)){ConfirmedCatches++;Status="RecastDelay";delayUntil=nowMs+s.PostCatchDelayMs;return None("Loot completion was observed; wait before the next cast.");}
+                if(g.LootWindowKnown&&g.LootWindowOpen)return None("拾取窗口仍打开，等拾取完成后再抛竿。");
+                if(CastEnded(g,nowMs,distinct)&&nowMs-reelAt>=700)return RecastAfterCompletion(nowMs);
                 if(nowMs>=castDeadline)return TimeoutCast(f,nowMs,distinct);
-                if(nowMs-reelAt>=s.LootWaitMs){Status="WaitBite";return None("Reel lacked loot evidence; no second F, retain the original cast deadline.");}
+                if(nowMs-reelAt>=s.LootWaitMs)return None("收竿暂无拾取反馈；继续核对读条和拾取窗口，不重复按F。");
                 return None("Waiting for observed loot after the single reel.");
             }
             if(Status=="WaitBite")
             {
+                if(CastEnded(g,nowMs,distinct))return RecastAfterCompletion(nowMs);
                 if(nowMs>=castDeadline)return TimeoutCast(f,nowMs,distinct);
                 if(distinct&&!reelUsed&&o.SignalReady&&o.LastBiteAtMs>eventFloor&&o.LastBiteAtMs!=rejectedBite&&Event(o.LastBiteAtMs,o.BiteConfidence,nowMs,900)&&o.LastBiteAtMs>=castAt+s.MinimumBiteDelayMs&&o.LastBiteAtMs>lastBite&&(lastBite<0||o.LastBiteAtMs-lastBite>=s.BiteDebounceMs))
                 {reelUsed=true;lastBite=pendingBite=o.LastBiteAtMs;int delay=Draw(s.ReelDelayMinMs,s.ReelDelayMaxMs);long remaining=castDeadline-nowMs-s.TapMs-100;if(remaining<0)return None("鱼讯距离本杆截止过近，不发送过期收杆。");delay=(int)Math.Min(delay,remaining);if(delay==0)return Reel(o,nowMs);reelDue=nowMs+delay;Status="ReelDelay";return None("本杆收杆随机等待 "+delay+" 毫秒。");}

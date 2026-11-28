@@ -121,13 +121,13 @@ namespace WoWProbe
         }
         void UpdateObservation(OperationObservation o,long now)
         {
-            if(settings.UseVisual&&now>=nextFrame){using(var image=host.Capture())splash.Push(image,settings.VisualRegion,now,castStarted,session!=null&&(session.EngineStatus=="WaitBite"||session.EngineStatus=="ReelDelay"));nextFrame=now+80;}
+            if(settings.UseVisual&&now>=nextFrame){using(var image=host.Capture())splash.Push(image,settings.VisualRegion,now,castStarted,session!=null&&(session.EngineStatus=="WaitBite"||session.EngineStatus=="ReelDelay")&&(o.Farm.Casting||o.Farm.Channeling));nextFrame=now+80;}
             var s=sound==null?null:sound.Snapshot();bool audioReady=audio!=null&&audio.Running&&now-audio.LastPacketMs<1000&&now-Interlocked.Read(ref lastAudible)<5000;
             long bite=audioReady&&s!=null?s.LastBiteAtMs:-1;double confidence=audioReady&&s!=null?s.BiteConfidence:0;
             if(settings.UseVisual&&splash.LastBiteAtMs>bite){bite=splash.LastBiteAtMs;confidence=splash.Confidence;}
             if(session!=null&&session.EngineStatus=="WaitBite"){
                 if(bite>=0&&bite!=lastSignalReport){lastSignalReport=bite;Report((settings.UseVisual&&bite==splash.LastBiteAtMs?"视觉鱼讯："+splash.Evidence:"声音鱼讯")+"；进入收竿延迟核验。");}
-                else if(now-lastSignalNotice>=5000){lastSignalNotice=now;Report("鱼讯监测：声音"+(audioReady?"有信号":"无有效信号")+"；"+(settings.UseVisual?"图像"+(splash.Ready?"可用":"未就绪")+"，浮标"+(splash.TrackingBobber?"已跟踪":"未锁定，检测局部水花")+String.Format(System.Globalization.CultureInfo.InvariantCulture,"，水花{0:F3}/阈值{1:F3}",splash.LocalWhiteChange,splash.Threshold):"图像未启用"));}
+                else if(now-lastSignalNotice>=5000){lastSignalNotice=now;Report("鱼讯监测：声音"+(audioReady?"有信号":"无有效信号")+"；"+(settings.UseVisual?"图像"+(splash.Ready?"可用":"未就绪")+"，浮标"+(splash.TrackingBobber?"已跟踪":"未锁定，检测局部水花")+String.Format(System.Globalization.CultureInfo.InvariantCulture,"，水花{0:F3}/阈值{1:F3}，最大下沉{2:F1}/阈值{3:F1}，读条{4}",splash.LocalWhiteChange,splash.Threshold,splash.PeakDrop,splash.DropThreshold,o.Farm.Casting||o.Farm.Channeling):"图像未启用"));}
             }
             var observation=new FishingObservation{Game=o,CapturedAtMs=now,AudioReady=audioReady,VisualReady=settings.UseVisual&&splash.Ready,LastBiteAtMs=bite,BiteConfidence=confidence,LastBagVoiceAtMs=s==null?-1:s.LastBagVoiceAtMs,BagVoiceConfidence=s==null?0:s.BagVoiceConfidence};
             lock(cacheGate)cached=observation;

@@ -61,6 +61,28 @@ class FishingTests
         Test("initial positioning closes only the currently verified saved merchant",delegate{var p=FishingFixtures.Plan(true);var o=FishingFixtures.Observation(p);o.Game.Farm.Y=.49;var f=o.Game.Farm;f.TargetExists=f.TargetIdentityKnown=f.NameHashKnown=f.AttackabilityKnown=f.TargetDeadKnown=true;f.TargetToken=123;f.TargetNameHash=p.Vendor.NameHash;o.Game.MerchantOpen=true;o.Game.MerchantTargetToken=123;o.Game.MerchantNameHash=p.Vendor.NameHash;var e=new FishingEngine(p);var c=e.Step(o,0);Assert(e.Status=="GoSpot"&&c.Purpose==FishingPurpose.CloseMerchant&&c.Key==0x1B&&c.ExpectedTargetToken==123&&c.ExpectedNameHash==p.Vendor.NameHash&&e.VendorVisits==0,"initial position did not safely close the same merchant");});
         Test("unknown or mismatched merchant window blocks initial recorded travel",delegate{foreach(bool unknown in new[]{false,true}){var p=FishingFixtures.Plan(true);var o=FishingFixtures.Observation(p);o.Game.Farm.Y=.49;if(unknown)o.Game.MerchantKnown=false;else{o.Game.MerchantOpen=true;o.Game.MerchantTargetToken=999;o.Game.MerchantNameHash=p.Vendor.NameHash;}Assert(new FishingEngine(p).Step(o,0).Action==FishingAction.Stop,"unsafe initial merchant window allowed movement");}});
         Test("initial-position checkpoint recovery retains route progress and never invents a vendor visit",delegate{string path=Path.Combine(Path.GetTempPath(),"fishing-go-spot-"+Guid.NewGuid().ToString("N")+".json");try{var p=FishingFixtures.Plan(true);p.VendorRoute.Points.Insert(1,new Waypoint{X=.5,Y=.495,Tolerance=.001});var o=FishingFixtures.Observation(p);o.Game.Farm.Y=.49;var old=new FishingEngine(p);old.Step(o,0);old.Stop("pause");Assert(old.CurrentCheckpoint.Phase=="GoSpot","initial route phase was lost");FishingCheckpointStore.Save(path,old.CurrentCheckpoint);var cp=FishingCheckpointStore.Load(path,p);FishingFixtures.Frame(o,100);var e=new FishingEngine(p);e.Restore(cp,o,100,true);for(int n=0;n<30&&e.Casts==0&&e.Status!="Stopped";n++){if(e.Status=="GoSpot"){var route=p.VendorRoute.Reversed();var point=route.Points[Math.Min(route.Points.Count-1,e.RouteIndex)];o.Game.Farm.X=point.X;o.Game.Farm.Y=point.Y;}if(e.Status=="RestoreFacing")o.Game.Farm.Facing=p.Facing;FishingFixtures.Frame(o,200+n*100);e.Step(o,200+n*100);}Assert(e.Casts==1&&e.VendorVisits==0,"initial-position recovery fabricated a vendor visit or failed to cast");}finally{if(File.Exists(path))File.Delete(path);}});
+        Test("completed channel after F recasts without waiting thirty seconds or claiming a catch",delegate{
+            var p=FishingFixtures.Plan();p.Settings.PostCatchDelayMs=0;var e=new FishingEngine(p);var o=FishingFixtures.Observation(p);o.Game.LootWindowKnown=true;e.Step(o,0);
+            FishingFixtures.Frame(o,1000);o.Game.Farm.Channeling=true;o.LastBiteAtMs=1000;o.BiteConfidence=.95;Assert(e.Step(o,1000).Purpose==FishingPurpose.Reel,"setup");
+            FishingFixtures.Frame(o,1200);o.Game.Farm.Channeling=false;e.Step(o,1200);FishingFixtures.Frame(o,1699);Assert(e.Step(o,1699).Action==FishingAction.None&&e.Casts==1,"premature recast");
+            FishingFixtures.Frame(o,1700);e.Step(o,1700);FishingFixtures.Frame(o,1800);Assert(e.Step(o,1800).Purpose==FishingPurpose.Cast&&e.Casts==2&&e.ConfirmedCatches==0,"did not recover without invented loot");
+        });
+        Test("an open loot window blocks recast until observed closed even when event counters miss",delegate{
+            var p=FishingFixtures.Plan();p.Settings.PostCatchDelayMs=0;var e=new FishingEngine(p);var o=FishingFixtures.Observation(p);o.Game.LootWindowKnown=true;e.Step(o,0);
+            FishingFixtures.Frame(o,1000);o.Game.Farm.Channeling=true;o.LastBiteAtMs=1000;o.BiteConfidence=.95;e.Step(o,1000);
+            FishingFixtures.Frame(o,1200);o.Game.Farm.Channeling=false;o.Game.LootWindowOpen=true;e.Step(o,1200);FishingFixtures.Frame(o,35000);Assert(e.Step(o,35000).Action==FishingAction.None&&e.Casts==1,"interrupted loot");
+            FishingFixtures.Frame(o,35200);o.Game.LootWindowOpen=false;e.Step(o,35200);FishingFixtures.Frame(o,35300);Assert(e.Step(o,35300).Purpose==FishingPurpose.Cast&&e.ConfirmedCatches==1,"missed close observation");
+        });
+        Test("single ended frame and unknown loot state cannot end an active fishing cast",delegate{
+            foreach(bool unknown in new[]{true,false}){var p=FishingFixtures.Plan();var e=new FishingEngine(p);var o=FishingFixtures.Observation(p);o.Game.LootWindowKnown=!unknown;e.Step(o,0);
+                FishingFixtures.Frame(o,1000);o.Game.Farm.Channeling=true;o.LastBiteAtMs=1000;o.BiteConfidence=.95;e.Step(o,1000);
+                FishingFixtures.Frame(o,1200);o.Game.Farm.Channeling=false;e.Step(o,1200);FishingFixtures.Frame(o,1300);if(!unknown)o.Game.Farm.Channeling=true;e.Step(o,1300);
+                FishingFixtures.Frame(o,2500);Assert(e.Step(o,2500).Action==FishingAction.None&&e.Casts==1,"unconfirmed end recast");}
+        });
+        Test("loot events arriving after three seconds still complete the reel",delegate{
+            var p=FishingFixtures.Plan();var e=new FishingEngine(p);var o=FishingFixtures.Observation(p);e.Step(o,0);FishingFixtures.Frame(o,1000);o.LastBiteAtMs=1000;o.BiteConfidence=.95;e.Step(o,1000);
+            FishingFixtures.Frame(o,4500);e.Step(o,4500);FishingFixtures.Frame(o,5000);o.Game.Farm.LootOpened++;o.Game.Farm.LootClosed++;e.Step(o,5000);Assert(e.ConfirmedCatches==1,"late loot evidence discarded");
+        });
         Console.WriteLine("Fishing tests: "+passed+" passed, "+failed+" failed. Pure state and file checks only.");return failed==0?0:1;
     }
 }
