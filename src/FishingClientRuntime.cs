@@ -15,8 +15,9 @@ namespace WoWProbe
         QuickRecovery recovery;FishingDeathCheckpoint death;string DeathPath{get{return Path.Combine(directory,"fishing-death-checkpoint.json");}}
         FishingNativeHost host;FishingSession session;FishingSoundDetector sound;FishingSplashDetector splash;WindowsFishingAudioCapture audio;
         FishingActivityClock activity;FishingSpotPicker picker;FishingPoint point;FishingPhrases phrases;readonly FishingWhisperPolicy replies=new FishingWhisperPolicy();
-        Navigator travel;QuickVendorEngine vendor;FarmObservation forwardAnchor;int forwardHold;double measuredTravelSpeed=.04;long arrived=-1,castStarted=-1,nextFrame,lastAudible=-100000,lastNotice=-100000;int countedCasts,countedReels,countedCatches,lastSpokenLap;
+        Navigator travel;QuickVendorEngine vendor;FarmObservation forwardAnchor;int forwardHold;double measuredTravelSpeed=.04;long arrived=-1,castStarted=-1,nextFrame,lastAudible=-100000,lastNotice=-100000;int countedCasts,countedReels,countedCatches;
         string lastLog="";int seenSessionCasts,seenSessionReels,seenSessionCatches;bool bagSuppressed;long lastSignalReport=-1,lastSignalNotice=-10000;
+        readonly FishingSocialGate socialGate=new FishingSocialGate();bool socialChecked;long nextSocialCheck;
         public volatile bool Running;public string Status="未开始";public int Casts{get{return countedCasts;}}public int Reels{get{return countedReels;}}public int Catches{get{return countedCatches;}}public int VendorVisits{get;private set;}public int Laps{get{return picker==null?0:picker.CompletedLaps;}}
         public FishingClientRuntime(FishingClientSettings settings,string directory,Action<string> log){this.settings=settings.Clone();this.directory=directory;this.log=log;}
         public bool WorkerAlive{get{return worker!=null&&worker.IsAlive;}}public volatile bool Retryable;
@@ -33,7 +34,7 @@ namespace WoWProbe
                 var first=host.Read();ValidateWorld(first);activity=new FishingActivityClock(settings,clock.ElapsedMilliseconds);periodicKey=new FishingPeriodicKeyClock(settings,clock.ElapsedMilliseconds);picker=new FishingSpotPicker(settings);point=picker.Start(first.Farm);stay.Select(settings.StayInterval());
                 splash=new FishingSplashDetector(settings.SplashSensitivity);if(settings.ChatAtLap)phrases=new FishingPhrases(Path.Combine(directory,"assets","fishing","chat-phrases.txt"));
                 if(settings.UseAudio){sound=new FishingSoundDetector(Path.Combine(directory,"assets","fishing"));audio=new WindowsFishingAudioCapture((samples,rate,end,broken)=>{if(broken){sound.Reset();return;}double energy=0;foreach(float v in samples)energy+=v*v;if(samples.Length>0&&energy/samples.Length>.00000001)Interlocked.Exchange(ref lastAudible,end);sound.Push(samples,rate,end);},()=>clock.ElapsedMilliseconds);try{audio.Start();}catch(Exception e){Report("声音监听不可用，使用水花图像："+e.Message);}}
-                var social=settings.RequiresSocialFeedback()?host.Social(first):new FishingSocialObservation();if(settings.RequiresSocialFeedback()&&!social.Known)throw new InvalidOperationException("自动聊天需要配套插件反馈，请在游戏输入 /reload；定时B和定时技能不需要此扩展反馈。");replies.Discard(social.WhisperCount);
+                if(settings.RequiresSocialFeedback())ObserveSocial(host.Social(first));
                 Report("钓鱼准备完成；F12急停，进入钓点后倒计时开始抛竿。");
                 if(settings.TimedKeyEnabled)Report("定时键"+settings.TimedKey+"已启用，本轮约"+((periodicKey.NextDue-clock.ElapsedMilliseconds)/60000.0).ToString("F2")+"分钟后执行；当前杆结束后按键并留足10秒。");
                 var checkpoint=Path.Combine(directory,"fishing-vendor-checkpoint.json");
@@ -70,9 +71,7 @@ namespace WoWProbe
                     bool idle=FishingCycleBoundary.IsIdle(session==null?null:session.EngineStatus,session!=null&&session.IsHolding);
                     if(idle&&!o.Farm.Casting&&!o.Farm.Channeling)
                     {
-                        var info=settings.RequiresSocialFeedback()?host.Social(o):new FishingSocialObservation();
-                        if(settings.WhisperReply&&info.Known){string answer=replies.Pending(info.WhisperCount,info.SenderHash);if(answer!=null){CancelSession("回复新私信。");host.Chat(answer,true,info.SenderHash,info.WhisperCount);replies.Sent(info.WhisperCount,info.SenderHash);continue;}}
-                        if(settings.ChatAtLap&&picker.CompletedLaps>lastSpokenLap){CancelSession("全部钓点连线轮换完成，发送圈末交流。");host.Chat(phrases.Next(),false);lastSpokenLap=picker.CompletedLaps;continue;}
+                        if(TickSocial(o,now))continue;
                         if(periodicKey.Due(now)){CancelSession("定时技能已到期，当前杆已结束。");auxiliary.Start(FishingAuxiliaryKind.TimedKey,(ushort)(48+settings.TimedKey));Report("准备定时按键"+settings.TimedKey+"，按下后保留10秒施法时间。");continue;}
                         if(activity.BagDue(now)){CancelSession("执行到期背包查看。");auxiliary.Start(FishingAuxiliaryKind.Bag,66,(long)Math.Round(settings.BagOpenSeconds*1000));Report("准备按B查看背包，保持"+settings.BagOpenSeconds.ToString("0.0")+"秒后再按B。");continue;}
                         if(settings.RandomSpots&&arrived>=0&&(stay.Due(now)||settings.ChangeAfterCatch&&seenSessionCatches>0))
@@ -100,6 +99,22 @@ namespace WoWProbe
         }
         void SuspendInput(string cause)
         {CancelSession(cause+"，释放本轮按键。");if(!focusRecovery.Waiting)focusResumeAt=clock.ElapsedMilliseconds+(settings.AutoRetry?settings.RetrySeconds*1000L:0);focusRecovery.Suspend();Report("等待恢复："+cause+"；任务仍保留。"+(settings.AutoRetry?"暂停至少"+settings.RetrySeconds+"秒后，":"")+"游戏回到前台且松开修饰键后自动继续；停止/F12才结束任务。");}
+        void ObserveSocial(FishingSocialObservation info)
+        {
+            bool previous=socialGate.Available;socialGate.Observe(info,picker.CompletedLaps,replies);
+            if(!socialChecked||previous!=socialGate.Available)Report(socialGate.Available?"聊天反馈已就绪；仅处理此后的新私信和新圈次。":"聊天扩展反馈暂不可读：暂缓自动聊天和私信，继续钓鱼、定时B和定时技能。若需聊天，请检查配套插件并 /reload。");
+            socialChecked=true;nextSocialCheck=clock.ElapsedMilliseconds+5000;
+        }
+        bool TickSocial(OperationObservation o,long now)
+        {
+            if(!settings.RequiresSocialFeedback()||!socialGate.Available&&now<nextSocialCheck)return false;
+            try{
+                var info=host.Social(o);ObserveSocial(info);if(!socialGate.Available)return false;
+                if(settings.WhisperReply){string answer=replies.Pending(info.WhisperCount,info.SenderHash);if(answer!=null){CancelSession("回复新私信。");host.Chat(answer,true,info.SenderHash,info.WhisperCount);replies.Sent(info.WhisperCount,info.SenderHash);return true;}}
+                if(settings.ChatAtLap&&picker.CompletedLaps>socialGate.HandledLap){CancelSession("全部钓点连线轮换完成，发送圈末交流。");host.Chat(phrases.Next(),false);socialGate.LapSent(picker.CompletedLaps);return true;}
+            }catch(InvalidOperationException ex){if(!FishingSocialUnavailableException.Caused(ex)||stopping||host.InputFaulted||fishingSafety.Faulted)throw;ObserveSocial(null);}
+            return false;
+        }
         void TickAuxiliary(OperationObservation o,long now)
         {
             bool casting=o.Farm.Casting||o.Farm.Channeling;ushort key=auxiliary.KeyDue(now,casting);

@@ -53,14 +53,14 @@ namespace WoWProbe
         public void Chat(string message,bool whisper,uint expectedSender=0,uint expectedEvent=0,bool command=false)
         {
             if(String.IsNullOrWhiteSpace(message)||message.Length>160)throw new FormatException("聊天文本为空或过长。");Destination();var before=Read();if(before.Farm.ChatOpen||before.Farm.Casting||before.Farm.Channeling)throw new InvalidOperationException("已有聊天或施法，暂不自动聊天。");
-            Func<OperationObservation,bool> recipient=o=>{if(!whisper)return true;var s=Social(o);return s.Known&&s.WhisperCount==expectedEvent&&s.SenderHash==expectedSender;};
+            Func<OperationObservation,bool> recipient=o=>{if(command)return true;var s=Social(o);if(!s.Known)throw new FishingSocialUnavailableException();return !whisper||s.WhisperCount==expectedEvent&&s.SenderHash==expectedSender;};
             bool owned=false;
             try{
                 bool opened=false;var guard=Guard(o=>recipient(o)&&(opened||!o.Farm.ChatOpen&&!o.Farm.Casting&&!o.Farm.Channeling),true);owned=true;guard.Pulse(whisper?(ushort)82:(ushort)13,80,()=>opened=true);Idle(250);
-                bool requireSay=false;Func<OperationObservation,bool> edit=o=>{if(!recipient(o)||!o.Farm.ChatOpen)return false;if(!whisper){if(!requireSay)return true;var channel=Social(o);return channel.ChatTypeKnown&&channel.Say;}var s=Social(o);return s.ChatTypeKnown&&s.Whisper&&s.ReplyTargetHash==expectedSender;};
+                bool requireSay=false;Func<OperationObservation,bool> edit=o=>{if(!recipient(o)||!o.Farm.ChatOpen)return false;if(!whisper){if(!requireSay)return true;var channel=Social(o);if(!channel.Known||!channel.ChatTypeKnown)throw new FishingSocialUnavailableException();return channel.Say;}var s=Social(o);if(!s.Known||!s.ChatTypeKnown)throw new FishingSocialUnavailableException();return s.Whisper&&s.ReplyTargetHash==expectedSender;};
                 guard=Guard(edit,true);
                 // Explicit /s chooses local say, irrespective of the user's previous channel.
-                if(!whisper&&!command){guard.TypeText("/s ",Native.SendUnicodeChar);Idle(100);var current=Read();var channel=Social(current);if(!channel.ChatTypeKnown||!channel.Say)throw new InvalidOperationException("未确认普通说话频道，保留消息待重试。");requireSay=true;}
+                if(!whisper&&!command){guard.TypeText("/s ",Native.SendUnicodeChar);Idle(100);var current=Read();var channel=Social(current);if(!channel.Known||!channel.ChatTypeKnown)throw new FishingSocialUnavailableException();if(!channel.Say)throw new InvalidOperationException("未确认普通说话频道，保留消息待重试。");requireSay=true;}
                 guard.TypeText(message,Native.SendUnicodeChar);guard.Ensure();bool submitted=false;
                 var submit=Guard(o=>submitted||edit(o),true);submit.Pulse(13,80,()=>submitted=true);owned=false;
                 report(whisper?"已按R回复新私信："+message:command?"已选择录制的商人目标。":"圈末交流："+message);

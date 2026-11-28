@@ -19,6 +19,21 @@ class FishingClientTests
             foreach(double speed in new[]{0,.00001,1.001,Double.NaN,Double.PositiveInfinity}){var cal=Settings().Fishing.Calibration;cal.ForwardUnitsPerSecond=speed;bool rejected=false;try{cal.Validate();}catch(ArgumentException){rejected=true;}Check(rejected);}
             Check(FishingTravelPolicy.ForwardHold(.05,.0015,.5)>FishingTravelPolicy.ForwardHold(.05,.0015,1.0));
         });
+        Test("missing optional social feedback permits casting and drops old whispers on recovery",()=>{
+            var s=Settings();s.ChatAtLap=s.WhisperReply=true;var gate=new FishingSocialGate();var replies=new FishingWhisperPolicy();Check(!gate.Observe(new FishingSocialObservation(),2,replies)&&gate.HandledLap==2);
+            var plan=s.At(s.Points[0]);plan.Settings.BindingsConfirmed=plan.Settings.AutoLootConfirmed=plan.Settings.AudioConfirmed=true;plan.Calibration.Confirmed=true;plan.Settings.CastDelayMinMs=plan.Settings.CastDelayMaxMs=0;
+            var engine=new FishingEngine(plan);var o=FishingFixtures.Observation(plan);bool cast=false;for(int i=0;i<10;i++){FishingFixtures.Frame(o,i*200);var command=engine.Step(o,i*200);if(command.Purpose==FishingPurpose.Cast){cast=true;break;}Check(command.Action!=FishingAction.Stop);}Check(cast);
+            Check(gate.Observe(new FishingSocialObservation{Known=true,WhisperCount=8,SenderHash=123},3,replies)&&gate.HandledLap==3);Check(replies.Pending(8,123)==null&&replies.Pending(9,123)!=null);
+        });
+        Test("only typed social loss is recoverable through input guard exception wrapping",()=>{
+            Check(FishingSocialUnavailableException.Caused(new InvalidOperationException("guard",new FishingSocialUnavailableException())));
+            Check(!FishingSocialUnavailableException.Caused(new InvalidOperationException("Target window lost foreground"))&&!FishingSocialUnavailableException.Caused(new InvalidOperationException("Input failure is latched"))&&!FishingSocialUnavailableException.Caused(new InvalidOperationException("聊天扩展反馈暂不可读")));
+        });
+        Test("social outage during a session skips backlog and resumes only future messages and laps",()=>{
+            var gate=new FishingSocialGate();var replies=new FishingWhisperPolicy();gate.Observe(new FishingSocialObservation{Known=true,WhisperCount=1},0,replies);replies.Sent(2,123);gate.LapSent(1);
+            gate.Observe(null,2,replies);Check(!gate.Available);gate.Observe(new FishingSocialObservation{Known=true,WhisperCount=7},4,replies);Check(gate.HandledLap==4&&replies.Pending(7,123)==null&&replies.Pending(8,123)=="稍等");
+            gate.Observe(new FishingSocialObservation{Known=true,WhisperCount=8},5,replies);Check(gate.HandledLap==4&&replies.Pending(8,456)!=null);gate.LapSent(5);Check(gate.HandledLap==5);
+        });
         Test("all active cast stages block auxiliary actions including held keys",()=>{foreach(var phase in new[]{"WaitBite","ReelDelay","WaitLoot","Vendor","Stopped"})Check(!FishingCycleBoundary.IsIdle(phase,false));foreach(var phase in new[]{"Ready","PreCast","RecastDelay","RestoreFacing"}){Check(FishingCycleBoundary.IsIdle(phase,false));Check(!FishingCycleBoundary.IsIdle(phase,true));}Check(FishingCycleBoundary.IsIdle(null,false));});
         Test("new profile defaults stay ten minutes with independently optional social features",()=>{var s=new FishingClientSettings();Check(s.StayMinutes==10&&s.RandomSpots&&!s.ChatAtLap&&!s.WhisperReply&&!s.TimedSessions);});
         Test("profile roundtrip preserves points ranges and visual area",()=>{var s=Settings();s.TimedSessions=true;s.WhisperReply=true;s.CastDelay=new FishingRange(.34,.87);string path=Path.GetTempFileName();try{s.Save(path);var copy=FishingClientSettings.Load(path);copy.Validate(true);Check(copy.Points.Count==3&&copy.CastDelay.Min==.34&&copy.WhisperReply&&copy.VisualRegion.Width==.1);copy.Points[0].X=.9;Check(s.Points[0].X==.1);}finally{File.Delete(path);}});

@@ -19,7 +19,7 @@ namespace WoWProbe
         readonly FishingRestartSchedule restart=new FishingRestartSchedule();readonly Stopwatch restartClock=Stopwatch.StartNew();
         public FishingClientForm()
         {
-            Text="独立钓鱼客户端 · FISHING 1.0.12";Font=new Font("Microsoft YaHei UI",10);Size=new Size(1050,820);MinimumSize=new Size(950,730);StartPosition=FormStartPosition.CenterScreen;
+            Text="独立钓鱼客户端 · FISHING 1.0.13";Font=new Font("Microsoft YaHei UI",10);Size=new Size(1050,820);MinimumSize=new Size(950,730);StartPosition=FormStartPosition.CenterScreen;
             settings=LoadSettings();var root=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,Padding=new Padding(12)};root.RowStyles.Add(new RowStyle(SizeType.Absolute,60));root.RowStyles.Add(new RowStyle(SizeType.Percent,70));root.RowStyles.Add(new RowStyle(SizeType.Percent,30));Controls.Add(root);
             var top=Row();top.Controls.Add(Button("开始钓鱼",StartFishing));top.Controls.Add(Button("停止 / F12",StopFishing));top.Controls.Add(Button("保存设置",Save));top.Controls.Add(Button("导入方案",Import));top.Controls.Add(Button("导出方案",Export));top.Controls.Add(status);root.Controls.Add(top,0,0);
             var tabs=new TabControl{Dock=DockStyle.Fill};root.Controls.Add(tabs,0,1);root.Controls.Add(log,0,2);
@@ -51,7 +51,7 @@ namespace WoWProbe
             page=Page(tabs,"水花与聊天");row=Row();row.Controls.Add(Button("框选浮标出现的水面",SelectRegion));row.Controls.Add(Button("查看 / 修改识别区域",SelectRegion));page.Controls.Add(row);page.Controls.Add(regionStatus);Number(page,"splash","水花检测阈值（较高更保守）",1.5m,10,settings.SplashSensitivity,1);
             Info(page,"框选小范围水面，尽量只包含自己的浮标，避开聊天框、姓名板和岸边动画。声音和水花只提供鱼讯候选；看到拾取事件才计收获。不会保存截图或原始录音。");
             Check(page,"chat","每完成全部钓点连线一圈，随机发一句普通说话",settings.ChatAtLap);Check(page,"whisper","自动回复新私信（首次电话回复，再次回复稍等）",settings.WhisperReply);
-            Info(page,"话术库为assets/fishing/chat-phrases.txt，共1000句，可查看。私信按R前核对最后发送者，回复前再次核对收件人。自动聊天需要配套0.5.18-fishing扩展反馈；定时B和定时技能不需要此反馈。");
+            Info(page,"话术库为assets/fishing/chat-phrases.txt，共1000句，可查看。私信按R前核对最后发送者，回复前再次核对收件人。聊天扩展反馈不可读时只暂缓聊天，继续钓鱼及定时按键；反馈恢复后只处理新消息，不补发旧圈次。配套插件为0.5.18-fishing。");
             timer.Tick+=Tick;timer.Start();FormClosing+=delegate(object sender,FormClosingEventArgs e){if(recorder!=null)try{recorder.Draft().Save(DraftPath);}catch(Exception ex){e.Cancel=true;MessageBox.Show("录制草稿保存失败，窗口保留："+ex.Message);return;}restart.Cancel();timer.Stop();if(runtime!=null)runtime.Dispose();};RefreshSummary();Write("独立钓鱼客户端已打开，配置文件独立于自动打怪客户端。");
         }
         FishingClientSettings LoadSettings()
