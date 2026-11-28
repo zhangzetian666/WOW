@@ -13,7 +13,7 @@ namespace WoWProbe
         public long DrawMilliseconds(double unit,Func<int,int> random){long min=(long)Math.Round(Min*unit),max=(long)Math.Round(Max*unit);return min+(max>min?random(checked((int)(max-min+1))):0);}
     }
     public sealed class FishingPoint
-    {public double X,Y,Facing;public Waypoint Waypoint(){return new Waypoint{X=X,Y=Y,Tolerance=.0005};}}
+    {public double X,Y,Facing;public Waypoint Waypoint(){return new Waypoint{X=X,Y=Y,Tolerance=FishingTravelPolicy.ArrivalTolerance};}}
     public sealed class FishingRegion
     {
         public double X,Y,Width,Height;
@@ -60,6 +60,13 @@ namespace WoWProbe
     {
         readonly FishingClientSettings settings;readonly Func<int,int> random;public int Segment{get;private set;}public int CompletedLaps{get;private set;}public double PositionOnSegment{get;private set;}
         public FishingSpotPicker(FishingClientSettings settings,Func<int,int> random=null){this.settings=settings;this.random=random??QuickRandom.Next;Segment=-1;}
+        public FishingPoint Start(FarmObservation current)
+        {
+            if(settings.RandomSpots)return Next();
+            Segment=0;double best=Double.MaxValue;
+            for(int i=0;i<settings.Points.Count;i++){var p=settings.Points[i];double d=NavigationMath.Distance(p.X-current.X,p.Y-current.Y,settings.Fishing.Calibration.AxisScale);if(d<best){best=d;Segment=i;}}
+            return settings.Points[Segment];
+        }
         public FishingPoint Next()
         {
             if(!settings.RandomSpots){Segment=0;return settings.Points[0];}
@@ -88,6 +95,14 @@ namespace WoWProbe
             Add(r,destination.Waypoint());return r;
         }
         static void Add(RouteDocument r,Waypoint p){if(r.Points.Count==0||NavigationMath.Distance(r.Points[r.Points.Count-1].X-p.X,r.Points[r.Points.Count-1].Y-p.Y,1)>.00001)r.Points.Add(p);}
+    }
+    public static class FishingTravelPolicy
+    {
+        public const double ArrivalTolerance=.0015;
+        public static int ForwardHold(double distance,double tolerance,double configuredSpeed)
+        {return NavigationMath.Pulse(Math.Max(0,distance-tolerance*.5)/Math.Max(.04,configuredSpeed)*650,20,300);}
+        public static int FacingHold(double radians,double configuredRate)
+        {return NavigationMath.Pulse(Math.Abs(radians)/Math.Max(3,configuredRate)*650,20,120);}
     }
     public static class FishingCycleBoundary
     {

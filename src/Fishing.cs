@@ -221,7 +221,7 @@ namespace WoWProbe
             {
                 if(nowMs-stateAt>=15000)return Fail("Fishing facing restoration exceeded its deadline.");if(!distinct)return None("Awaiting a new facing observation.");
                 double target=NavigationMath.Normalize(plan.Calibration.FacingSign*plan.Facing+plan.Calibration.FacingOffset),current=NavigationMath.Normalize(plan.Calibration.FacingSign*f.Facing+plan.Calibration.FacingOffset),delta=NavigationMath.Normalize(target-current);
-                if(Math.Abs(delta)>.12)return Key(FishingPurpose.RestoreFacing,delta>0?plan.Movement.TurnRight:plan.Movement.TurnLeft,NavigationMath.Pulse(Math.Abs(delta)/plan.Calibration.TurnRadiansPerSecond*1000,60,250),"Restore the saved fishing facing before recasting.");
+                if(Math.Abs(delta)>.12)return Key(FishingPurpose.RestoreFacing,delta>0?plan.Movement.TurnRight:plan.Movement.TurnLeft,FishingTravelPolicy.FacingHold(delta,plan.Calibration.TurnRadiansPerSecond),"Restore the saved fishing facing before recasting.");
                 if(returningToSpot)VendorVisits++;returningToSpot=false;Status="Ready";return None("At the saved fishing spot and facing.");
             }
             if(Status=="Ready")

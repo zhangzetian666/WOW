@@ -40,8 +40,8 @@ namespace WoWProbe
                 if(context!=null&&!context(o))throw new InvalidOperationException("钓鱼输入条件已改变。");return f;
             },clock,ms=>Thread.Sleep(ms),safety,map.MapId,map.MapMode,map.Zone);
         }
-        public void Pulse(ushort key,int hold=80,Func<OperationObservation,bool> context=null)
-        {Destination();Guard(context).Pulse(key,hold);}
+        public void Pulse(ushort key,int hold=80,Func<OperationObservation,bool> context=null,Func<FarmObservation,bool> releaseWhen=null)
+        {Destination();Guard(context).Pulse(key,hold,null,releaseWhen);}
         public void Click(Rectangle region,Func<OperationObservation,bool> context)
         {Destination();var bounds=Native.ClientBounds(Window);var point=new Point(bounds.X+region.X+region.Width/2,bounds.Y+region.Y+region.Height/2);bool clicked=false;Guard(o=>clicked||context==null||context(o)).Click(point,false,p=>Native.ClientBounds(Window)==bounds&&bounds.Contains(p),Native.MoveMouse,(right,up)=>{Native.SendMouseButton(right,up);if(!up)clicked=true;});}
         public void MenuKey(ushort key)

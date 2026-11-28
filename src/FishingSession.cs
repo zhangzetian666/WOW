@@ -49,7 +49,7 @@ namespace WoWProbe
                     if(waiting&&o.Game.Sequence==releasedSequence)return;waiting=false;
                     var next=engine.Step(o,now);command=next;if(next.Action==FishingAction.Stop){StopCore(next.Reason);return;}if(next.Action==FishingAction.Completed){running=false;status="Completed";reason=next.Reason;return;}
                     if(next.Action==FishingAction.None){status="WaitingForFrame";reason=next.Reason;return;}
-                    if(next.Action!=FishingAction.Key||next.HoldMilliseconds<60||next.HoldMilliseconds>250)throw new InvalidOperationException("Unbounded or non-keyboard fishing command rejected.");
+                    if(next.Action!=FishingAction.Key||next.HoldMilliseconds<(next.Purpose==FishingPurpose.RestoreFacing?20:60)||next.HoldMilliseconds>250)throw new InvalidOperationException("Unbounded or non-keyboard fishing command rejected.");
                     if(next.Purpose==FishingPurpose.Cast)castDeadline=checked(now+plan.Settings.CastTimeoutMs);
                     WriteLog("Fishing pulse "+next.Purpose+" VK="+next.Key+" "+next.HoldMilliseconds+"ms");if(!Continue(ticket))return;
                     if(!ReadCurrent(ticket,out o,out now))return;problem=GlobalProblem(plan,o,now)??CommandProblem(o,next,true,now);if(problem!=null){StopCore(problem);return;}

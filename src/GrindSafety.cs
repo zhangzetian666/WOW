@@ -9,7 +9,7 @@ namespace WoWProbe
     {
         readonly IInputBackend backend;readonly Func<FarmObservation> reader;readonly Func<long> clock;readonly Action<int> wait;readonly InputFailureLatch safety;
         readonly uint mapId;readonly int mapMode;readonly string zone;bool stopped;long lastTime=-1;string reason="";
-        FarmObservation latest;
+        FarmObservation latest;long lastReadMilliseconds;
         public const string InteractBindingError="当前角色F未绑定“与目标互动”。请在游戏按键设置中将F绑定“与目标互动”，不要绑定“协助目标”，然后重新开始。";
         public GrindInputGuard(IInputBackend backend,Func<FarmObservation> reader,Func<long> clock,Action<int> wait,InputFailureLatch safety,uint mapId,int mapMode,string zone)
         {if(backend==null||reader==null||clock==null||wait==null||safety==null)throw new ArgumentNullException("grind input dependencies");this.backend=backend;this.reader=reader;this.clock=clock;this.wait=wait;this.safety=safety;this.mapId=mapId;this.mapMode=mapMode;this.zone=zone;}
@@ -22,7 +22,7 @@ namespace WoWProbe
                 if(backend.IsEmergencyPressed())Stop("Emergency stop during CLI operation.");
                 if(!backend.IsTargetForeground())Stop("Target window lost foreground during CLI operation.");
                 long now=clock();if(now<0||now<lastTime)Stop("CLI monotonic clock moved backwards.");lastTime=now;
-                var o=reader();if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0)Stop("CLI observations are unavailable, unknown or stale.");
+                var o=reader();long readFinished=clock();if(readFinished<now)Stop("CLI monotonic clock moved backwards.");lastReadMilliseconds=readFinished-now;lastTime=readFinished;if(o==null||!o.Fresh||!o.KnownCore||o.ReadFailures!=0)Stop("CLI observations are unavailable, unknown or stale.");
                 if(!MapIdentity.Matches(o.MapId,o.MapMode,o.Zone,mapId,mapMode,zone))Stop("CLI map identity changed.");
                 if(backend.IsEmergencyPressed())Stop("Emergency stop during CLI checks.");if(!backend.IsTargetForeground())Stop("Target window lost foreground during CLI checks.");
                 if(safety.Faulted)Stop("Input failure was latched during CLI checks: "+safety.Reason);
@@ -31,14 +31,26 @@ namespace WoWProbe
         }
         public void Wait(int milliseconds)
         {if(milliseconds<0||milliseconds>60000)throw new ArgumentOutOfRangeException("milliseconds");Ensure();for(int left=milliseconds;left>0;){int slice=Math.Min(25,left);wait(slice);left-=slice;Ensure();}}
-        public void Pulse(ushort key,int milliseconds,Action afterKeyDown=null)
+        public void Pulse(ushort key,int milliseconds,Action afterKeyDown=null,Func<FarmObservation,bool> releaseWhen=null)
         {
             if(milliseconds<1||milliseconds>5000)throw new ArgumentOutOfRangeException("milliseconds");Ensure();
             if(backend.IsKeyAlreadyDown(key))Stop("The user is already holding this CLI key.");Ensure();
             if(key==70&&latest.InteractBindingKnown&&!latest.InteractBindingCorrect)Stop(InteractBindingError);
             bool owned=false;
-            try{owned=true;try{backend.KeyDown(key);}catch(Exception ex){safety.Fail("CLI key-down failed: "+ex.Message);Stop("CLI key-down failed: "+ex.Message);}if(afterKeyDown!=null)afterKeyDown();Wait(milliseconds);}
+            long deadline=checked(clock()+milliseconds);
+            try{owned=true;try{backend.KeyDown(key);}catch(Exception ex){safety.Fail("CLI key-down failed: "+ex.Message);Stop("CLI key-down failed: "+ex.Message);}if(afterKeyDown!=null)afterKeyDown();
+                HoldUntil(deadline,releaseWhen);}
             finally{if(owned)try{backend.KeyUp(key);}catch(Exception ex){safety.Fail("CLI key release failed: "+ex.Message);Stop("CLI key release failed: "+ex.Message);}}
+        }
+        void HoldUntil(long deadline,Func<FarmObservation,bool> releaseWhen)
+        {
+            // Readback consumes wall time too. Never add every screen-read duration
+            // on top of the requested hold, or short movement pulses become long runs.
+            while(true){long now=clock();if(now<lastTime)Stop("CLI monotonic clock moved backwards.");long remaining=deadline-now;if(remaining<=0)return;
+                wait((int)Math.Min(25,remaining));remaining=deadline-clock();if(remaining<=0)return;
+                if(backend.IsEmergencyPressed())Stop("Emergency stop during CLI operation.");if(!backend.IsTargetForeground())Stop("Target window lost foreground during CLI operation.");if(safety.Faulted)Stop("Input failure is latched: "+safety.Reason);
+                // Do not start another screen read when it is likely to outlast this key hold.
+                if(remaining>lastReadMilliseconds+5){Ensure();if(releaseWhen!=null&&releaseWhen(latest))return;}}
         }
         public void TypeText(string text,Action<char> send)
         {if(text==null||send==null)throw new ArgumentNullException("text input");foreach(char ch in text){Ensure();try{send(ch);}catch(Exception ex){safety.Fail("CLI text input failed: "+ex.Message);Stop("CLI text input failed: "+ex.Message);}Ensure();}}

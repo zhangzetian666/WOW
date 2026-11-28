@@ -46,7 +46,7 @@ namespace WoWProbe
         }
         void Apply(FishingCommand c)
         {
-            if(c.HoldMilliseconds<60||c.HoldMilliseconds>250)throw new InvalidOperationException("Unbounded virtual fishing pulse.");var g=observation.Game;var f=g.Farm;var s=plan.Settings;
+            if(c.HoldMilliseconds<(c.Purpose==FishingPurpose.RestoreFacing?20:60)||c.HoldMilliseconds>250)throw new InvalidOperationException("Unbounded virtual fishing pulse.");var g=observation.Game;var f=g.Farm;var s=plan.Settings;
             switch(c.Purpose)
             {
                 case FishingPurpose.Cast:

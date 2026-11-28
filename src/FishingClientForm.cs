@@ -17,7 +17,7 @@ namespace WoWProbe
         string DraftPath{get{return Path.Combine(directory,"fishing-npc-recording.json");}}
         public FishingClientForm()
         {
-            Text="独立钓鱼客户端 · FISHING 1.0.3";Font=new Font("Microsoft YaHei UI",10);Size=new Size(1050,820);MinimumSize=new Size(950,730);StartPosition=FormStartPosition.CenterScreen;
+            Text="独立钓鱼客户端 · FISHING 1.0.4";Font=new Font("Microsoft YaHei UI",10);Size=new Size(1050,820);MinimumSize=new Size(950,730);StartPosition=FormStartPosition.CenterScreen;
             settings=LoadSettings();var root=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,Padding=new Padding(12)};root.RowStyles.Add(new RowStyle(SizeType.Absolute,60));root.RowStyles.Add(new RowStyle(SizeType.Percent,70));root.RowStyles.Add(new RowStyle(SizeType.Percent,30));Controls.Add(root);
             var top=Row();top.Controls.Add(Button("开始钓鱼",StartFishing));top.Controls.Add(Button("停止 / F12",StopFishing));top.Controls.Add(Button("保存设置",Save));top.Controls.Add(Button("导入方案",Import));top.Controls.Add(Button("导出方案",Export));top.Controls.Add(status);root.Controls.Add(top,0,0);
             var tabs=new TabControl{Dock=DockStyle.Fill};root.Controls.Add(tabs,0,1);root.Controls.Add(log,0,2);
@@ -26,7 +26,7 @@ namespace WoWProbe
             Pair(page,"castMin","castMax","每次抛竿前随机等待（秒）",settings.CastDelay,0,60,2);
             Pair(page,"reelMin","reelMax","鱼讯后随机收杆延迟（秒，最高1秒）",settings.ReelDelay,0,1,2);
             Check(page,"audio","声音识别（系统播放声音，不采集麦克风）",settings.UseAudio);Check(page,"visual","水花图像识别（静音可用，需要选择观察区域）",settings.UseVisual);
-            Check(page,"random","启用三条连线随机钓点",settings.RandomSpots);Number(page,"stay","每个随机钓点驻留（分钟）",.1m,1440,settings.StayMinutes,1);
+            Check(page,"random","启用三条连线随机钓点（不勾选则在最近的已保存点钓鱼）",settings.RandomSpots);Number(page,"stay","每个随机钓点驻留（分钟）",.1m,1440,settings.StayMinutes,1);
             Check(page,"bags","定时按B查看背包，3秒后关闭",settings.PeekBags);Pair(page,"bagMin","bagMax","每次查看背包的随机间隔（分钟）",settings.BagMinutes,.1m,1440,1);
             Check(page,"timed","启用随机下线和重新上线",settings.TimedSessions);Pair(page,"onMin","onMax","每轮上线时长（小时）",settings.OnlineHours,.01m,24,2);Pair(page,"offMin","offMax","每次离线等待（小时）",settings.OfflineHours,.01m,24,2);
             Info(page,"背包查看、换点、普通聊天及定时下线都等当前杆结束。重新上线后重新抽取在线时长。账号登录需要凭据时会等待，不保存密码。");
