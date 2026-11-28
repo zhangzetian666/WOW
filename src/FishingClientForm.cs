@@ -43,7 +43,8 @@ namespace WoWProbe
             row=Row();row.Controls.Add(new Label{AutoSize=true,Text="NPC名称"});row.Controls.Add(npc);page.Controls.Add(row);npc.Text=settings.Service.Vendor.Name;
             Check(page,"vendor","背包满后沿已录路线自动售卖并原路返回",settings.Service.Vendor.Enabled);Check(page,"repair","同一NPC顺便自动修理",settings.Service.Repair.Enabled);
             row=Row();row.Controls.Add(Button("导入打怪客户端的路线/标定",ImportService));page.Controls.Add(row);
-            Number(page,"axis","地图横纵比例",.1m,10,settings.Fishing.Calibration.AxisScale,3);Number(page,"turn","转向速度（弧度/秒）",.1m,10,settings.Fishing.Calibration.TurnRadiansPerSecond,3);Number(page,"speed","前进速度（地图单位/秒）",.0001m,.2m,settings.Fishing.Calibration.ForwardUnitsPerSecond,4);
+            Number(page,"axis","地图横纵比例",.1m,10,settings.Fishing.Calibration.AxisScale,3);Number(page,"turn","转向速度（弧度/秒）",.1m,10,settings.Fishing.Calibration.TurnRadiansPerSecond,3);Number(page,"speed","前进速度标定（0–1地图单位/秒）",(decimal)NavigationCalibration.MinimumForwardSpeed,(decimal)NavigationCalibration.MaximumForwardSpeed,settings.Fishing.Calibration.ForwardUnitsPerSecond,4);numbers["speed"].Increment=.0001m;
+            Info(page,"前进标定上限已提高到1.0000。0.01代表每秒移动1个地图坐标点；它用于估算按键时长，不改变游戏跑速，填得越大反而按得越短。请按当前地图实测位移÷前进时间填写，不要把游戏的7码/秒填成7。");
             Info(page,"录制开始后手动走到商人旁，客户端自动连续采样。结束录制只保存真实走过的路线。默认方向键↑前进、←/→转向。");
             page=Page(tabs,"死亡跑尸");Check(page,"corpse","启用死亡后自动跑尸并返回钓点",settings.AutoCorpse);row=Row();row.Controls.Add(Button("开始录制跑尸路线",()=>BeginRecording(true)));row.Controls.Add(Button("结束并保存跑尸路线",EndRecording));cancelCorpseRecording=Button("取消本次录制",CancelRecording);row.Controls.Add(cancelCorpseRecording);row.Controls.Add(Button("继续上次跑尸录制",()=>ResumeRecording(true)));row.Controls.Add(Button("导入打怪跑尸路线",ImportCorpse));page.Controls.Add(row);page.Controls.Add(corpseLabel);
             Info(page,"从灵魂医者附近开始，沿实际可通行路径走到钓鱼区后结束录制；存活和灵魂状态均可录制，途中复活也可继续。死亡后只点击释放灵魂，不与灵魂医者交互；先到录制终点，再到实际死亡点接受尸体复活，确认存活后返回钓点。NPC与跑尸路线分别保存，死亡坐标自动记录。");

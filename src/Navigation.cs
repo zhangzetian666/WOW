@@ -4,6 +4,7 @@ namespace WoWProbe
 {
     public sealed class NavigationCalibration
     {
+        public const double MinimumForwardSpeed = 0.0001, MaximumForwardSpeed = 1.0;
         public double AxisScale = 1, FacingSign = -1, FacingOffset, TurnRadiansPerSecond = 2, ForwardUnitsPerSecond = 0.01;
         public bool Confirmed;
         public uint MapId;
@@ -13,7 +14,7 @@ namespace WoWProbe
         {
             if (!NavigationMath.InRange(AxisScale, 0.1, 10) || (FacingSign != -1 && FacingSign != 1) ||
                 !NavigationMath.Finite(FacingOffset) || !NavigationMath.InRange(TurnRadiansPerSecond, 0.1, 10) ||
-                !NavigationMath.InRange(ForwardUnitsPerSecond, 0.0001, 0.2))
+                !NavigationMath.InRange(ForwardUnitsPerSecond, MinimumForwardSpeed, MaximumForwardSpeed))
                 throw new ArgumentException("Invalid navigation scale, orientation or movement calibration.");
             if (MapId == 0 || MapMode < 1 || MapMode > 3 || String.IsNullOrWhiteSpace(Zone) || Zone.Length > 128)
                 throw new ArgumentException("Navigation calibration requires a valid map ID, mode and zone.");

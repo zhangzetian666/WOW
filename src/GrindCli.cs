@@ -1041,7 +1041,7 @@ namespace WoWProbe
             profile.Calibration.FacingSign = bestSign;
             profile.Calibration.FacingOffset = Normalize(bestOffset);
             profile.Calibration.TurnRadiansPerSecond = Math.Max(0.1, Math.Min(10, turnRate));
-            profile.Calibration.ForwardUnitsPerSecond = forwardUnits > 0 ? Math.Max(0.0001, Math.Min(0.2, forwardUnits)) : 0.01;
+            profile.Calibration.ForwardUnitsPerSecond = forwardUnits > 0 ? Math.Max(NavigationCalibration.MinimumForwardSpeed, Math.Min(NavigationCalibration.MaximumForwardSpeed, forwardUnits)) : 0.01;
             Log(String.Format("标定完成: FacingSign={0} FacingOffset={1:F3} 转速={2:F3} rad/s 移速={3:F5} units/s (样本 {4})",
                 bestSign, profile.Calibration.FacingOffset, profile.Calibration.TurnRadiansPerSecond, profile.Calibration.ForwardUnitsPerSecond, samples.Count));
             return true;

@@ -150,7 +150,7 @@ namespace WoWProbe
         void TickTravel(OperationObservation o,long now)
         {
             var f=o.Farm;
-            if(forwardAnchor!=null&&f.Sequence!=forwardAnchor.Sequence){double moved=NavigationMath.Distance(f.X-forwardAnchor.X,f.Y-forwardAnchor.Y,settings.Fishing.Calibration.AxisScale);if(moved>.0001&&forwardHold>0)measuredTravelSpeed=Math.Max(measuredTravelSpeed,Math.Min(.2,moved*1000/forwardHold*1.15));forwardAnchor=null;}
+            if(forwardAnchor!=null&&f.Sequence!=forwardAnchor.Sequence){double moved=NavigationMath.Distance(f.X-forwardAnchor.X,f.Y-forwardAnchor.Y,settings.Fishing.Calibration.AxisScale);if(moved>.0001&&forwardHold>0)measuredTravelSpeed=Math.Max(measuredTravelSpeed,Math.Min(NavigationCalibration.MaximumForwardSpeed,moved*1000/forwardHold*1.15));forwardAnchor=null;}
             var action=travel.Step(new NavigationSample{Fresh=f.Fresh,KnownCore=f.KnownCore,ReadFailures=f.ReadFailures,Sequence=f.Sequence,MapId=f.MapId,MapMode=f.MapMode,Zone=f.Zone,X=f.X,Y=f.Y,Facing=f.Facing,Dead=f.PlayerDead,Ghost=f.PlayerGhost,Combat=f.InCombat},now);
             if(action.Action==NavigationAction.Stop)throw new InvalidOperationException(action.Reason);
             if(action.Action==NavigationAction.Completed){travel=null;arrived=now;stay.Arrive(now);Report("已到达钓点并停稳，恢复面水朝向后按抛竿键。");return;}

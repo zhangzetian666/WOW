@@ -13,6 +13,12 @@ class FishingClientTests
     static void Sum(byte[] b){int a=0,c=0;for(int i=0;i<126;i++){a=(a+b[i])%255;c=(c+a)%255;}b[126]=(byte)a;b[127]=(byte)c;}
     static int Main()
     {
+        Test("expanded forward calibration survives settings clone and disk roundtrip",()=>{
+            foreach(double speed in new[]{.0001,.008,.2,.5,1.0}){var s=Settings();s.Fishing.Calibration.ForwardUnitsPerSecond=speed;s.Service.Calibration=s.Fishing.Calibration.Clone();s.Validate(true);Check(s.Clone().Fishing.Calibration.ForwardUnitsPerSecond==speed);
+                string path=Path.GetTempFileName();try{s.Save(path);var copy=FishingClientSettings.Load(path);Check(copy.Fishing.Calibration.ForwardUnitsPerSecond==speed&&copy.Service.Calibration.ForwardUnitsPerSecond==speed);}finally{File.Delete(path);}}
+            foreach(double speed in new[]{0,.00001,1.001,Double.NaN,Double.PositiveInfinity}){var cal=Settings().Fishing.Calibration;cal.ForwardUnitsPerSecond=speed;bool rejected=false;try{cal.Validate();}catch(ArgumentException){rejected=true;}Check(rejected);}
+            Check(FishingTravelPolicy.ForwardHold(.05,.0015,.5)>FishingTravelPolicy.ForwardHold(.05,.0015,1.0));
+        });
         Test("all active cast stages block auxiliary actions including held keys",()=>{foreach(var phase in new[]{"WaitBite","ReelDelay","WaitLoot","Vendor","Stopped"})Check(!FishingCycleBoundary.IsIdle(phase,false));foreach(var phase in new[]{"Ready","PreCast","RecastDelay","RestoreFacing"}){Check(FishingCycleBoundary.IsIdle(phase,false));Check(!FishingCycleBoundary.IsIdle(phase,true));}Check(FishingCycleBoundary.IsIdle(null,false));});
         Test("new profile defaults stay ten minutes with independently optional social features",()=>{var s=new FishingClientSettings();Check(s.StayMinutes==10&&s.RandomSpots&&!s.ChatAtLap&&!s.WhisperReply&&!s.TimedSessions);});
         Test("profile roundtrip preserves points ranges and visual area",()=>{var s=Settings();s.TimedSessions=true;s.WhisperReply=true;s.CastDelay=new FishingRange(.34,.87);string path=Path.GetTempFileName();try{s.Save(path);var copy=FishingClientSettings.Load(path);copy.Validate(true);Check(copy.Points.Count==3&&copy.CastDelay.Min==.34&&copy.WhisperReply&&copy.VisualRegion.Width==.1);copy.Points[0].X=.9;Check(s.Points[0].X==.1);}finally{File.Delete(path);}});

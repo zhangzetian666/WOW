@@ -8,7 +8,7 @@ namespace WoWProbe
     public sealed class QuickRouteEditor:UserControl
     {
         readonly TextBox routeName=new TextBox{Text="我的打怪路线",Width=150},mapId=new TextBox{Width=75},zone=new TextBox{Width=120};
-        readonly NumericUpDown mode=N(1,3,1,0),corridor=N(.05m,2,.5m,2),tolerance=N(.01m,.5m,.1m,2),axis=N(.1m,10,1.5m,3),offset=N(-6.2832m,6.2832m,0,4),turn=N(.1m,10,5.85m,3),speed=N(.0001m,.2m,.008m,4);
+        readonly NumericUpDown mode=N(1,3,1,0),corridor=N(.05m,2,.5m,2),tolerance=N(.01m,.5m,.1m,2),axis=N(.1m,10,1.5m,3),offset=N(-6.2832m,6.2832m,0,4),turn=N(.1m,10,5.85m,3),speed=N((decimal)NavigationCalibration.MinimumForwardSpeed,(decimal)NavigationCalibration.MaximumForwardSpeed,.008m,4);
         readonly NumericUpDown chase=N(.05m,5,2,2);
         readonly TextBox openingKeys=new TextBox{Text="242223",Width=160},loopKeys=new TextBox{Text="2",Width=160};
         readonly TextBox[] extraSkillRows=new[]{new TextBox{Width=160},new TextBox{Width=160},new TextBox{Width=160},new TextBox{Width=160}};
