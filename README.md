@@ -1,4 +1,4 @@
-# 独立钓鱼客户端 · FISHING 1.0.0
+# 独立钓鱼客户端 · FISHING 1.0.1
 
 这是从自动打怪主线拆出的钓鱼客户端。源码维护在 [FISHING 分支](https://github.com/zhangzetian666/WOW/tree/FISHING)，入口为 `WoWFishing.exe`，不会启动打怪窗口。坐标读取、移动和录制商人路线复用主线的基础代码；main/chief 的源码与客户端没有被替换。
 
@@ -31,9 +31,16 @@
 
 背包、聊天、换点和计划下线均不会在等待鱼讯、延迟收杆或拾取确认期间插入。系统静音可能让声音识别没有信号，因此建议保留水花识别；真实水花阈值仍需在自己的水面验证。声音通过 [WASAPI 播放混音环回](https://learn.microsoft.com/en-us/windows/win32/coreaudio/loopback-recording)读取，不录麦克风。
 
+## 录制中断与结束
+
+1.0.1 修复了短暂读取中断后持续报“位置跳跃”、无法结束的问题。开始录制时保持游戏在前台；每个新增路线点自动保存草稿。正常短暂漏读在位移合理时可恢复，真正长时间缺段或跨图不会拼成完整路线。
+
+“结束并保存路线”遇到终点读不到、长缺段或只有一个点时，也会结束本次录制并保存草稿，不替换原有的可用售卖路线。界面和提示会列出最后有效坐标；回到该位置后点击“继续上次录制”补录，之后正常结束。已录草稿在关闭窗口和重新打开后仍保留。新开一次录制会把上一份草稿保留为 `fishing-npc-recording.previous.json`。
+
 ## 配置与日志
 
 - `fishing-settings.json`：独立钓点、范围、路线与开关；支持导入、导出，导入立即更新界面。
+- `fishing-npc-recording.json`：自动保存的录制点、地图和最后有效坐标，用于继续补录。
 - `fishing-vendor-checkpoint.json`：正在进行的商人往返进度，完成后移除。
 - `fishing-runtime.log`：文字日志，每份约 2 MB，最多保留当前文件及 4 份轮换文件。
 - `assets/fishing/chat-phrases.txt`：1000 条内置话术。
