@@ -109,6 +109,22 @@ namespace WoWProbe
         public static bool IsIdle(string phase,bool holding)
         {return !holding&&(phase==null||phase=="Ready"||phase=="PreCast"||phase=="RecastDelay"||phase=="RestoreFacing");}
     }
+    public sealed class FishingFocusRecovery
+    {
+        public bool Waiting{get;private set;}long readySince=-1;
+        public void Suspend(){Waiting=true;readySince=-1;}
+        public bool ResumeReady(long now,bool foreground,bool modifiersReleased,bool chatClosed)
+        {
+            if(!Waiting)return true;
+            if(!foreground||!modifiersReleased||!chatClosed){readySince=-1;return false;}
+            if(readySince<0||now<readySince){readySince=now;return false;}
+            if(now-readySince<500)return false;Waiting=false;readySince=-1;return true;
+        }
+        public static bool Transient(string reason)
+        {
+            return reason=="Target window lost foreground."||reason=="Target window lost foreground during CLI operation."||reason=="Target window lost foreground during CLI checks."||reason=="游戏失去前台；切回游戏后继续。"||reason=="A user-held modifier stopped fishing."||reason=="等待用户松开修饰键。";
+        }
+    }
     public sealed class FishingActivityClock
     {
         readonly FishingClientSettings settings;readonly Func<int,int> random;public long NextBag,OnlineDue,OfflineDue;public string Phase="Online";

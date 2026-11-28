@@ -156,7 +156,7 @@ namespace WoWProbe
         bool CastEnded(OperationObservation o,long now,bool distinct)
         {return distinct&&channelSeen&&quietSince>=0&&now-quietSince>=500&&now-castAt>=1000&&o.LootWindowKnown&&!o.LootWindowOpen&&!o.Farm.Casting&&!o.Farm.Channeling;}
         FishingCommand RecastAfterCompletion(long now)
-        {Status="RecastDelay";delayUntil=now+plan.Settings.PostCatchDelayMs;return None("钓鱼读条已结束且拾取窗口已关闭；未确认收获，继续准备下一杆。");}
+        {int delay=Draw(plan.Settings.CastDelayMinMs,plan.Settings.CastDelayMaxMs);Status="PreCast";delayUntil=checked(quietSince+delay);return None("本杆已结束但未确认收获；从结束时计抛竿前随机等待 "+delay+" 毫秒，再次抛竿。");}
         FishingCommand TimeoutCast(FarmObservation current,long now,bool distinct)
         {
             if(now-castDeadline>300)return Fail("The old fishing cast did not provide a usable completion frame within its 300ms timeout grace.");

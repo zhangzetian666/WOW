@@ -27,6 +27,8 @@ namespace WoWProbe
         {var s=GrindCli.FishingSocial(o.Sequence);for(int i=0;i<2&&!s.Known;i++){Idle(30);o=Read();s=GrindCli.FishingSocial(o.Sequence);}return s;}
         public Bitmap Capture(){return GrindCli.FishingCapture();}
         public bool Foreground{get{return Backend.IsTargetForeground();}}
+        public bool InputFaulted{get{return safety.Faulted;}}
+        public bool ModifiersReleased{get{return !Backend.IsKeyAlreadyDown(16)&&!Backend.IsKeyAlreadyDown(17)&&!Backend.IsKeyAlreadyDown(18);}}
         public void Focus(){GrindCli.FocusGameWindow();}
         public void CheckCancelled(){if(cancel()||Backend.IsEmergencyPressed())throw new OperationCanceledException("钓鱼已停止。");}
         public void Idle(int ms){for(int n=0;n<ms;n+=50){CheckCancelled();Thread.Sleep(Math.Min(50,ms-n));}}

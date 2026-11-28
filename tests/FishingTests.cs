@@ -83,6 +83,13 @@ class FishingTests
             var p=FishingFixtures.Plan();var e=new FishingEngine(p);var o=FishingFixtures.Observation(p);e.Step(o,0);FishingFixtures.Frame(o,1000);o.LastBiteAtMs=1000;o.BiteConfidence=.95;e.Step(o,1000);
             FishingFixtures.Frame(o,4500);e.Step(o,4500);FishingFixtures.Frame(o,5000);o.Game.Farm.LootOpened++;o.Game.Farm.LootClosed++;e.Step(o,5000);Assert(e.ConfirmedCatches==1,"late loot evidence discarded");
         });
+        Test("empty reel starts configured random delay at observed cast end without extra post-catch wait",delegate{
+            var p=FishingFixtures.Plan();p.Settings.PostCatchDelayMs=5000;p.Settings.CastDelayMinMs=500;p.Settings.CastDelayMaxMs=1000;int draws=0;var e=new FishingEngine(p,n=>{draws++;return n-1;});var o=FishingFixtures.Observation(p);o.Game.LootWindowKnown=true;
+            e.Step(o,0);FishingFixtures.Frame(o,1000);Assert(e.Step(o,1000).Purpose==FishingPurpose.Cast,"initial cast");
+            FishingFixtures.Frame(o,2000);o.Game.Farm.Channeling=true;o.LastBiteAtMs=2000;o.BiteConfidence=.95;e.Step(o,2000);
+            FishingFixtures.Frame(o,2100);o.Game.Farm.Channeling=false;e.Step(o,2100);FishingFixtures.Frame(o,2700);var completed=e.Step(o,2700);Assert(completed.Reason.Contains("随机等待 1000")&&draws==2,"delay not drawn once at completion");
+            FishingFixtures.Frame(o,3099);Assert(e.Step(o,3099).Action==FishingAction.None&&e.Casts==1,"cast before delay");FishingFixtures.Frame(o,3100);Assert(e.Step(o,3100).Purpose==FishingPurpose.Cast&&e.ConfirmedCatches==0&&draws==2,"stacked old deadline or post-catch delay");
+        });
         Console.WriteLine("Fishing tests: "+passed+" passed, "+failed+" failed. Pure state and file checks only.");return failed==0?0:1;
     }
 }

@@ -1,5 +1,5 @@
 ﻿using System.Reflection;
 [assembly: AssemblyTitle("WoW Independent Fishing")]
 [assembly: AssemblyDescription("Independent fishing, shoreline points and recorded NPC routes")]
-[assembly: AssemblyVersion("1.0.6.0")]
-[assembly: AssemblyFileVersion("1.0.6.0")]
+[assembly: AssemblyVersion("1.0.7.0")]
+[assembly: AssemblyFileVersion("1.0.7.0")]

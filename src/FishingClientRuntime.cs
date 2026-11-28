@@ -9,6 +9,7 @@ namespace WoWProbe
     {
         readonly FishingClientSettings settings;readonly Action<string> log;readonly Stopwatch clock=Stopwatch.StartNew();readonly string directory;
         readonly object cacheGate=new object();FishingObservation cached;volatile bool stopping;Thread worker;
+        readonly FishingFocusRecovery focusRecovery=new FishingFocusRecovery();long lastLootNotice=-10000;
         FishingNativeHost host;FishingSession session;FishingSoundDetector sound;FishingSplashDetector splash;WindowsFishingAudioCapture audio;
         FishingActivityClock activity;FishingSpotPicker picker;FishingPoint point;FishingPhrases phrases;readonly FishingWhisperPolicy replies=new FishingWhisperPolicy();
         Navigator travel;QuickVendorEngine vendor;FarmObservation forwardAnchor;int forwardHold;double measuredTravelSpeed=.04;long arrived=-1,castStarted=-1,nextFrame,lastAudible=-100000,lastNotice=-100000;int countedCasts,countedReels,countedCatches,lastSpokenLap;
@@ -35,10 +36,14 @@ namespace WoWProbe
                 else BeginTravel(first.Farm,-1);
                 while(!stopping)
                 {
+                    try{
                     host.CheckCancelled();
-                    if(!host.Foreground){CancelSession("游戏失去前台，暂停钓鱼输入。");Report("等待游戏回到前台。");host.Idle(200);continue;}
-                    var o=host.Read();ValidateWorld(o);long now=clock.ElapsedMilliseconds;
-                    if(o.Farm.ChatOpen){CancelSession("用户打开了聊天框。");Report("等待用户关闭聊天框。");host.Idle(200);continue;}
+                    if(!host.Foreground||!host.ModifiersReleased){SuspendInput();host.Idle(200);continue;}
+                    var o=host.Read();if(!host.Foreground){SuspendInput();continue;}ValidateWorld(o);long now=clock.ElapsedMilliseconds;
+                    if(o.Farm.ChatOpen){CancelSession("用户打开了聊天框。");focusRecovery.Suspend();Report("等待用户关闭聊天框。");host.Idle(200);continue;}
+                    if(focusRecovery.Waiting){if(!focusRecovery.ResumeReady(now,host.Foreground,host.ModifiersReleased,!o.Farm.ChatOpen)){host.Idle(100);continue;}
+                        if(vendor!=null)vendor=new QuickVendorEngine(vendor.Checkpoint,o);else if(travel!=null)BeginTravel(o.Farm,picker.Segment);
+                        Report("游戏已回到前台且按键已松开，自动恢复钓鱼任务。");}
                         if(activity.LogoutDue(now)&&FishingCycleBoundary.IsIdle(session==null?null:session.EngineStatus,session!=null&&session.IsHolding)&&!o.Farm.Casting&&!o.Farm.Channeling)
                         {
                             CancelSession("本轮在线时长达到随机下线点。");activity.LogoutRequested();Report("已结束当前杆，开始登出。");
@@ -77,12 +82,15 @@ namespace WoWProbe
                     if(!session.IsActive){string reason=session.LastReason;CancelSession(reason);throw new InvalidOperationException(reason);}
                     var command=session.LastCommand;if(command!=null&&command.Action==FishingAction.None)Report(command.Reason);
                     host.Idle(60);
+                    }catch(InvalidOperationException ex){if(stopping||host.InputFaulted||!FishingFocusRecovery.Transient(ex.Message))throw;SuspendInput();host.Idle(100);}
                 }
             }
             catch(OperationCanceledException){Report("钓鱼已停止。");}
             catch(Exception e){Report("钓鱼暂停："+e.Message);}
             finally{if(session!=null)session.Stop("钓鱼退出，释放按键。");if(audio!=null)audio.Dispose();if(owner&&exclusive!=null)exclusive.ReleaseMutex();if(exclusive!=null)exclusive.Dispose();Running=false;}
         }
+        void SuspendInput()
+        {CancelSession("游戏失焦或用户正在使用修饰键，释放本轮按键。");focusRecovery.Suspend();Report("任务保留：等待游戏回到前台并松开Alt/Ctrl/Shift，随后自动恢复；停止/F12仍会结束任务。");}
         void ValidateWorld(OperationObservation o)
         {
             var f=o==null?null:o.Farm;var c=settings.Fishing.Calibration;
@@ -116,7 +124,7 @@ namespace WoWProbe
         void PrepareSession(OperationObservation o,long now)
         {
             var plan=settings.At(point);plan.Settings.BindingsConfirmed=plan.Settings.AutoLootConfirmed=plan.Settings.AudioConfirmed=true;plan.Calibration.Confirmed=true;
-            castStarted=-1;nextFrame=0;lastSignalReport=-1;lastSignalNotice=-10000;splash.Reset();if(sound!=null)sound.Reset();seenSessionCasts=seenSessionReels=seenSessionCatches=0;UpdateObservation(o,now);
+            castStarted=-1;nextFrame=0;lastSignalReport=-1;lastSignalNotice=lastLootNotice=-10000;splash.Reset();if(sound!=null)sound.Reset();seenSessionCasts=seenSessionReels=seenSessionCatches=0;UpdateObservation(o,now);
             session=new FishingSession(host.Backend,()=>clock.ElapsedMilliseconds,()=>{lock(cacheGate)return cached==null?null:cached.Clone();},message=>{if(message.StartsWith("Fishing pulse"))Report(message);},new InputFailureLatch());session.Start(plan);
         }
         void UpdateObservation(OperationObservation o,long now)
@@ -129,6 +137,7 @@ namespace WoWProbe
                 if(bite>=0&&bite!=lastSignalReport){lastSignalReport=bite;Report((settings.UseVisual&&bite==splash.LastBiteAtMs?"视觉鱼讯："+splash.Evidence:"声音鱼讯")+"；进入收竿延迟核验。");}
                 else if(now-lastSignalNotice>=5000){lastSignalNotice=now;Report("鱼讯监测：声音"+(audioReady?"有信号":"无有效信号")+"；"+(settings.UseVisual?"图像"+(splash.Ready?"可用":"未就绪")+"，浮标"+(splash.TrackingBobber?"已跟踪":"未锁定，检测局部水花")+String.Format(System.Globalization.CultureInfo.InvariantCulture,"，水花{0:F3}/阈值{1:F3}，最大下沉{2:F1}/阈值{3:F1}，读条{4}",splash.LocalWhiteChange,splash.Threshold,splash.PeakDrop,splash.DropThreshold,o.Farm.Casting||o.Farm.Channeling):"图像未启用"));}
             }
+            if(session!=null&&session.EngineStatus=="LootWait"&&now-lastLootNotice>=3000){lastLootNotice=now;Report("收竿核对：读条="+(o.Farm.Casting||o.Farm.Channeling)+"，拾取窗口="+(!o.LootWindowKnown?"未知":o.LootWindowOpen?"打开":"关闭")+"，拾取事件="+o.Farm.LootOpened+"/"+o.Farm.LootClosed+"；本杆结束后按抛竿前随机等待继续。");}
             var observation=new FishingObservation{Game=o,CapturedAtMs=now,AudioReady=audioReady,VisualReady=settings.UseVisual&&splash.Ready,LastBiteAtMs=bite,BiteConfidence=confidence,LastBagVoiceAtMs=s==null?-1:s.LastBagVoiceAtMs,BagVoiceConfidence=s==null?0:s.BagVoiceConfidence};
             lock(cacheGate)cached=observation;
         }

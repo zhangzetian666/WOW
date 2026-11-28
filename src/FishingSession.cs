@@ -53,7 +53,7 @@ namespace WoWProbe
                     if(next.Purpose==FishingPurpose.Cast)castDeadline=checked(now+plan.Settings.CastTimeoutMs);
                     WriteLog("Fishing pulse "+next.Purpose+" VK="+next.Key+" "+next.HoldMilliseconds+"ms");if(!Continue(ticket))return;
                     if(!ReadCurrent(ticket,out o,out now))return;problem=GlobalProblem(plan,o,now)??CommandProblem(o,next,true,now);if(problem!=null){StopCore(problem);return;}
-                    foreground=backend.IsTargetForeground();if(!Continue(ticket))return;emergency=backend.IsEmergencyPressed();if(!Continue(ticket))return;if(!foreground||emergency){StopCore("Fishing input destination or emergency state changed.");return;}
+                    foreground=backend.IsTargetForeground();if(!Continue(ticket))return;emergency=backend.IsEmergencyPressed();if(!Continue(ticket))return;if(emergency){StopCore("Emergency stop.");return;}if(!foreground){StopCore("Target window lost foreground.");return;}
                     bool down=backend.IsKeyAlreadyDown(next.Key);if(!Continue(ticket))return;if(down){StopCore("The user is already holding this fishing key.");return;}
                     long press;if(!ReadCurrent(ticket,out o,out press))return;problem=GlobalProblem(plan,o,press)??CommandProblem(o,next,true,press);if(problem!=null){StopCore(problem);return;}
                     if(!ModifiersReleased(ticket))return;

@@ -53,6 +53,17 @@ class FishingClientTests
                 Check(cast&&engine.Casts==1);
             }
         });
+        Test("focus recovery waits for stable foreground released modifiers and closed chat",()=>{
+            var gate=new FishingFocusRecovery();gate.Suspend();Check(!gate.ResumeReady(1000,false,true,true));Check(!gate.ResumeReady(2000,true,false,true));Check(!gate.ResumeReady(3000,true,true,false));
+            Check(!gate.ResumeReady(4000,true,true,true));Check(!gate.ResumeReady(4499,true,true,true));Check(gate.ResumeReady(4500,true,true,true)&&!gate.Waiting);
+        });
+        Test("another focus interruption resets the resume countdown",()=>{
+            var gate=new FishingFocusRecovery();gate.Suspend();Check(!gate.ResumeReady(0,true,true,true));Check(!gate.ResumeReady(400,false,true,true));Check(!gate.ResumeReady(500,true,true,true));Check(!gate.ResumeReady(999,true,true,true));Check(gate.ResumeReady(1000,true,true,true));
+        });
+        Test("only explicit focus and modifier interruptions may recover automatically",()=>{
+            foreach(var reason in new[]{"Target window lost foreground.","Target window lost foreground during CLI operation.","Target window lost foreground during CLI checks.","A user-held modifier stopped fishing.","等待用户松开修饰键。"})Check(FishingFocusRecovery.Transient(reason));
+            foreach(var reason in new[]{"Emergency stop.","用户停止钓鱼。","Fishing key release failed.","Fishing input destination or emergency state changed.","CLI observations are unavailable, unknown or stale.","当前地图与保存钓点不同。"})Check(!FishingFocusRecovery.Transient(reason));
+        });
         Console.WriteLine("Fishing client: "+passed+" passed, "+failed+" failed. Pure/synthetic checks; no game input.");return failed==0?0:1;
     }
 }
