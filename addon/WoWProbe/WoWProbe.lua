@@ -793,6 +793,10 @@ function P.ScalePanel()
             P.operationsPanel:SetScale(pixelScale/parentScale);P.operationsPanel:ClearAllPoints();P.operationsPanel:SetPoint("TOPLEFT",UIParent,"TOPLEFT",552,-8)
             if width<808 or WoWProbeDB.visible==false then P.operationsPanel:Hide() else P.operationsPanel:Show() end
         end
+        if P.fishingPanel then
+            P.fishingPanel:SetScale(pixelScale/parentScale);P.fishingPanel:ClearAllPoints();P.fishingPanel:SetPoint("TOPLEFT",UIParent,"TOPLEFT",8,-168)
+            if WoWProbeDB.visible==false then P.fishingPanel:Hide() else P.fishingPanel:Show() end
+        end
         WoWProbeDB.renderer = {valid = true, effectiveScale = pixelScale, parentScale = parentScale,
             physicalWidth = width, physicalHeight = height, resolutionSource = source,
             cellPixels = 8, widthPixels = 256, heightPixels = 96}
@@ -835,6 +839,7 @@ local function createPanel()
     local texture=reference:CreateTexture(nil,"ARTWORK");texture:SetWidth(64);texture:SetHeight(64)
     texture:SetPoint("TOPLEFT",reference,"TOPLEFT",0,0);P.portraitTexture=texture;reference:Hide()
     if P.CreateOperationsPanel then P.CreateOperationsPanel() end
+    if P.CreateFishingPanel then P.CreateFishingPanel() end
     -- Native StatusBars can render restricted values without Lua inspecting or
     -- doing arithmetic on them. These optional gauges are visual observations;
     -- WP1 keeps its original unknown value and capability bits.
@@ -908,6 +913,11 @@ local function update()
                 if not good then errorRecord("operations.renderer",why);if P.operationsPanel then P.operationsPanel:Hide() end
                 elseif P.operationsPanel and WoWProbeDB.visible~=false and WoWProbeDB.renderer.physicalWidth>=808 then P.operationsPanel:Show() end
             else errorRecord("operations.packet",operations);if P.operationsPanel then P.operationsPanel:Hide() end end
+        end
+        if P.BuildFishingPacket then
+            local built,packet=pcall(P.BuildFishingPacket,packet)
+            if built then local rendered=pcall(P.RenderPacket,packet,P.fishingCells);if rendered and WoWProbeDB.visible~=false then P.fishingPanel:Show() else P.fishingPanel:Hide() end
+            else P.fishingPanel:Hide() end
         end
         return true
     else

@@ -10,6 +10,7 @@ namespace WoWProbe
 {
     public sealed class FishingSettings
     {
+        public int CastDelayMinMs,CastDelayMaxMs,ReelDelayMinMs,ReelDelayMaxMs;
         public ushort CastKey=0x31,InteractKey=0x46,SelectKey=9;
         public int TapMs=80,CastTimeoutMs=30000,PostCatchDelayMs=1000,LootWaitMs=3000,MinimumBiteDelayMs=700,BiteDebounceMs=1000,BagFusionMs=1000,BagCandidateMs=2000,VendorWaitMs=15000,ScanIntervalMs=1000,ScanLimit=12,MinimumFreeSlots=2;
         public bool EnableVendor,RequireAudio=true,BindingsConfirmed,AutoLootConfirmed,AudioConfirmed,AutoSellConfirmed;
@@ -17,7 +18,7 @@ namespace WoWProbe
         public void Validate()
         {
             if(CastKey<49||CastKey>57||InteractKey!=70||(SelectKey!=9&&SelectKey!=0x75))throw new FormatException("Unsupported fishing key bindings.");
-            Range(TapMs,60,250);Range(CastTimeoutMs,5000,60000);Range(PostCatchDelayMs,500,5000);Range(LootWaitMs,500,10000);Range(MinimumBiteDelayMs,200,5000);Range(BiteDebounceMs,500,3000);Range(BagFusionMs,200,3000);Range(BagCandidateMs,BagFusionMs,5000);Range(VendorWaitMs,1000,60000);Range(ScanIntervalMs,500,5000);Range(ScanLimit,1,30);Range(MinimumFreeSlots,1,40);
+            Range(CastDelayMinMs,0,60000);Range(CastDelayMaxMs,CastDelayMinMs,60000);Range(ReelDelayMinMs,0,1000);Range(ReelDelayMaxMs,ReelDelayMinMs,1000);Range(TapMs,60,250);Range(CastTimeoutMs,5000,60000);Range(PostCatchDelayMs,0,5000);Range(LootWaitMs,500,10000);Range(MinimumBiteDelayMs,200,5000);Range(BiteDebounceMs,500,3000);Range(BagFusionMs,200,3000);Range(BagCandidateMs,BagFusionMs,5000);Range(VendorWaitMs,1000,60000);Range(ScanIntervalMs,500,5000);Range(ScanLimit,1,30);Range(MinimumFreeSlots,1,40);
             if(MinimumBiteDelayMs>=CastTimeoutMs||LootWaitMs>=CastTimeoutMs)throw new FormatException("Fishing time windows overlap invalidly.");
         }
         static void Range(int n,int lo,int hi){if(n<lo||n>hi)throw new FormatException("Fishing setting is outside supported bounds.");}
@@ -42,7 +43,7 @@ namespace WoWProbe
     }
     public sealed class FishingObservation
     {
-        public OperationObservation Game=new OperationObservation();public long CapturedAtMs,LastBiteAtMs=-1,LastBagVoiceAtMs=-1,LastBagTextAtMs=-1;public bool AudioReady;public double BiteConfidence,BagVoiceConfidence,BagTextConfidence;
+        public OperationObservation Game=new OperationObservation();public long CapturedAtMs,LastBiteAtMs=-1,LastBagVoiceAtMs=-1,LastBagTextAtMs=-1;public bool AudioReady,VisualReady;public bool SignalReady {get{return AudioReady||VisualReady;}}public double BiteConfidence,BagVoiceConfidence,BagTextConfidence;
         public FishingObservation Clone(){var o=(FishingObservation)MemberwiseClone();o.Game=Game==null?null:Game.Clone();return o;}
     }
     public enum FishingAction{None,Key,Stop,Completed}
@@ -75,7 +76,7 @@ namespace WoWProbe
             if(type==typeof(uint))return RouteJson.Unsigned(box,"value");
             if(type==typeof(double))return RouteJson.Number(box,"value");
             if(type==typeof(List<Waypoint>)){var source=node as List<object>;if(source==null||source.Count>5000)throw new FormatException("Invalid fishing route point array.");var list=new List<Waypoint>();foreach(var item in source)list.Add((Waypoint)ReadValue(item,typeof(Waypoint)));return list;}
-            var fields=type.GetFields(BindingFlags.Public|BindingFlags.Instance);var names=new List<string>();foreach(var f in fields)names.Add(f.Name);var o=RouteJson.Object(node);RouteJson.Keys(o,String.Join(",",names.ToArray()),null);var result=Activator.CreateInstance(type);foreach(var f in fields)f.SetValue(result,ReadValue(o[f.Name],f.FieldType));return result;
+            var fields=type.GetFields(BindingFlags.Public|BindingFlags.Instance);var names=new List<string>();foreach(var f in fields)names.Add(f.Name);var o=RouteJson.Object(node);string optional=type==typeof(FishingSettings)?"CastDelayMinMs,CastDelayMaxMs,ReelDelayMinMs,ReelDelayMaxMs":null;RouteJson.Keys(o,String.Join(",",names.ToArray()),optional);var result=Activator.CreateInstance(type);foreach(var f in fields)if(o.ContainsKey(f.Name))f.SetValue(result,ReadValue(o[f.Name],f.FieldType));return result;
         }
     }
     public static class FishingCheckpointStore
@@ -85,7 +86,7 @@ namespace WoWProbe
         internal static void Validate(FishingCheckpoint c,FishingPlan plan)
         {
             if(c==null||c.SchemaVersion!=1||c.RouteIndex<0||c.RouteIndex>5000||c.PlanFingerprint==null||c.PlanFingerprint.Length!=64)throw new FormatException("Invalid fishing checkpoint.");foreach(char x in c.PlanFingerprint)if(!(x>='a'&&x<='f')&&!(x>='0'&&x<='9'))throw new FormatException("Invalid fishing checkpoint fingerprint.");
-            if(c.Phase!="Ready"&&c.Phase!="WaitBite"&&c.Phase!="LootWait"&&c.Phase!="RecastDelay"&&c.Phase!="GoSpot"&&c.Phase!="ReturnNpc"&&c.Phase!="NpcScan"&&c.Phase!="VendorWait"&&c.Phase!="ReturnSpot"&&c.Phase!="RestoreFacing"&&c.Phase!="Stopped")throw new FormatException("Invalid fishing checkpoint phase.");
+            if(c.Phase!="Ready"&&c.Phase!="PreCast"&&c.Phase!="ReelDelay"&&c.Phase!="WaitBite"&&c.Phase!="LootWait"&&c.Phase!="RecastDelay"&&c.Phase!="GoSpot"&&c.Phase!="ReturnNpc"&&c.Phase!="NpcScan"&&c.Phase!="VendorWait"&&c.Phase!="ReturnSpot"&&c.Phase!="RestoreFacing"&&c.Phase!="Stopped")throw new FormatException("Invalid fishing checkpoint phase.");
             bool travel=c.Phase=="GoSpot"||c.Phase=="ReturnNpc"||c.Phase=="NpcScan"||c.Phase=="VendorWait"||c.Phase=="ReturnSpot";
             if(!travel&&c.RouteIndex!=0)throw new FormatException("Stationary checkpoint cannot contain a travel index.");
             if(c.Phase=="VendorWait")
@@ -98,8 +99,8 @@ namespace WoWProbe
     }
     public sealed class FishingEngine
     {
-        readonly FishingPlan plan;readonly string fingerprint;Navigator navigator;bool hasTime,hasSequence,reelUsed,merchantSeen,returningToSpot;int sequence,scans,merchantAttempts;long lastTime,castAt,castDeadline,reelAt,delayUntil,nextScan,stateAt,lastBite=-1,lastBag=-1,eventFloor=-1,rejectedBite=-1,rejectedVoice=-1,rejectedText=-1;uint lootOpened,lootClosed,inventoryRevision,npcToken;int slotsBefore;string checkpointPhase="Ready";
-        public FishingEngine(FishingPlan plan){if(plan==null)throw new ArgumentNullException("plan");this.plan=plan.Clone();this.plan.Validate();fingerprint=this.plan.Fingerprint();Status="Ready";LastReason="Awaiting a fresh fishing observation.";}
+        readonly FishingPlan plan;readonly string fingerprint;readonly Func<int,int> random;long pendingBite=-1,reelDue;Navigator navigator;bool hasTime,hasSequence,reelUsed,merchantSeen,returningToSpot;int sequence,scans,merchantAttempts;long lastTime,castAt,castDeadline,reelAt,delayUntil,nextScan,stateAt,lastBite=-1,lastBag=-1,eventFloor=-1,rejectedBite=-1,rejectedVoice=-1,rejectedText=-1;uint lootOpened,lootClosed,inventoryRevision,npcToken;int slotsBefore;string checkpointPhase="Ready";
+        public FishingEngine(FishingPlan plan,Func<int,int> random=null){this.random=random??QuickRandom.Next;if(plan==null)throw new ArgumentNullException("plan");this.plan=plan.Clone();this.plan.Validate();fingerprint=this.plan.Fingerprint();Status="Ready";LastReason="Awaiting a fresh fishing observation.";}
         public string Status{get;private set;}public string LastReason{get;private set;}public int RouteIndex{get;private set;}public int Casts{get;private set;}public int Reels{get;private set;}public int ConfirmedCatches{get;private set;}public int VendorVisits{get;private set;}
         public FishingCheckpoint CurrentCheckpoint{get{string phase=Status=="Stopped"?checkpointPhase:Status;var cp=new FishingCheckpoint{PlanFingerprint=fingerprint,Phase=phase,RouteIndex=phase=="GoSpot"||phase=="ReturnNpc"||phase=="ReturnSpot"||phase=="NpcScan"||phase=="VendorWait"?RouteIndex:0};if(phase=="VendorWait"){cp.VendorSlotsBefore=slotsBefore;cp.VendorInventoryRevision=inventoryRevision;cp.VendorTargetToken=npcToken;cp.VendorNameHash=plan.Vendor.NameHash;cp.MerchantObserved=merchantSeen;}return cp;}}
         public void Stop(string reason){if(Status=="Stopped")return;checkpointPhase=Status;Status="Stopped";LastReason=String.IsNullOrEmpty(reason)?"Fishing stopped by request.":reason;if(navigator!=null)navigator.Stop(LastReason);}
@@ -146,12 +147,17 @@ namespace WoWProbe
         }
         FishingCommand Cast(long now)
         {if(now>Int64.MaxValue-plan.Settings.CastTimeoutMs)return Fail("Fishing deadline overflow.");Casts++;castAt=now;castDeadline=now+plan.Settings.CastTimeoutMs;reelUsed=false;Status="WaitBite";return Key(FishingPurpose.Cast,plan.Settings.CastKey,plan.Settings.TapMs,"One fishing cast begins a new bounded window.");}
+        int Draw(int min,int max){return min+(max>min?random(max-min+1):0);}
+        FishingCommand QueueCast(long now)
+        {int delay=Draw(plan.Settings.CastDelayMinMs,plan.Settings.CastDelayMaxMs);if(delay==0)return Cast(now);Status="PreCast";delayUntil=checked(now+delay);return None("本杆抛竿前随机等待 "+delay+" 毫秒。");}
+        FishingCommand Reel(FishingObservation o,long now)
+        {var f=o.Game.Farm;reelAt=now;Reels++;lootOpened=f.LootOpened;lootClosed=f.LootClosed;inventoryRevision=o.Game.InventoryRevision;slotsBefore=o.Game.FreeSlots;Status="LootWait";return Key(FishingPurpose.Reel,plan.Settings.InteractKey,plan.Settings.TapMs,"已确认本杆新鱼讯，随机延迟结束，按F一次收杆。",0,0,pendingBite);}
         FishingCommand TimeoutCast(FarmObservation current,long now,bool distinct)
         {
             if(now-castDeadline>300)return Fail("The old fishing cast did not provide a usable completion frame within its 300ms timeout grace.");
             if(current.Casting||current.Channeling)return None("Waiting at most 300ms for the old fishing channel to end; no reel or cancellation input is sent.");
             if(!distinct)return None("The cast deadline was reached; awaiting a distinct completed-cast frame inside the bounded grace.");
-            return Cast(now);
+            return QueueCast(now);
         }
         FishingCommand BeginInitialReturn(OperationObservation current,long now)
         {
@@ -219,9 +225,13 @@ namespace WoWProbe
                 if(returningToSpot)VendorVisits++;returningToSpot=false;Status="Ready";return None("At the saved fishing spot and facing.");
             }
             if(Status=="Ready")
-            {if(!distinct)return None("Awaiting a distinct frame before casting.");if(f.Casting||f.Channeling)return Fail("An existing cast must finish before starting fishing.");if(Math.Abs(NavigationMath.Normalize(plan.Facing-f.Facing))>.12){Status="RestoreFacing";returningToSpot=false;stateAt=nowMs;return None("Restore the recorded fishing facing before the first cast.");}return Cast(nowMs);}
+            {if(!distinct)return None("Awaiting a distinct frame before casting.");if(f.Casting||f.Channeling)return Fail("An existing cast must finish before starting fishing.");if(Math.Abs(NavigationMath.Normalize(plan.Facing-f.Facing))>.12){Status="RestoreFacing";returningToSpot=false;stateAt=nowMs;return None("Restore the recorded fishing facing before the first cast.");}return QueueCast(nowMs);}
+            if(Status=="PreCast")
+            {if(nowMs<delayUntil||!distinct)return None("等待本杆随机抛竿延迟结束。");if(f.Casting||f.Channeling)return None("等待已有施法结束。");if(Math.Abs(NavigationMath.Normalize(plan.Facing-f.Facing))>.12){Status="RestoreFacing";stateAt=nowMs;return None("抛竿前重新确认面水朝向。");}return Cast(nowMs);}
+            if(Status=="ReelDelay")
+            {if(nowMs>=castDeadline)return TimeoutCast(f,nowMs,distinct);if(!o.SignalReady||o.LastBiteAtMs!=pendingBite||!Event(pendingBite,o.BiteConfidence,nowMs,900+s.ReelDelayMaxMs)){Status="WaitBite";return None("延迟期间鱼讯失效，本杆不补按F。");}if(nowMs<reelDue||!distinct)return None("等待本杆随机收杆延迟结束。");return Reel(o,nowMs);}
             if(Status=="RecastDelay")
-            {if(nowMs<delayUntil)return None("Waiting one second after observed loot completion.");if(f.Casting||f.Channeling)return Fail("An active cast remains after the post-catch delay; fishing will not cast over it.");if(!distinct)return None("Awaiting a fresh frame before recast.");return Cast(nowMs);}
+            {if(nowMs<delayUntil)return None("Waiting one second after observed loot completion.");if(f.Casting||f.Channeling)return Fail("An active cast remains after the post-catch delay; fishing will not cast over it.");if(!distinct)return None("Awaiting a fresh frame before recast.");return QueueCast(nowMs);}
             if(Status=="LootWait")
             {
                 bool loot=f.LootEventsKnown&&f.LootOpened!=lootOpened&&f.LootClosed!=lootClosed;
@@ -234,8 +244,8 @@ namespace WoWProbe
             if(Status=="WaitBite")
             {
                 if(nowMs>=castDeadline)return TimeoutCast(f,nowMs,distinct);
-                if(distinct&&!reelUsed&&o.AudioReady&&o.LastBiteAtMs>eventFloor&&o.LastBiteAtMs!=rejectedBite&&Event(o.LastBiteAtMs,o.BiteConfidence,nowMs,900)&&o.LastBiteAtMs>=castAt+s.MinimumBiteDelayMs&&o.LastBiteAtMs>lastBite&&(lastBite<0||o.LastBiteAtMs-lastBite>=s.BiteDebounceMs))
-                {reelUsed=true;lastBite=o.LastBiteAtMs;reelAt=nowMs;Reels++;lootOpened=f.LootOpened;lootClosed=f.LootClosed;inventoryRevision=g.InventoryRevision;slotsBefore=g.FreeSlots;Status="LootWait";return Key(FishingPurpose.Reel,s.InteractKey,s.TapMs,"One recent splash candidate authorizes one reel in this cast window.",0,0,o.LastBiteAtMs);}
+                if(distinct&&!reelUsed&&o.SignalReady&&o.LastBiteAtMs>eventFloor&&o.LastBiteAtMs!=rejectedBite&&Event(o.LastBiteAtMs,o.BiteConfidence,nowMs,900)&&o.LastBiteAtMs>=castAt+s.MinimumBiteDelayMs&&o.LastBiteAtMs>lastBite&&(lastBite<0||o.LastBiteAtMs-lastBite>=s.BiteDebounceMs))
+                {reelUsed=true;lastBite=pendingBite=o.LastBiteAtMs;int delay=Draw(s.ReelDelayMinMs,s.ReelDelayMaxMs);long remaining=castDeadline-nowMs-s.TapMs-100;if(remaining<0)return None("鱼讯距离本杆截止过近，不发送过期收杆。");delay=(int)Math.Min(delay,remaining);if(delay==0)return Reel(o,nowMs);reelDue=nowMs+delay;Status="ReelDelay";return None("本杆收杆随机等待 "+delay+" 毫秒。");}
                 return None("Listening for one recent splash inside the current cast window.");
             }
             return Fail("Unsupported fishing state.");
@@ -250,7 +260,7 @@ namespace WoWProbe
             if(!NavigationMath.InRange(f.X,0,1)||!NavigationMath.InRange(f.Y,0,1)||!NavigationMath.InRange(f.Facing,0,Math.PI*2))return "Fishing player position or facing is invalid.";
             if(!g.CursorKnown||!g.CursorEmpty||!g.ConfirmationKnown||g.ConfirmationVisible||!g.IncomingResurrectionKnown||g.IncomingResurrection)return "Fishing cursor, confirmation or resurrection state is unsafe or unknown.";
             if(!f.CastingKnown)return "Fishing casting state is unknown.";
-            if(plan.Settings.RequireAudio&&!o.AudioReady)return "Fishing audio is unavailable; timeout-only fallback was not explicitly enabled.";
+            if(plan.Settings.RequireAudio&&!o.SignalReady)return "声音和水花图像均不可用，请核对观察区域。";
             if(g.FreeSlotsKnown&&(g.FreeSlots<0||g.FreeSlots>200))return "Fishing free-slot evidence is invalid.";
             return null;
         }

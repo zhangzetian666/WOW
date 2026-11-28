@@ -80,9 +80,9 @@ namespace WoWProbe
         string CommandProblem(FishingObservation o,FishingCommand c,bool before,long now)
         {
             if(c==null)return null;var g=o.Game;var f=g.Farm;
-            if(c.Purpose==FishingPurpose.Reel&&!o.AudioReady)return "Fishing audio became unavailable during reel input.";
+            if(c.Purpose==FishingPurpose.Reel&&!o.SignalReady)return "Fishing audio became unavailable during reel input.";
             if(c.Purpose==FishingPurpose.Reel&&before&&(castDeadline<0||now>=castDeadline))return "The authorized fishing cast window elapsed before reel input.";
-            if(c.Purpose==FishingPurpose.Reel&&before&&(c.ExpectedBiteAtMs<0||o.LastBiteAtMs!=c.ExpectedBiteAtMs||!NavigationMath.InRange(o.BiteConfidence,.70,1)||now<o.LastBiteAtMs||now-o.LastBiteAtMs>900))return "The fishing bite candidate changed or became stale before reel input.";
+            if(c.Purpose==FishingPurpose.Reel&&before&&(c.ExpectedBiteAtMs<0||o.LastBiteAtMs!=c.ExpectedBiteAtMs||!NavigationMath.InRange(o.BiteConfidence,.70,1)||now<o.LastBiteAtMs||now-o.LastBiteAtMs>900+plan.Settings.ReelDelayMaxMs))return "The fishing bite candidate changed or became stale before reel input.";
             if((c.Purpose==FishingPurpose.Cast||c.Purpose==FishingPurpose.RestoreFacing)&&(NavigationMath.Distance(f.X-plan.Spot.X,f.Y-plan.Spot.Y,plan.Calibration.AxisScale)>plan.Spot.Tolerance))return "Fishing cast or facing input is allowed only at the recorded fishing spot.";
             if(c.Purpose==FishingPurpose.Cast&&before&&(Math.Abs(NavigationMath.Normalize(plan.Facing-f.Facing))>.12||f.Casting||f.Channeling))return "Fishing facing or the current cast changed before pending cast input.";
             if(c.Purpose==FishingPurpose.Travel&&(!plan.Settings.EnableVendor||plan.VendorRoute==null||FarmEngine.DistanceFromRoute(plan.VendorRoute,plan.Calibration.AxisScale,f.X,f.Y)>.006))return "Fishing travel left its recorded route corridor.";
