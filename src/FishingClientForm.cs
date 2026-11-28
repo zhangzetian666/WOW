@@ -11,12 +11,13 @@ namespace WoWProbe
         readonly string directory=AppDomain.CurrentDomain.BaseDirectory;FishingClientSettings settings;FishingClientRuntime runtime;
         readonly Dictionary<string,NumericUpDown> numbers=new Dictionary<string,NumericUpDown>();readonly Dictionary<string,CheckBox> checks=new Dictionary<string,CheckBox>();
         readonly TextBox log=new TextBox{Multiline=true,ReadOnly=true,ScrollBars=ScrollBars.Vertical,Dock=DockStyle.Fill};readonly Label status=new Label{AutoSize=true},pointsLabel=new Label{AutoSize=true},routeLabel=new Label{AutoSize=true};
+        readonly Button cancelRecording;
         readonly ComboBox slot=new ComboBox{DropDownStyle=ComboBoxStyle.DropDownList,Width=90};readonly TextBox npc=new TextBox{Width=200};
         readonly System.Windows.Forms.Timer timer=new System.Windows.Forms.Timer{Interval=300};readonly object logGate=new object();FishingRouteRecorder recorder;bool busy;DateTime nextRecord;string recordingWarning="";DateTime lastRecordingWarning;
         string DraftPath{get{return Path.Combine(directory,"fishing-npc-recording.json");}}
         public FishingClientForm()
         {
-            Text="独立钓鱼客户端 · FISHING 1.0.1";Font=new Font("Microsoft YaHei UI",10);Size=new Size(1050,820);MinimumSize=new Size(950,730);StartPosition=FormStartPosition.CenterScreen;
+            Text="独立钓鱼客户端 · FISHING 1.0.2";Font=new Font("Microsoft YaHei UI",10);Size=new Size(1050,820);MinimumSize=new Size(950,730);StartPosition=FormStartPosition.CenterScreen;
             settings=LoadSettings();var root=new TableLayoutPanel{Dock=DockStyle.Fill,ColumnCount=1,RowCount=3,Padding=new Padding(12)};root.RowStyles.Add(new RowStyle(SizeType.Absolute,60));root.RowStyles.Add(new RowStyle(SizeType.Percent,70));root.RowStyles.Add(new RowStyle(SizeType.Percent,30));Controls.Add(root);
             var top=Row();top.Controls.Add(Button("开始钓鱼",StartFishing));top.Controls.Add(Button("停止 / F12",StopFishing));top.Controls.Add(Button("保存设置",Save));top.Controls.Add(Button("导入方案",Import));top.Controls.Add(Button("导出方案",Export));top.Controls.Add(status);root.Controls.Add(top,0,0);
             var tabs=new TabControl{Dock=DockStyle.Fill};root.Controls.Add(tabs,0,1);root.Controls.Add(log,0,2);
@@ -31,7 +32,7 @@ namespace WoWProbe
             Info(page,"背包查看、换点、普通聊天及定时下线都等当前杆结束。重新上线后重新抽取在线时长。账号登录需要凭据时会等待，不保存密码。");
             page=Page(tabs,"钓点与售卖路线");slot.Items.AddRange(new object[]{"钓点A","钓点B","钓点C"});slot.SelectedIndex=0;var row=Row();row.Controls.Add(slot);row.Controls.Add(Button("保存当前位置和朝向",SaveSpot));page.Controls.Add(row);page.Controls.Add(pointsLabel);
             Info(page,"保存前请让角色面向水面。三个点必须同图，AB、BC、CA连线应在可通行岸边；每段选一个随机位置，三段完成算一圈。");
-            row=Row();row.Controls.Add(Button("开始录制NPC路线",BeginRecording));row.Controls.Add(Button("结束并保存路线",EndRecording));row.Controls.Add(Button("继续上次录制",ResumeRecording));row.Controls.Add(Button("保存当前NPC",SaveNpc));page.Controls.Add(row);page.Controls.Add(routeLabel);
+            row=Row();row.Controls.Add(Button("开始录制NPC路线",BeginRecording));row.Controls.Add(Button("结束并保存路线",EndRecording));cancelRecording=Button("取消本次录制",CancelRecording);cancelRecording.Enabled=false;row.Controls.Add(cancelRecording);row.Controls.Add(Button("继续上次录制",ResumeRecording));row.Controls.Add(Button("保存当前NPC",SaveNpc));page.Controls.Add(row);page.Controls.Add(routeLabel);
             row=Row();row.Controls.Add(new Label{AutoSize=true,Text="NPC名称"});row.Controls.Add(npc);page.Controls.Add(row);npc.Text=settings.Service.Vendor.Name;
             Check(page,"vendor","背包满后沿已录路线自动售卖并原路返回",settings.Service.Vendor.Enabled);Check(page,"repair","同一NPC顺便自动修理",settings.Service.Repair.Enabled);
             row=Row();row.Controls.Add(Button("导入打怪客户端的路线/标定",ImportService));page.Controls.Add(row);
@@ -90,6 +91,17 @@ namespace WoWProbe
             var next=FishingRouteRecorder.Resume(draft,o.Farm);SetMap(o.Farm);recorder=next;nextRecord=DateTime.MinValue;recordingWarning="";
             WindowState=FormWindowState.Minimized;GrindCli.FocusGameWindow();Write("继续上次录制，已保留"+recorder.Count+"个点。");RefreshSummary();
         }
+        void CancelRecording()
+        {
+            IdleRequired();if(recorder==null){Write("当前没有正在进行的录制。");return;}
+            busy=true;
+            try{
+                // Discard only this active recording. Saved routes and the previous draft are separate files.
+                if(File.Exists(DraftPath))File.Delete(DraftPath);
+                recorder=null;recordingWarning="";nextRecord=DateTime.MaxValue;RefreshSummary();
+                Write("已取消本次录制。已保存的钓点和NPC路线保留，可重新开始录制。");
+            }finally{busy=false;}
+        }
         void EndRecording()
         {
             IdleRequired();if(recorder==null)throw new InvalidOperationException("尚未开始录制。");busy=true;
@@ -104,7 +116,7 @@ namespace WoWProbe
             }finally{busy=false;}
         }
         void SaveNpc(){IdleRequired();var f=Observe(true).Farm;if(!f.TargetExists||f.TargetIsPlayer||f.TargetCanAttack||f.TargetDead)throw new InvalidOperationException("请先选中售卖NPC。");npc.Text=f.TargetName;Save();}
-        void RefreshSummary(){string text="";for(int i=0;i<settings.Points.Count;i++){var p=settings.Points[i];text+=(char)('A'+i)+"："+(p.X*100).ToString("F3")+", "+(p.Y*100).ToString("F3")+"  朝向 "+p.Facing.ToString("F3")+Environment.NewLine;}pointsLabel.Text=text.Length==0?"尚未保存钓点。":text;routeLabel.Text="NPC路线："+settings.Service.Vendor.Points.Count+"个点"+(recorder==null?(File.Exists(DraftPath)?"；有录制草稿，可继续补录":""):"（录制中："+recorder.Count+"） 最后有效坐标："+recorder.Location);}
+        void RefreshSummary(){cancelRecording.Enabled=recorder!=null;string text="";for(int i=0;i<settings.Points.Count;i++){var p=settings.Points[i];text+=(char)('A'+i)+"："+(p.X*100).ToString("F3")+", "+(p.Y*100).ToString("F3")+"  朝向 "+p.Facing.ToString("F3")+Environment.NewLine;}pointsLabel.Text=text.Length==0?"尚未保存钓点。":text;routeLabel.Text="NPC路线："+settings.Service.Vendor.Points.Count+"个点"+(recorder==null?(File.Exists(DraftPath)?"；有录制草稿，可继续补录":""):"（录制中："+recorder.Count+"） 最后有效坐标："+recorder.Location);}
         Bitmap CaptureGame(){WindowState=FormWindowState.Minimized;try{GrindCli.FocusGameWindow();System.Threading.Thread.Sleep(200);GrindCli.ReadRecordingPoint();return GrindCli.FishingCapture();}finally{WindowState=FormWindowState.Normal;Activate();}}
         void SelectRegion(){IdleRequired();using(var capture=CaptureGame())using(var select=new FishingRegionForm(capture)){if(select.ShowDialog(this)==DialogResult.OK){settings.VisualRegion=select.SelectedRegion;Save();}}}
         void ShowRegion(){IdleRequired();using(var image=CaptureGame())using(var select=new FishingRegionForm(image,settings.VisualRegion))select.ShowDialog(this);}
