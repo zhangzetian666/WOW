@@ -921,6 +921,25 @@ test("only player swing damage against selected target becomes melee evidence",f
     eq(wp.meleeHits,1);eq(wp.meleeHitToken,wp.HashUTF8("Creature-1"))
     local p=wp.BuildCombatPacket(wp.BuildPacket());eq(p[110],1);eq(dword(p,114),1)
 end)
+test("WF1 observes whispers and reply destination without sending messages",function()
+    local env=environment();local wp=load(env);local receiver
+    env.CreateFrame=function()receiver=object();return receiver end
+    local chunk=assert(loadfile("addon/WoWProbe/Fishing.lua"));setfenv(chunk,env);chunk()
+    assert(receiver.events.CHAT_MSG_WHISPER)
+    receiver.scripts.OnEvent(receiver,"CHAT_MSG_WHISPER","hello","Angler-Realm")
+    receiver.scripts.OnEvent(receiver,"CHAT_MSG_WHISPER","again","Angler-Realm")
+    local edit=object();function edit:GetAttribute(key)if key=="chatType" then return "WHISPER" else return "Angler-Realm" end end
+    env.ChatEdit_GetActiveWindow=function()return edit end;env.IsBagOpen=function()return 1 end
+    local core=wp.BuildPacket();local p=wp.BuildFishingPacket(core)
+    eq(#p,128);eq(p[1],87);eq(p[2],70);eq(p[3],49);eq(word(p,4),word(core,4));eq(dword(p,8),2);eq(p[8],5);eq(dword(p,12),wp.HashUTF8("angler-realm"));eq(dword(p,16),dword(p,12));eq(p[21],3)
+    local a,b=0,0;for i=1,126 do a=(a+p[i])%255;b=(b+a)%255 end;eq(p[127],a);eq(p[128],b)
+    WoWProbeFishingFixture=p
+end)
+test("WF1 leaves unavailable UI observations unknown",function()
+    local env=environment();local wp=load(env);local chunk=assert(loadfile("addon/WoWProbe/Fishing.lua"));setfenv(chunk,env);chunk()
+    env.ChatEdit_GetActiveWindow=function()error("unavailable")end;env.IsBagOpen=function()error("unavailable")end
+    local p=wp.BuildFishingPacket(wp.BuildPacket());eq(p[8],0);eq(p[21],0);eq(dword(p,8),0)
+end)
 for _, t in ipairs(tests) do
     local ok, message = pcall(t[2])
     if ok then passed = passed + 1; print("PASS " .. t[1])

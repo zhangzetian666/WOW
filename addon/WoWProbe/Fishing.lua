@@ -1,14 +1,14 @@
 -- WF1: passive fishing social/UI observations only. Never sends chat or input.
 local P=WoWProbe
 local floor=math.floor
-local count,sender,lastAuthor=0,0,nil
+local count,sender=0,0
 local registered=false
 local frame=CreateFrame("Frame")
 local ok=pcall(frame.RegisterEvent,frame,"CHAT_MSG_WHISPER");registered=ok
 frame:SetScript("OnEvent",function(_,event,_,author)
     if event=="CHAT_MSG_WHISPER" and type(author)=="string" and #author>0 then
         local valid,hash=pcall(P.HashUTF8,string.lower(author))
-        if valid and hash then count=(count+1)%4294967296;sender=hash;lastAuthor=author end
+        if valid and hash then count=(count+1)%4294967296;sender=hash end
     end
 end)
 function P.CreateFishingPanel()

@@ -1,5 +1,5 @@
 using System.Reflection;
-[assembly: AssemblyTitle("WoWProbe Current Client")]
-[assembly: AssemblyDescription("Recorded patrol, combat, recovery and NPC routes")]
-[assembly: AssemblyVersion("0.8.88.0")]
-[assembly: AssemblyFileVersion("0.8.88.0")]
+[assembly: AssemblyTitle("WoW Independent Fishing")]
+[assembly: AssemblyDescription("Independent fishing, shoreline points and recorded NPC routes")]
+[assembly: AssemblyVersion("1.0.0.0")]
+[assembly: AssemblyFileVersion("1.0.0.0")]

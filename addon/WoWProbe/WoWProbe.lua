@@ -926,6 +926,7 @@ local function update()
         if P.combatPanel then P.combatPanel:Hide() end
         if P.portraitPanel then P.portraitPanel:Hide() end
         if P.operationsPanel then P.operationsPanel:Hide() end
+        if P.fishingPanel then P.fishingPanel:Hide() end
         return false
     end
 end

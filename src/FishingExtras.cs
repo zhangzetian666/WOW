@@ -26,7 +26,7 @@ namespace WoWProbe
         public FishingRegion VisualRegion=new FishingRegion();public double SplashSensitivity=3.5;
         public void Validate(bool ready)
         {
-            if(Version!=1||Fishing==null||Service==null||Points==null||Points.Count>3||VisualRegion==null)throw new FormatException("钓鱼配置无效。");
+            if(Version!=1||Fishing==null||Service==null||Points==null||Points.Count>3||VisualRegion==null||CastDelay==null||ReelDelay==null||BagMinutes==null||OnlineHours==null||OfflineHours==null)throw new FormatException("钓鱼配置无效。");
             CastDelay.Validate(0,60,"抛竿延迟（秒）");ReelDelay.Validate(0,1,"收杆延迟（秒）");BagMinutes.Validate(.1,1440,"背包间隔（分）");OnlineHours.Validate(.01,24,"在线时长（小时）");OfflineHours.Validate(.01,24,"离线时长（小时）");
             if(!NavigationMath.InRange(StayMinutes,.1,1440)||!NavigationMath.InRange(SplashSensitivity,1.5,10))throw new FormatException("驻留时间或水花灵敏度无效。");
             foreach(var p in Points)if(p==null||!NavigationMath.InRange(p.X,0,1)||!NavigationMath.InRange(p.Y,0,1)||!NavigationMath.InRange(p.Facing,0,Math.PI*2))throw new FormatException("钓点坐标或朝向无效。");
@@ -62,10 +62,28 @@ namespace WoWProbe
         {
             var c=settings.Fishing.Calibration;var r=new RouteDocument{RouteId="fishing-shore",Name="三点连线换钓点",RouteType="vendor_return",AllowReverse=true,MapId=c.MapId,MapMode=c.MapMode,Zone=c.Zone};
             Add(r,new Waypoint{X=from.X,Y=from.Y,Tolerance=.0005});
-            if(settings.RandomSpots&&previousSegment>=0&&previousSegment!=Segment)Add(r,settings.Points[Segment].Waypoint());
+            if(settings.RandomSpots)
+            {
+                // Join the nearest recorded shoreline segment, then follow its vertices.
+                int nearest=0;double best=Double.MaxValue;Waypoint projection=null;
+                for(int i=0;i<3;i++){
+                    var a=settings.Points[i];var b=settings.Points[(i+1)%3];double dx=(b.X-a.X)*c.AxisScale,dy=b.Y-a.Y;
+                    double t=Math.Max(0,Math.Min(1,((from.X-a.X)*c.AxisScale*dx+(from.Y-a.Y)*dy)/(dx*dx+dy*dy)));
+                    var candidate=new Waypoint{X=a.X+(b.X-a.X)*t,Y=a.Y+(b.Y-a.Y)*t,Tolerance=.0005};
+                    double distance=NavigationMath.Distance(candidate.X-from.X,candidate.Y-from.Y,c.AxisScale);
+                    if(distance<best){best=distance;nearest=i;projection=candidate;}
+                }
+                Add(r,projection);
+                for(int i=nearest;i!=Segment;i=(i+1)%3)Add(r,settings.Points[(i+1)%3].Waypoint());
+            }
             Add(r,destination.Waypoint());return r;
         }
         static void Add(RouteDocument r,Waypoint p){if(r.Points.Count==0||NavigationMath.Distance(r.Points[r.Points.Count-1].X-p.X,r.Points[r.Points.Count-1].Y-p.Y,1)>.00001)r.Points.Add(p);}
+    }
+    public static class FishingCycleBoundary
+    {
+        public static bool IsIdle(string phase,bool holding)
+        {return !holding&&(phase==null||phase=="Ready"||phase=="PreCast"||phase=="RecastDelay"||phase=="RestoreFacing");}
     }
     public sealed class FishingActivityClock
     {

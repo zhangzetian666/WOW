@@ -1,0 +1,28 @@
+using System;
+using System.IO;
+using WoWProbe;
+class FishingClientTests
+{
+    static int passed,failed;
+    static void Check(bool yes){if(!yes)throw new Exception("Unexpected fishing client behavior");}
+    static void Reject(Action action){try{action();}catch(FormatException){return;}throw new Exception("Invalid input accepted");}
+    static void Test(string name,Action test){try{test();passed++;Console.WriteLine("PASS "+name);}catch(Exception e){failed++;Console.WriteLine("FAIL "+name+": "+e.Message);}}
+    static FishingClientSettings Settings(){var s=new FishingClientSettings{Fishing=FishingFixtures.Plan(),UseAudio=false};s.VisualRegion=new FishingRegion{X=.3,Y=.3,Width=.1,Height=.1};s.Points.Add(new FishingPoint{X=.1,Y=.1});s.Points.Add(new FishingPoint{X=.2,Y=.1});s.Points.Add(new FishingPoint{X=.2,Y=.2});return s;}
+    static QuickScreenText L(string s,int x=10){return new QuickScreenText{Text=s,X=x,Y=10,Width=100,Height=20};}
+    static void Sum(byte[] b){int a=0,c=0;for(int i=0;i<126;i++){a=(a+b[i])%255;c=(c+a)%255;}b[126]=(byte)a;b[127]=(byte)c;}
+    static int Main()
+    {
+        Test("all active cast stages block auxiliary actions including held keys",()=>{foreach(var phase in new[]{"WaitBite","ReelDelay","WaitLoot","Vendor","Stopped"})Check(!FishingCycleBoundary.IsIdle(phase,false));foreach(var phase in new[]{"Ready","PreCast","RecastDelay","RestoreFacing"}){Check(FishingCycleBoundary.IsIdle(phase,false));Check(!FishingCycleBoundary.IsIdle(phase,true));}Check(FishingCycleBoundary.IsIdle(null,false));});
+        Test("new profile defaults stay ten minutes with independently optional social features",()=>{var s=new FishingClientSettings();Check(s.StayMinutes==10&&s.RandomSpots&&!s.ChatAtLap&&!s.WhisperReply&&!s.TimedSessions);});
+        Test("profile roundtrip preserves points ranges and visual area",()=>{var s=Settings();s.TimedSessions=true;s.WhisperReply=true;s.CastDelay=new FishingRange(.34,.87);string path=Path.GetTempFileName();try{s.Save(path);var copy=FishingClientSettings.Load(path);copy.Validate(true);Check(copy.Points.Count==3&&copy.CastDelay.Min==.34&&copy.WhisperReply&&copy.VisualRegion.Width==.1);copy.Points[0].X=.9;Check(s.Points[0].X==.1);}finally{File.Delete(path);}});
+        Test("invalid ranges null ranges and missing visual selection are rejected",()=>{var s=Settings();s.ReelDelay.Max=1.1;Reject(()=>s.Validate(true));s.ReelDelay=new FishingRange(.8,.1);Reject(()=>s.Validate(true));s.ReelDelay=null;Reject(()=>s.Validate(false));s=Settings();s.VisualRegion=new FishingRegion();Reject(()=>s.Validate(true));});
+        Test("startup joins a shoreline edge and uses the shared vertex",()=>{var s=Settings();var picker=new FishingSpotPicker(s,n=>n/2);var target=picker.Next();var r=picker.Travel(new FarmObservation{X=.2,Y=.17},target,-1);Check(r.Points.Count==4);Check(r.Points[1].X==.2&&r.Points[1].Y==.2);Check(r.Points[2].X==.1&&r.Points[2].Y==.1);Check(r.Points[3].X==target.X);});
+        Test("adjacent segment change passes the shared vertex rather than crossing water",()=>{var s=Settings();var picker=new FishingSpotPicker(s,n=>n/2);var a=picker.Next();var b=picker.Next();var r=picker.Travel(new FarmObservation{X=a.X,Y=a.Y},b,0);Check(r.Points.Count==3&&r.Points[1].X==.2&&r.Points[1].Y==.1);});
+        Test("unrelated OK buttons and incomplete login pages are not login evidence",()=>{Check(!FishingLoginScreen.Login(new[]{L("登录")}));Check(!FishingLoginScreen.Disconnected(new[]{L("确定")}));Check(FishingLoginScreen.Login(new[]{L("Account"),L("Password"),L("Log In")}));Check(FishingLoginScreen.Disconnected(new[]{L("您已断开连接"),L("确定")}));Check(FishingLoginScreen.Find(new[]{L("确定"),L("确定",100)},"确定")==null);Check(!FishingLoginScreen.Same(L("确定"),L("确定",90)));});
+        Test("actual Lua WF1 packet decodes with sender and active reply target",()=>{var b=File.ReadAllBytes("test-output/lua-fishing-packet.bin");var s=FishingSocialObservation.Decode(b,b[4]+256*b[5]);Check(s.Known&&s.WhisperCount==2&&s.SenderHash!=0&&s.Whisper&&s.ReplyTargetHash==s.SenderHash&&s.BagsKnown&&s.BagsOpen);Reject(()=>FishingSocialObservation.Decode(b,(b[4]+256*b[5]+1)%65536));b[50]=1;Reject(()=>FishingSocialObservation.Decode(b,b[4]+256*b[5]));Sum(b);Reject(()=>FishingSocialObservation.Decode(b,b[4]+256*b[5]));});
+        Test("one thousand short unique phrases load and consecutive draws differ",()=>{var p=new FishingPhrases("assets/fishing/chat-phrases.txt",n=>0);var a=p.Next();Check(a.Length>0&&p.Next()!=a);});
+        Test("recording keeps moving samples and accepts a stationary finish after UI delay",()=>{long now=0;var plan=FishingFixtures.Plan();var f=FishingFixtures.Observation(plan).Game.Farm;var recorder=new FishingRouteRecorder(plan.Calibration,f,()=>now);now=500;f.Sequence++;f.X+=.001;recorder.Observe(f,false);now=5000;recorder.Observe(f,true);Check(recorder.Finish().Count==2);});
+        Test("recording rejects teleport while preserving recorded points",()=>{long now=0;var plan=FishingFixtures.Plan();var f=FishingFixtures.Observation(plan).Game.Farm;var recorder=new FishingRouteRecorder(plan.Calibration,f,()=>now);now=100;f.X+=.2;bool rejected=false;try{recorder.Observe(f,true);}catch(InvalidOperationException){rejected=true;}Check(rejected&&recorder.Count==1);});
+        Console.WriteLine("Fishing client: "+passed+" passed, "+failed+" failed. Pure/synthetic checks; no game input.");return failed==0?0:1;
+    }
+}
