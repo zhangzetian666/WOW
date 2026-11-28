@@ -64,6 +64,27 @@ class FishingClientTests
             foreach(var reason in new[]{"Target window lost foreground.","Target window lost foreground during CLI operation.","Target window lost foreground during CLI checks.","A user-held modifier stopped fishing.","等待用户松开修饰键。"})Check(FishingFocusRecovery.Transient(reason));
             foreach(var reason in new[]{"Emergency stop.","用户停止钓鱼。","Fishing key release failed.","Fishing input destination or emergency state changed.","CLI observations are unavailable, unknown or stale.","当前地图与保存钓点不同。"})Check(!FishingFocusRecovery.Transient(reason));
         });
+        Test("bag and periodic key features do not require WF1 social feedback",()=>{
+            var s=Settings();s.PeekBags=s.TimedKeyEnabled=true;s.Validate(true);Check(!s.RequiresSocialFeedback());s.ChatAtLap=true;Check(s.RequiresSocialFeedback());s.ChatAtLap=false;s.WhisperReply=true;Check(s.RequiresSocialFeedback());
+        });
+        Test("timed key settings survive save import and cloning with legacy defaults",()=>{
+            var s=Settings();Check(!s.TimedKeyEnabled&&s.TimedKey==8&&s.KeyMinutes.Min==10&&s.KeyMinutes.Max==15);s.TimedKeyEnabled=true;s.TimedKey=0;s.KeyMinutes=new FishingRange(11,14);string path=Path.GetTempFileName();
+            try{s.Save(path);var loaded=FishingClientSettings.Load(path);Check(loaded.TimedKeyEnabled&&loaded.TimedKey==0&&loaded.KeyMinutes.Min==11&&loaded.KeyMinutes.Max==14);var copy=loaded.Clone();copy.KeyMinutes.Min=12;Check(loaded.KeyMinutes.Min==11);
+                var json=File.ReadAllText(path);json=System.Text.RegularExpressions.Regex.Replace(json,",?\"TimedKeyEnabled\":true","");json=System.Text.RegularExpressions.Regex.Replace(json,",?\"TimedKey\":0","");json=System.Text.RegularExpressions.Regex.Replace(json,",?\"KeyMinutes\":\\{[^}]*\\}","");File.WriteAllText(path,json);var legacy=FishingClientSettings.Load(path);Check(!legacy.TimedKeyEnabled&&legacy.TimedKey==8&&legacy.KeyMinutes.Min==10);
+            }finally{File.Delete(path);}
+        });
+        Test("invalid timed key or interval cannot be started",()=>{
+            var s=Settings();s.TimedKey=12;Reject(()=>s.Validate(true));s=Settings();s.KeyMinutes=new FishingRange(15,10);Reject(()=>s.Validate(true));s=Settings();s.KeyMinutes=null;Reject(()=>s.Validate(false));
+        });
+        Test("each random segment faces its saved interpolated water direction before casting",()=>{
+            foreach(double sign in new[]{-1.0,1.0}){var s=Settings();s.Fishing.Calibration.FacingSign=sign;s.Points[0].Facing=6.22;s.Points[1].Facing=.08;s.Points[2].Facing=.4;var picker=new FishingSpotPicker(s,n=>n/2);
+                for(int segment=0;segment<3;segment++){var target=picker.Next();var f=new FarmObservation{Facing=NavigationMath.PositiveAngle(target.Facing+2.8),X=target.X,Y=target.Y};bool done=false;
+                    for(int i=0;i<70;i++){var c=FishingArrivalFacing.Next(f,target,s.Fishing.Calibration,s.Fishing.Movement);if(c.Action==FishingAction.None){done=true;break;}Check(c.Key==s.Fishing.Movement.TurnRight||c.Key==s.Fishing.Movement.TurnLeft);f.Facing=NavigationMath.PositiveAngle(f.Facing+sign*(c.Key==s.Fishing.Movement.TurnRight?1:-1)*6.28*c.HoldMilliseconds/1000.0);}
+                    Check(done&&Math.Abs(NavigationMath.Normalize(target.Facing-f.Facing))<=.10&&f.X==target.X&&f.Y==target.Y);
+                    var plan=s.At(target);plan.Settings.CastDelayMinMs=plan.Settings.CastDelayMaxMs=0;var o=FishingFixtures.Observation(plan);o.Game.Farm.Facing=f.Facing;Check(new FishingEngine(plan).Step(o,0).Purpose==FishingPurpose.Cast);
+                }
+            }
+        });
         Console.WriteLine("Fishing client: "+passed+" passed, "+failed+" failed. Pure/synthetic checks; no game input.");return failed==0?0:1;
     }
 }

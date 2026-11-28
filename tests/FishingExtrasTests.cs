@@ -100,6 +100,21 @@ class FishingExtrasTests
                 PaintBobber(img,180,100);for(int i=0;i<10;i++)d.Push(img,r,i*200,0,true);using(var g=Graphics.FromImage(img))g.Clear(Color.FromArgb(45,77,105));d.Push(img,r,2000,0,false);d.Push(img,r,2200,0,false);Check(d.LastBiteAtMs<0);
             }
         });
+        Test("bag sequence issues two B presses separated by three seconds without a feedback reader",()=>{
+            var a=new FishingAuxiliaryCycle();a.Start(FishingAuxiliaryKind.Bag,66);Check(a.KeyDue(0,true)==0&&a.KeyDue(0,false)==66);a.InputSent(0);Check(a.KeyDue(2999,false)==0&&!a.Finished(3000,false));Check(a.KeyDue(3000,false)==66);a.InputSent(3000);Check(a.KeyDue(3100,false)==0&&a.Finished(3100,false));a.Clear();Check(!a.Active);
+        });
+        Test("interrupted bag sequence retains only the pending closing B",()=>{
+            var a=new FishingAuxiliaryCycle();a.Start(FishingAuxiliaryKind.Bag,66);a.InputSent(100);Check(a.KeyDue(2000,false)==0);Check(a.KeyDue(30000,false)==66);a.InputSent(30000);Check(a.Finished(30100,false)&&a.KeyDue(30100,false)==0);
+        });
+        Test("timed skill is sent once and owns at least ten seconds plus any remaining channel",()=>{
+            var a=new FishingAuxiliaryCycle();a.Start(FishingAuxiliaryKind.TimedKey,56);Check(a.KeyDue(0,false)==56);a.InputSent(200);Check(a.KeyDue(10000,false)==0&&!a.Finished(10199,false));Check(!a.Finished(10200,true));Check(a.Finished(12000,false)&&a.KeyDue(12000,false)==0);
+        });
+        Test("timed key timer independently resamples after completion strictly inside requested bounds",()=>{
+            var s=new FishingClientSettings{TimedKeyEnabled=true};int draw=0;var c=new FishingPeriodicKeyClock(s,100,n=>draw++%2==0?0:n-1);Check(c.NextDue==600101&&!c.Due(600100)&&c.Due(600101));c.Completed(700000);Check(c.NextDue==1599999&&draw==2);s.TimedKeyEnabled=false;c.Completed(2000000);Check(!c.Due(Int64.MaxValue)&&draw==2);
+        });
+        Test("active auxiliary cycles cannot overlap or repeat a confirmed skill",()=>{
+            var a=new FishingAuxiliaryCycle();a.Start(FishingAuxiliaryKind.TimedKey,56);bool rejected=false;try{a.Start(FishingAuxiliaryKind.Bag,66);}catch(InvalidOperationException){rejected=true;}Check(rejected);a.InputSent(0);for(int t=100;t<10000;t+=100)Check(a.Active&&a.KeyDue(t,false)==0&&!a.Finished(t,false));
+        });
         Console.WriteLine("Fishing extras: "+passed+" passed, "+failed+" failed. Synthetic observations only; no game input.");return failed==0?0:1;
     }
     static void PaintBobber(Bitmap image,int x,int y){using(var g=Graphics.FromImage(image)){g.Clear(Color.FromArgb(45,77,105));using(var brush=new SolidBrush(Color.FromArgb(100,35,30)))g.FillRectangle(brush,x,y,14,6);}}

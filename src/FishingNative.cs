@@ -68,12 +68,9 @@ namespace WoWProbe
                 if(owned&&Foreground&&!cancel())try{var o=Read();if(o.Farm.ChatOpen)Guard(null,true).Pulse(27,60);}catch{}
             }
         }
-        public void PeekBag()
+        public void AuxiliaryPulse(ushort key,Action sent)
         {
-            var o=Read();var social=Social(o);if(!social.BagsKnown){report("背包状态未知，等待加载钓鱼插件。");return;}if(social.BagsOpen){report("背包已打开，本次不切换用户窗口。");return;}
-            bool opened=false;Destination();Guard(x=>{var s=Social(x);return s.BagsKnown&&(opened||!s.BagsOpen)&&!x.Farm.Casting&&!x.Farm.Channeling;}).Pulse(66,80,()=>opened=true);Idle(3000);
-            o=Read();social=Social(o);if(social.BagsKnown&&social.BagsOpen)Pulse(66,80,x=>{var s=Social(x);return s.BagsKnown;});
-            report("背包查看完成，下一次间隔将重新随机。");
+            bool pressed=false;Destination();Guard(o=>pressed||!o.Farm.Casting&&!o.Farm.Channeling).Pulse(key,80,()=>{pressed=true;sent();});
         }
     }
     public static class FishingLoginScreen
