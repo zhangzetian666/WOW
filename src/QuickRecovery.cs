@@ -18,17 +18,19 @@ namespace WoWProbe
     {
         readonly RouteDocument route;readonly NavigationCalibration calibration;readonly uint map;readonly int mode;readonly string zone;
         readonly bool actualCorpseRouting;
+        readonly bool requireRecordedEnd;public bool RecordedEndReached{get;private set;}
         int detourPhase;double detourFacing;
         readonly double deathX=Double.NaN,deathY=Double.NaN;
         Navigator navigator;long started=-1,last=-1,clickedAt=-1;int sequence=-1,aliveFrames,resurrectAttempts;bool released,resurrected;double corpseX=Double.NaN,corpseY;
         public static bool RouteMatches(RouteDocument route,FarmObservation state)
         {return route!=null&&state!=null&&route.RouteType=="corpse_run"&&MapIdentity.Matches(route.MapId,route.MapMode,route.Zone,state.MapId,state.MapMode,state.Zone);}
-        public QuickRecovery(RouteDocument route,NavigationCalibration calibration,FarmObservation death,bool actualCorpseRouting=false)
+        public QuickRecovery(RouteDocument route,NavigationCalibration calibration,FarmObservation death,bool actualCorpseRouting=false,bool requireRecordedEnd=false,bool recordedEndReached=false)
         {
             if(calibration==null||death==null||route==null&&!actualCorpseRouting)throw new ArgumentNullException("recovery configuration");
             calibration.Validate();if(route!=null){route.Validate();if(!RouteMatches(route,death))throw new InvalidOperationException("跑尸路线与当前地图不匹配。");}
             if(!MapIdentity.Matches(calibration.MapId,calibration.MapMode,calibration.Zone,death.MapId,death.MapMode,death.Zone))throw new InvalidOperationException("跑尸移动参数与当前地图不匹配。");
             this.route=route==null?null:route.Clone();this.calibration=calibration.Clone();map=death.MapId;mode=death.MapMode;zone=death.Zone;this.actualCorpseRouting=actualCorpseRouting;
+            if(requireRecordedEnd&&(route==null||route.RouteId!="recorded-ghost"))throw new InvalidOperationException("需要完整录制的跑尸路线。");this.requireRecordedEnd=requireRecordedEnd;RecordedEndReached=recordedEndReached;
             if(death.PlayerDead&&!death.PlayerGhost&&NavigationMath.InRange(death.X,0,1)&&NavigationMath.InRange(death.Y,0,1)){deathX=death.X;deathY=death.Y;}
         }
         QuickRecoveryCommand Command(QuickRecoveryAction action,string reason){return new QuickRecoveryCommand{Action=action,Reason=reason};}
@@ -62,7 +64,8 @@ namespace WoWProbe
             if(apiCorpse&&recorded&&NavigationMath.Distance(cx-deathX,cy-deathY,calibration.AxisScale)>.005)return Stop("尸体坐标与本轮记录的死亡点不匹配。");
             if(Double.IsNaN(corpseX)){corpseX=cx;corpseY=cy;}
             else if(NavigationMath.Distance(cx-corpseX,cy-corpseY,calibration.AxisScale)>.005)return Stop("本轮尸体坐标发生变化。");
-            if(o.ResurrectKnown&&o.ResurrectVisible&&o.ResurrectEnabled&&o.RecoveryDelayKnown&&o.RecoveryDelayMs==0)
+            if(requireRecordedEnd&&!RecordedEndReached){var end=route.Points[route.Points.Count-1];if(NavigationMath.Distance(f.X-end.X,f.Y-end.Y,calibration.AxisScale)<=Math.Max(.0015,end.Tolerance))RecordedEndReached=true;}
+            if((!requireRecordedEnd||RecordedEndReached)&&o.ResurrectKnown&&o.ResurrectVisible&&o.ResurrectEnabled&&o.RecoveryDelayKnown&&o.RecoveryDelayMs==0)
             {
                 if(NavigationMath.Distance(f.X-corpseX,f.Y-corpseY,calibration.AxisScale)>.035)return Stop("复活按钮出现但距离尸体异常。");
                 resurrected=true;resurrectAttempts++;clickedAt=now;var c=Command(QuickRecoveryAction.Click,"跑尸到达：尝试点击当前复活按钮（"+resurrectAttempts+"/3），等待存活证据。");c.Region=o.ResurrectRegion;return c;
@@ -75,6 +78,7 @@ namespace WoWProbe
                 var work=route==null?new RouteDocument{RouteId="observed-corpse",Name="实际死亡点跑尸",RouteType="corpse_run",MapId=map,MapMode=mode,Zone=zone}:route.Clone();
                 if(strict)
                 {
+                    if(requireRecordedEnd&&RecordedEndReached){work.Points.Clear();work.Points.Add(new Waypoint{X=f.X,Y=f.Y,Tolerance=.001});}
                     int nearest=0;double best=Double.PositiveInfinity;
                     for(int i=0;i<work.Points.Count;i++){var p=work.Points[i];double d=NavigationMath.Distance(f.X-p.X,f.Y-p.Y,calibration.AxisScale);if(d<best){best=d;nearest=i;}}
                     if(nearest>0)work.Points.RemoveRange(0,nearest);

@@ -12,7 +12,7 @@ $bin=Join-Path $root 'bin'
 New-Item -ItemType Directory -Path $bin -Force | Out-Null
 $sources=@(Get-ChildItem -LiteralPath (Join-Path $root 'src') -Filter '*.cs' | ForEach-Object FullName)
 $common=@('/nologo','/codepage:65001','/langversion:5','/optimize+','/r:System.Drawing.dll','/r:System.Windows.Forms.dll','/r:System.Web.Extensions.dll','/r:System.IO.Compression.dll','/r:System.IO.Compression.FileSystem.dll')
-foreach($test in @('FishingTests','FishingSimulatorTests','FishingSessionTests','FishingAudioFormatTests','FishingPerceptionTests','FishingExtrasTests','FishingClientTests','QuickVendorTests','QuickServiceRouteTests','GrindSafetyTests')) {
+foreach($test in @('FishingTests','FishingSimulatorTests','FishingSessionTests','FishingAudioFormatTests','FishingPerceptionTests','FishingExtrasTests','FishingClientTests','FishingRecoveryTests','QuickRecoveryTests','QuickVendorTests','QuickServiceRouteTests','GrindSafetyTests')) {
     $testFile=Join-Path $root ('tests\'+$test+'.cs')
     & $compiler @common /target:exe ('/main:'+$test) ('/out:'+(Join-Path $bin ($test+'.exe'))) @sources (Join-Path $root 'tests\FishingFixtures.cs') $testFile
     if($LASTEXITCODE -ne 0){throw "$test compilation failed"}

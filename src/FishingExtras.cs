@@ -36,20 +36,22 @@ namespace WoWProbe
         public bool TimedKeyEnabled;public int TimedKey=8;public FishingRange KeyMinutes=new FishingRange(10,15);
         public FishingRange StayRange;public bool AutoRetry;public int RetrySeconds=30;
         public double BagOpenSeconds=3;
+        public bool AutoCorpse;public RouteDocument CorpseRoute;
         public FishingRange StayInterval(){return StayRange??new FishingRange(StayMinutes,StayMinutes);}
         public bool RequiresSocialFeedback(){return ChatAtLap||WhisperReply;}
         public void Validate(bool ready)
         {
-            if(Version!=1||Fishing==null||Service==null||Points==null||Points.Count>3||VisualRegion==null||CastDelay==null||ReelDelay==null||BagMinutes==null||OnlineHours==null||OfflineHours==null)throw new FormatException("钓鱼配置无效。");
+            if(Version!=1||Fishing==null||Service==null||Points==null||Points.Count>500||VisualRegion==null||CastDelay==null||ReelDelay==null||BagMinutes==null||OnlineHours==null||OfflineHours==null)throw new FormatException("钓鱼配置无效。");
             CastDelay.Validate(0,60,"抛竿延迟（秒）");ReelDelay.Validate(0,1,"收杆延迟（秒）");BagMinutes.Validate(.1,1440,"背包间隔（分）");OnlineHours.Validate(.01,24,"在线时长（小时）");OfflineHours.Validate(.01,24,"离线时长（小时）");
             if(KeyMinutes==null||TimedKey<0||TimedKey>9)throw new FormatException("定时快捷键请填写0至9，间隔范围不能为空。");KeyMinutes.Validate(.1,1440,"定时按键间隔（分）");
             StayInterval().Validate(.1,1440,"随机钓点驻留（分）");if(RetrySeconds<1||RetrySeconds>3600)throw new FormatException("自动重试间隔请填写1至3600秒。");
             if(!NavigationMath.InRange(BagOpenSeconds,.1,3600))throw new FormatException("背包保持打开时间请填写0.1至3600秒。");
+            if(CorpseRoute!=null){CorpseRoute.Validate();if(CorpseRoute.RouteType!="corpse_run"||CorpseRoute.RouteId!="recorded-ghost"||!MapIdentity.Matches(CorpseRoute.MapId,CorpseRoute.MapMode,CorpseRoute.Zone,Fishing.Calibration.MapId,Fishing.Calibration.MapMode,Fishing.Calibration.Zone))throw new FormatException("跑尸路线与钓点地图不匹配。");}if(AutoCorpse&&CorpseRoute==null)throw new FormatException("请先录制或导入跑尸路线，再启用自动跑尸。");
             if(!NavigationMath.InRange(StayMinutes,.1,1440)||!NavigationMath.InRange(SplashSensitivity,1.5,10))throw new FormatException("驻留时间或水花灵敏度无效。");
             foreach(var p in Points)if(p==null||!NavigationMath.InRange(p.X,0,1)||!NavigationMath.InRange(p.Y,0,1)||!NavigationMath.InRange(p.Facing,0,Math.PI*2))throw new FormatException("钓点坐标或朝向无效。");
             if(!ready)return;
-            if(Points.Count<(RandomSpots?3:1))throw new InvalidOperationException(RandomSpots?"请保存三个同图钓点及面水朝向。":"请保存钓点及面水朝向。");
-            if(RandomSpots)for(int i=0;i<3;i++)if(NavigationMath.Distance(Points[i].X-Points[(i+1)%3].X,Points[i].Y-Points[(i+1)%3].Y,Fishing.Calibration.AxisScale)<.001)throw new FormatException("相邻钓点过近，请保存三个不同位置。");
+            if(Points.Count<(RandomSpots?2:1))throw new InvalidOperationException(RandomSpots?"请至少保存两个同图钓点及面水朝向。":"请保存钓点及面水朝向。");
+            if(RandomSpots)for(int i=0;i<Points.Count;i++)if(NavigationMath.Distance(Points[i].X-Points[(i+1)%Points.Count].X,Points[i].Y-Points[(i+1)%Points.Count].Y,Fishing.Calibration.AxisScale)<.001)throw new FormatException("相邻钓点过近；末点自动连回首点，无需重复保存起点。");
             if(!UseAudio&&!UseVisual)throw new FormatException("至少启用声音或水花图像识别。");
             if(UseVisual&&!VisualRegion.Valid)throw new FormatException("请到“水花与聊天”在图片上按住左键拖出绿色水面选框，再点击“保存选区”；仅显示图片不代表已保存选区。");
             var plan=At(Points[0]);plan.Validate();if(Service.Vendor.Enabled)Service.Validate(true);
@@ -78,27 +80,27 @@ namespace WoWProbe
         public FishingPoint Next()
         {
             if(!settings.RandomSpots){Segment=0;return settings.Points[0];}
-            if(Segment==2)CompletedLaps++;Segment=(Segment+1)%3;PositionOnSegment=(random(9801)+100)/10000.0;
-            var a=settings.Points[Segment];var b=settings.Points[(Segment+1)%3];double angle=a.Facing+NavigationMath.Normalize(b.Facing-a.Facing)*PositionOnSegment;angle=(angle%(Math.PI*2)+Math.PI*2)%(Math.PI*2);
+            if(Segment==settings.Points.Count-1)CompletedLaps++;Segment=(Segment+1)%settings.Points.Count;PositionOnSegment=(random(9801)+100)/10000.0;
+            var a=settings.Points[Segment];var b=settings.Points[(Segment+1)%settings.Points.Count];double angle=a.Facing+NavigationMath.Normalize(b.Facing-a.Facing)*PositionOnSegment;angle=(angle%(Math.PI*2)+Math.PI*2)%(Math.PI*2);
             return new FishingPoint{X=a.X+(b.X-a.X)*PositionOnSegment,Y=a.Y+(b.Y-a.Y)*PositionOnSegment,Facing=angle};
         }
         public RouteDocument Travel(FarmObservation from,FishingPoint destination,int previousSegment)
         {
-            var c=settings.Fishing.Calibration;var r=new RouteDocument{RouteId="fishing-shore",Name="三点连线换钓点",RouteType="vendor_return",AllowReverse=true,MapId=c.MapId,MapMode=c.MapMode,Zone=c.Zone};
+            var c=settings.Fishing.Calibration;var r=new RouteDocument{RouteId="fishing-shore",Name="钓点连线循环",RouteType="vendor_return",AllowReverse=true,MapId=c.MapId,MapMode=c.MapMode,Zone=c.Zone};
             Add(r,new Waypoint{X=from.X,Y=from.Y,Tolerance=.0005});
             if(settings.RandomSpots)
             {
                 // Join the nearest recorded shoreline segment, then follow its vertices.
                 int nearest=0;double best=Double.MaxValue;Waypoint projection=null;
-                for(int i=0;i<3;i++){
-                    var a=settings.Points[i];var b=settings.Points[(i+1)%3];double dx=(b.X-a.X)*c.AxisScale,dy=b.Y-a.Y;
+                for(int i=0;i<settings.Points.Count;i++){
+                    var a=settings.Points[i];var b=settings.Points[(i+1)%settings.Points.Count];double dx=(b.X-a.X)*c.AxisScale,dy=b.Y-a.Y;
                     double t=Math.Max(0,Math.Min(1,((from.X-a.X)*c.AxisScale*dx+(from.Y-a.Y)*dy)/(dx*dx+dy*dy)));
                     var candidate=new Waypoint{X=a.X+(b.X-a.X)*t,Y=a.Y+(b.Y-a.Y)*t,Tolerance=.0005};
                     double distance=NavigationMath.Distance(candidate.X-from.X,candidate.Y-from.Y,c.AxisScale);
                     if(distance<best){best=distance;nearest=i;projection=candidate;}
                 }
                 Add(r,projection);
-                for(int i=nearest;i!=Segment;i=(i+1)%3)Add(r,settings.Points[(i+1)%3].Waypoint());
+                for(int i=nearest;i!=Segment;i=(i+1)%settings.Points.Count)Add(r,settings.Points[(i+1)%settings.Points.Count].Waypoint());
             }
             Add(r,destination.Waypoint());return r;
         }

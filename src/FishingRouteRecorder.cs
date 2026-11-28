@@ -10,20 +10,20 @@ namespace WoWProbe
     public sealed class FishingRouteRecorder
     {
         readonly NavigationCalibration map;readonly List<Waypoint> points=new List<Waypoint>();
-        readonly Func<long> clock;long last;double x,y;int sequence;
+        readonly Func<long> clock;readonly bool allowGhost;long last;double x,y;int sequence;
         public int Count{get{return points.Count;}}
         public NavigationCalibration Calibration{get{return map.Clone();}}
         public string Location{get{return String.Format(CultureInfo.InvariantCulture,"({0:F3}, {1:F3})",x*100,y*100);}}
-        public FishingRouteRecorder(NavigationCalibration map,FarmObservation start,Func<long> clock=null)
+        public FishingRouteRecorder(NavigationCalibration map,FarmObservation start,Func<long> clock=null,bool allowGhost=false)
         {
             var watch=Stopwatch.StartNew();this.clock=clock??(()=>watch.ElapsedMilliseconds);last=this.clock();
-            this.map=map.Clone();this.map.Validate();Check(start);x=start.X;y=start.Y;sequence=start.Sequence;
+            this.map=map.Clone();this.allowGhost=allowGhost;this.map.Validate();Check(start);x=start.X;y=start.Y;sequence=start.Sequence;
             points.Add(new Waypoint{X=x,Y=y,Tolerance=.0004});
         }
         void Check(FarmObservation f)
         {
             if(f==null||!f.Fresh||!f.KnownCore||f.ReadFailures!=0)throw new InvalidOperationException("暂未读到有效坐标，请露出游戏左上色块；已录点保留。最后有效坐标"+Location);
-            if(f.PlayerDead||f.PlayerGhost)throw new InvalidOperationException("角色死亡或处于灵魂状态，已录点保留。最后有效坐标"+Location);
+            if(f.PlayerDead&&!f.PlayerGhost||f.PlayerGhost&&!allowGhost)throw new InvalidOperationException("当前死亡/灵魂状态不适合此路线录制，已录点保留。最后有效坐标"+Location);
             if(!MapIdentity.Matches(f.MapId,f.MapMode,f.Zone,map.MapId,map.MapMode,map.Zone))throw new InvalidOperationException("当前地图发生变化，已录点保留；不能连接不同地图。最后有效坐标"+Location);
             if(!NavigationMath.InRange(f.X,0,1)||!NavigationMath.InRange(f.Y,0,1))throw new InvalidOperationException("坐标超出有效范围，已录点保留。");
         }
@@ -44,10 +44,10 @@ namespace WoWProbe
         }
         public List<Waypoint> Finish(){if(points.Count<2)throw new InvalidOperationException("路线不足两个点，已保存草稿，请继续补录。");return Snapshot();}
         public List<Waypoint> Snapshot(){var result=new List<Waypoint>();foreach(var p in points)result.Add(p.Clone());return result;}
-        public FishingRecordingDraft Draft(){return new FishingRecordingDraft{Map=map.Clone(),Points=Snapshot(),LastX=x,LastY=y};}
+        public FishingRecordingDraft Draft(){return new FishingRecordingDraft{Map=map.Clone(),Points=Snapshot(),LastX=x,LastY=y,AllowGhost=allowGhost};}
         public static FishingRouteRecorder Resume(FishingRecordingDraft draft,FarmObservation f,Func<long> clock=null)
         {
-            draft.Validate();var r=new FishingRouteRecorder(draft.Map,f,clock);
+            draft.Validate();var r=new FishingRouteRecorder(draft.Map,f,clock,draft.AllowGhost);
             if(NavigationMath.Distance(f.X-draft.LastX,f.Y-draft.LastY,draft.Map.AxisScale)>.001)
                 throw new InvalidOperationException(String.Format(CultureInfo.InvariantCulture,"草稿已保留{0}点；请先回到最后有效坐标({1:F3}, {2:F3})，再点继续上次录制。",draft.Points.Count,draft.LastX*100,draft.LastY*100));
             r.points.Clear();foreach(var point in draft.Points)r.points.Add(point.Clone());return r;
@@ -55,7 +55,7 @@ namespace WoWProbe
     }
     public sealed class FishingRecordingDraft
     {
-        public int Version=1;public NavigationCalibration Map;public List<Waypoint> Points;public double LastX,LastY;
+        public int Version=1;public NavigationCalibration Map;public List<Waypoint> Points;public double LastX,LastY;public bool AllowGhost;
         public void Validate()
         {
             if(Version!=1||Map==null||Points==null||Points.Count<1||Points.Count>4990||!NavigationMath.InRange(LastX,0,1)||!NavigationMath.InRange(LastY,0,1))throw new FormatException("录制草稿无效。");
@@ -80,7 +80,7 @@ namespace WoWProbe
             try{
                 recorder.Observe(readEndpoint(),true);recorder.Draft().Save(draftPath);
                 return new FishingRecordingFinish{Complete=true,Points=recorder.Finish(),Message="录制完成。"};
-            }catch(InvalidOperationException e){return new FishingRecordingFinish{Complete=false,Points=recorder.Snapshot(),Message="录制已结束，已录点已保存为草稿，原售卖路线保持不变。"+Environment.NewLine+e.Message};}
+            }catch(InvalidOperationException e){return new FishingRecordingFinish{Complete=false,Points=recorder.Snapshot(),Message="录制已结束，已录点已保存为草稿，原已保存路线保持不变。"+Environment.NewLine+e.Message};}
         }
         public static QuickRoutePlan Service(QuickRoutePlan existing,NavigationCalibration map,List<Waypoint> points,FarmObservation endpoint,string name,bool repair)
         {

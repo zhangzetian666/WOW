@@ -72,6 +72,15 @@ namespace WoWProbe
         {
             bool pressed=false;Destination();Guard(o=>pressed||!o.Farm.Casting&&!o.Farm.Channeling).Pulse(key,80,()=>{pressed=true;sent();});
         }
+        public void RecoveryInput(QuickRecoveryCommand command,RouteKeyBindings keys)
+        {
+            Destination();bool clicked=false;
+            var guard=new GrindInputGuard(Backend,()=>{CheckCancelled();var o=Read();var f=o.Farm;bool completed=clicked&&(command.Release?f.PlayerGhost:!f.PlayerDead&&!f.PlayerGhost&&f.Health>0);
+                if(!f.ChatOpenKnown||f.ChatOpen||f.InCombat||(!completed&&!QuickRecovery.Matches(command,o)))throw new InvalidOperationException("跑尸/复活输入状态发生变化。");return f;},clock,ms=>Thread.Sleep(ms),safety,map.MapId,map.MapMode,map.Zone);
+            if(command.Action==QuickRecoveryAction.Key){guard.Pulse(FishingRecoveryRoutes.Key(command.Key,keys),command.Hold);return;}
+            if(command.Action!=QuickRecoveryAction.Click)return;var bounds=Native.ClientBounds(Window);var r=command.Region;var point=new Point(bounds.X+r.X+r.Width/2,bounds.Y+r.Y+r.Height/2);
+            guard.Click(point,false,p=>Native.ClientBounds(Window)==bounds&&bounds.Contains(p),Native.MoveMouse,(right,up)=>{Native.SendMouseButton(right,up);if(!up)clicked=true;});
+        }
     }
     public static class FishingLoginScreen
     {
